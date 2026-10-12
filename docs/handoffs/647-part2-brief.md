@@ -1,6 +1,6 @@
 # [feat(pane): doctor finds a tmux session no Herdr pane shows (`unattached`) and a pane that runs as an agent that cannot dispatch (`agent-cannot-dispatch`): part 2 of #647](https://github.com/Performant-Labs/holler/issues/647)
 
-Part of epic #633. This is the complete statement of **part 2** of story #647, written as one text against `main` at `bda1069` (#840 merged, 2026-10-11); every excerpt (E1 and following) was cut there, except the ones marked in flight, which are cut from a named commit of another story's branch. Part 1 (the reconcile engine and `holler pane doctor`, 13 finding kinds today) merged as PR #701 (`e612878`, 2026-10-09 18:56 MDT) and is the record in `docs/handoffs/647/`, which this story does not touch. Part 2 is the two amendments the issue parked: `agent-cannot-dispatch` (operator-confirmed 2026-10-09 17:40 MDT, epic decision 8, from pfleet#372) and `unattached` (2026-10-09 19:03 MDT, from the c4r1 incident).
+Part of epic #633. This is the complete statement of **part 2** of story #647, written as one text against `main` at `bda1069` (#840 merged, 2026-10-11) and **refreshed on 2026-10-12 against `main` at `6eff9cc`** (#835, #831, #665, #667, #648 and #853 have merged since); every excerpt (E1 and following) was re-cut from that tree, except E42 and E43, which are cut from a named commit of #839's brief, a story that has not merged. Part 1 (the reconcile engine and `holler pane doctor`, 16 finding kinds on `main` now) merged as PR #701 (`e612878`, 2026-10-09 18:56 MDT) and is the record in `docs/handoffs/647/`, which this story does not touch. Part 2 is the two amendments the issue parked: `agent-cannot-dispatch` (operator-confirmed 2026-10-09 17:40 MDT, epic decision 8, from pfleet#372) and `unattached` (2026-10-09 19:03 MDT, from the c4r1 incident).
 
 It starts from the operator's decision of 2026-10-11, the last comment on #647: the contract change is **allowed**; `agent-cannot-dispatch` and `unattached` may add read-only port methods, "default-armed or required as the contract amendment decides"; #835 and #832 set the pattern; and #649's wrappers must forward every new method. It also settles every finding of the earlier plan check (`docs/handoffs/647-part2/earlier-attempt/handoff-A.md`, verdict BLOCK, B-1, B-2, W-1 to W-9); the table in "Where this brief is the decision" says where each is settled.
 
@@ -10,24 +10,24 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 **D1. The scope is both amendments, in one PR that closes #647.** *(decided by the preparer, to be confirmed at the plan check)* Both findings need the same kind of change (a read-only port method, the ADR amended first, a wrapper test, a finding row in the guide), and they edit the same files. The pipeline script opens the PR with `Closes #647.` (E50), which is right only if both land. Rejected: split `unattached` into its own issue (the #665 precedent): it would amend the same ADR section and the same traits twice, in two PRs that clash, for no saving. If the plan check or the build run must drop one, the PR body is edited (`gh pr edit`) so it does not close #647.
 
-**D2. The story starts after #835 and #831 have merged, and is built on the merged `main`, not on their commits.** *(decided by the preparer, to be confirmed at the plan check)* #835 (branch `issue-835-implementation`, at `e5e35ee`, anti-duplication PASS, S and the PR remaining; its excerpts here are cut at `b488a33`) makes the rule this story follows, required port methods (E5, E6, E33), and edits the same `ports.rs`, the same wrappers (E22, E24), the same test doubles and the same ADR lines. #831 (branch `issue-831-implementation`, at `b3f0295`, T-red PASS) changes **every `HarnessPort` method keyed by `port: u16` to be keyed by `&HarnessEndpoint`** (E41), so a harness method written now would be rewritten by it. Stacking on either branch is rejected: both still move (review rounds), and a stack on #835 alone would still be rewritten by #831. If the operator wants an earlier start, build on #835's commits only and write `agent_view` with `port: u16`; the one-line-per-site conversion then belongs to whichever of #831 and this story merges second. After #831, the method is `agent_view(at: &HarnessEndpoint, session, max_turns)`, a single-process (Claude Code) endpoint answers an empty view, and #831's `HarnessRouter` routes it like the other methods. The build run re-cuts the excerpts named *in flight* from `main` before it writes code.
+**D2. The story starts after #835 and #831, which have merged, and is built on `main` at `6eff9cc`.** *(decided by the preparer, to be confirmed at the plan check)* #835 (PR #860, `4e691d9`) made the rule this story follows, required port methods (E5, E6, E33), and edited the same `ports.rs`, the same wrappers (E22, E24), the same test doubles and the same ADR lines. #831 (PR #857, `b76f4d2`) changed **every `HarnessPort` method keyed by `port: u16` to be keyed by `&HarnessEndpoint`** (E41), added the second harness (`holler-adapter-claude`, the kit's `FakeClaude`) and the one router `HarnessRouter` of the two shapes, and split the reconcile chain by the harness's shape (E10). So the method is `agent_view(at: &HarnessEndpoint, session, max_turns)`; `HarnessRouter` routes it by endpoint like every endpoint-keyed method (its module doc has the table); a single-process (Claude Code) endpoint answers an empty view; and no doctor chain calls it for a Claude Code pane (D6, rule 2). Also merged since the first text: #665 (PR #858: `profile-drift`, the last finding kind), #667 (`0f5835e`: the apply scenario and its shared end-state helper, E44), #648 (PR #856) and #853 (PR #861). The alternatives of the first text (stacking on either branch; building on #835 alone with `port: u16`) are moot and dropped.
 
 **D3. Both new port methods are required, with no default.** *(operator, by the rule of 2026-10-11, ADR decisions 12 and 23, applied by the preparer)* E51 says the contract changes by changing the port, so an omission is a compile error; E33 says why a default is wrong here: E2 was default-armed, and the review of #849-era found it answering an empty observation, silently, over the real wiring; #835 made it required. E4 is the shape this story does not repeat. Cost, stated: every implementation of `HostPort` and `HarnessPort` in the workspace gets a method (the list is in "Blast radius"); the compiler finds them. Rejected: default-armed methods "that answer cannot-tell" (the operator's decision allows them; they are the exact failure the wrapper tests below exist to catch, and `session_activity` shows the cost of a default that is a plausible answer, `Idle`).
 
 **D4. The two methods, and what already answers.** *(decided by the preparer, to be confirmed at the plan check)*
 - `HostPort::attached_clients(&self, name: &PaneName) -> Result<u32, PaneError>`: the number of tmux clients attached to the session, as tmux counts them (`#{session_attached}`). A fresh session has none; a missing session is `pane-not-found`, as `ps` answers. Modelled on #835's `foreground_commands` (E6).
-- `HarnessPort::agent_view(&self, port: u16, session: &str, max_turns: usize) -> Result<AgentView, PaneError>` (D5).
+- `HarnessPort::agent_view(&self, at: &HarnessEndpoint, session: &str, max_turns: usize) -> Result<AgentView, PaneError>` (D5).
 - **Reuse, nothing copied.** `foreground_commands` (#835) reads process names, not clients: it does not answer `unattached`, though the tmux adapter can take both values from the same `list-panes` listing `ps` already makes. `observe_pane` (#832) is Herdr's working directory and screen time: Herdr reports no tmux session. `session_activity` and `verify_serving` do not give turns or permissions, but `verify_serving` already calls `GET /agent` and owns the "agent usable as a default" rule (E18): `agent_view` calls that one function, it does not restate the rule. `from_messages` already reads `GET /session/:id/message` (E19): the reader is shared. Both routes exist (E20). Rejected: two harness methods (one for turns, one for agents): two wrapper arms, two fakes, two calls per pane, and the "can dispatch" of a turn needs the agent list anyway; raw JSON in the port (adapter text in `holler-pane`, I6, I7); a method that returns the finished `cannot-dispatch` boolean (the opt-out and the "ships an orchestrator" judgments belong to reconcile, so a second harness reports observations and never findings).
 
 **D5. `AgentView`.** *(decided by the preparer, to be confirmed at the plan check)* A `#[non_exhaustive]` struct with builders and a `Default` that is empty, as `PaneObservation` is in `ports.rs` (E3 shows the host trait; E4 the defaults this story does not repeat): `turns: Vec<TurnAgent>` (the last `max_turns` user turns of the session, oldest first) and `dispatchers: Vec<AgentKey>` (sorted, no duplicates). `TurnAgent { agent: Option<AgentKey>, can_dispatch: Option<bool> }`. The exact meaning of each field is in the ADR text below. "Cannot tell" is an empty view or a `None`, never a guess; a server whose reply has the wrong shape is `unavailable` (an `observe-failed` finding), because a rule that is silently skipped on a version change is the failure this story is about. A name the server uses that is not an `AgentKey` is left out of `dispatchers` and is `agent: None` in a turn. Rejected: `turns` as raw message ids or times (not needed by any rule; the hub's feed is not this port's business).
 
-**D6. The `agent-cannot-dispatch` rule.** *(operator for the finding's existence and its remedy text; the rule's details are decided by the preparer, to be confirmed at the plan check)* The finding is raised for a pane when all of these hold, each from an observation: (1) **the record names no agent** (`opencode_agent` is `None`). That is the only "opted out deliberately" the data has: a pane whose record names an agent chose one, `build` included, which is the pfleet#372 acceptance ("does not fire for a pane running `build` deliberately"); a pane whose record names a dispatching agent is a different problem (a server that lost its `default_agent`) and raises nothing here. No new `Pane` field. (2) The pane's harness is OpenCode (`HarnessKind` has one variant on `main`; the `match` is written exhaustively so #831's second kind must choose). (3) Its server is healthy and lists the session of record (the trust rule of E12). (4) `agent_view(port, session_of_record, RECENT_TURNS)` answers at least one turn and **every** turn has `can_dispatch == Some(false)`, with `RECENT_TURNS = 3`, one constant in `observe.rs`. (5) `dispatchers` is not empty: the project "ships an orchestrator". "Recent hub-delivered turns" can only mean the recent turns of the session of record, the stand-in for DRIVEN that #645 chose and E14 records: OpenCode records the agent of a turn, not who sent it. Rejected: reading `.opencode/agents/` or `opencode.json` (I6; and on an Aftersight pane the orchestrator lives elsewhere, epic decision 8); `Pane.role` as the gate (the epic says the role is the fleet role, not the agent); a majority of turns instead of all (a pane that mixes agents is partly working); a stored "was reported" flag (part 1 keeps no memory between runs).
+**D6. The `agent-cannot-dispatch` rule.** *(operator for the finding's existence and its remedy text; the rule's details are decided by the preparer, to be confirmed at the plan check)* The finding is raised for a pane when all of these hold, each from an observation: (1) **the record names no agent** (`opencode_agent` is `None`). That is the only "opted out deliberately" the data has: a pane whose record names an agent chose one, `build` included, which is the pfleet#372 acceptance ("does not fire for a pane running `build` deliberately"); a pane whose record names a dispatching agent is a different problem (a server that lost its `default_agent`) and raises nothing here. No new `Pane` field. (2) The pane's harness is a server harness (OpenCode): `HarnessKind` has two variants on `main` and `check_pane` branches on `pane.harness.kind.shape()`, handing a single-process pane to the child module `process` (E10), so the agent check is added to the server-shape path only, after `check_session_of_record`, and a Claude Code pane never reaches it. (3) Its server is healthy and lists the session of record (the trust rule of E12). (4) `agent_view(&at, session_of_record, RECENT_TURNS)` answers at least one turn and **every** turn has `can_dispatch == Some(false)`, with `RECENT_TURNS = 3`, one constant in `observe.rs`. (5) `dispatchers` is not empty: the project "ships an orchestrator". "Recent hub-delivered turns" can only mean the recent turns of the session of record, the stand-in for DRIVEN that #645 chose and E14 records: OpenCode records the agent of a turn, not who sent it. Rejected: reading `.opencode/agents/` or `opencode.json` (I6; and on an Aftersight pane the orchestrator lives elsewhere, epic decision 8); `Pane.role` as the gate (the epic says the role is the fleet role, not the agent); a majority of turns instead of all (a pane that mixes agents is partly working); a stored "was reported" flag (part 1 keeps no memory between runs).
 
 **D7. "Ships an orchestrator", and how an agent "cannot dispatch".** *(decided by the preparer, to be confirmed at the plan check)* The adapter reports what the server says; the rule is one definition. An agent **cannot dispatch** when the server's permission rules for it deny the `task` permission for every subagent: in OpenCode 1.19.0 the rules are a list of `{permission, action, pattern}`, and the last rule whose permission is `task` or `*` and whose pattern is `*` is `deny`, with no later `task` rule that allows another pattern (measured: "Facts measured outside the repository"). The project **ships an orchestrator** when `dispatchers` is not empty: an agent the server lists that is usable as a default (the `verify_serving` rule: not a subagent, not hidden), is not one of OpenCode's own (`native` is false) and can dispatch. Anything else the adapter cannot read (a rule list of another shape, an agent missing from the list) is `None`, which stops the rule. Rejected: counting every dispatching primary agent (OpenCode's built-in `plan` is one: a false positive on every pane); a list of agent names in the ADR (a name is the project's).
 
 **D8. The remedy of `agent-cannot-dispatch`.** *(operator for "naming the cure (`relaunch --agent KEY`)"; the form is decided by the preparer, to be confirmed at the plan check)* `holler pane relaunch PANE --agent=KEY`, with KEY the one dispatcher when `dispatchers` has exactly one; with several, no remedy, and the message lists up to three (quoted) and says to pass one. The form `--agent=KEY`, not `--agent KEY`, because `AgentKey::parse` accepts a leading `-` and capitals (E17), so `-x` is a valid key and `--agent -x` would read as a flag. KEY reaches a message and a remedy only as a parsed `AgentKey`. The one table (E8) stays one table: `FindingKind::remedy_for(self, pane, fix, agent: Option<&AgentKey>)` is the table, and `remedy(self, pane, fix)` (the signature `tx_switch.rs` calls, E40) delegates with `None`; the `Finding` is built with its key through `Finding::with_agent`. `--fix` is not offered: the finding is `not-fixable`, and `--fix` never changes a pane's agent, silently or not (the issue; ADR decision 16 says a relaunch never changes the agent silently, and this one names it on the command line). Rejected: `remedy` gains a parameter (breaks an outside caller for one kind); a remedy with a `KEY` placeholder (not a command); `holler pane relaunch PANE` alone (does not change the agent: decision 16).
 
-**D9. The `unattached` rule.** *(operator for the finding and its acceptance: "a running, registered session with no attached client raises it; the same pane attached raises nothing"; the rule's edges are decided by the preparer, to be confirmed at the plan check)* Raised when `host.ps` answered for the pane (the session exists) and `attached_clients` is `0`. It is not gated on Herdr, on the pane's hold or on its role: the operator sees nothing in every case. It is independent of `herdr-pane-missing` and `tmux-session-missing`: a missing session raises only the latter (no `attached_clients` call is made); a failed `attached_clients` is `observe-failed` naming `host.attached_clients` and no `unattached`.
+**D9. The `unattached` rule.** *(operator for the finding and its acceptance: "a running, registered session with no attached client raises it; the same pane attached raises nothing"; the rule's edges are decided by the preparer, to be confirmed at the plan check)* Raised when `host.ps` answered for the pane (the session exists) and `attached_clients` is `0`. It is not gated on Herdr, on the pane's hold or on its role: the operator sees nothing in every case. It is independent of `herdr-pane-missing` and `tmux-session-missing`: a missing session raises only the latter (no `attached_clients` call is made); a failed `attached_clients` is `observe-failed` naming `host.attached_clients` and no `unattached`. It is raised for a Claude Code pane too: `check_tmux` runs for every pane before `check_pane` branches on the harness's shape (E10, E11), and a Claude Code pane's tmux session needs a client in a Herdr pane as much as an OpenCode pane's does.
 
 **D10. The `HerdrSnapshot` amendment the ADR defers: none is needed, and the deferral is already closed.** *(decided by the preparer, to be confirmed at the plan check)* The ADR's old sentence ("`HerdrSnapshot`, which waits for a contract amendment before #647 and #650 need it") was replaced when #808 added the label (the "Deferred" bullet now reads "the label is added by #808"); a search of `docs/adr/` for `HerdrSnapshot` finds nothing, and the earlier plan check's line 741 no longer exists. The only fact that would let `unattached` say "attached in the Herdr pane the record names" is what process that Herdr pane runs, and Herdr answers that with whole command lines (`pane.process_info`, argv included), which I7 and ADR section 13 refuse. So the rule is "no client at all", and its limit is written in the ADR, the guide and the message: a client attached in some other terminal hides the finding. This is the issue's own acceptance ("no attached client"). Rejected: adding `foreground_processes` to `HerdrPane` (a Herdr read of command lines, a wider `HerdrSnapshot`, a change #650's join does not need); a `HerdrPort` method that returns the pane's tty (no source says Herdr reports one; the spike lists `tty` only as an optional field).
 
@@ -35,15 +35,15 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 **D12. `SpecField` row for `opencode_agent`: already done, nothing to build.** *(operator, ADR decision 18, #644)* E30 shows `SpecField::OpencodeAgent` and `ALL: [SpecField; 16]` on `main`; E31 item 18 records it. The earlier W-7 is settled; this story edits no line of `profile_diff.rs`.
 
-**D13. Reconcile's chain and the read-only guarantee.** *(decided by the preparer, to be confirmed at the plan check)* `check_tmux` (E11) gains the `attached_clients` call after a successful `ps`; the agent check is a new function called after `check_session_of_record` in `check_pane` (E10), so it can use the same `Server` value. The module doc's bound (E9) becomes "at most nine port calls" and the read-only allowlist (E15) adds exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`. Neither rule writes the record. The agent check calls `agent_view` only when rules (1) to (3) of D6 hold, so a pane with a recorded agent costs no extra call. I6 stays true: E13.
+**D13. Reconcile's chain and the read-only guarantee.** *(decided by the preparer, to be confirmed at the plan check)* `check_tmux` (E11) gains the `attached_clients` call after a successful `ps`, and it runs for both shapes (E10); the agent check is a new function called after `check_session_of_record` in the server-shape path of `check_pane` (E10), so it can use the same `Server` value. The module doc's bound (E9) becomes "at most nine port calls" for a server's chain, and the list of a single process's chain (the child module `process`) gains `attached_clients`; and the read-only allowlist (E15) adds exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`. Neither rule writes the record. The agent check calls `agent_view` only when rules (1) to (3) of D6 hold, so a pane with a recorded agent costs no extra call. I6 stays true: E13.
 
 **D14. The test kit gets the support; no wrapper doubles are needed for the engine tests.** *(decided by the preparer, to be confirmed at the plan check)* The earlier W-5 wanted test-local doubles because the kit lacked support. #684 (the kit) is closed, and the support is reusable, so it goes in the kit: `FakeHost` gains `attach_client(name)` and `detach_clients(name)` and the op `HostOp::AttachedClients`, and a fresh fake session has **no** client, as a fresh real one has none (a conformance case pins it, so the fake cannot drift); `FakeHarness` gains `seed_turns(port, session, turns)`, `seed_dispatchers(port, keys)` and `HarnessOp::AgentView`. A "healthy world" of the doctor rig attaches one client per pane in `make_live` (E52), so every existing doctor test keeps its meaning. The kit files are listed in "Blast radius" (E37, E38, E53 show where).
 
-**D15. The real implementations.** *(decided by the preparer, to be confirmed at the plan check)* `holler-adapter-host`: `attached_clients` reads `#{session_attached}` through the exact-target listing `ps` uses, with a parser as strict as `ps`'s (a value that is not an unsigned integer is `unavailable`; a missing session is `pane-not-found`). `holler-adapter-opencode`: a new module `agents.rs` (so `lib.rs`, 741 lines, grows by the method and its `mod` line only) implements `agent_view` from `GET /session/:id/message` and `GET /agent`, existing routes (E20); the "usable as a default" rule is `server::usable`'s, shared. Unknown session is `session-not-found` (the check `abort` makes). A reply that is not the JSON a step needs is `unavailable` and quotes no reply (the adapter's rule). The message field that names the agent of a user turn is **not verified on 1.19.0** (the SDK types of 1.14.39 give `UserMessage.agent`; see "Facts measured outside the repository"): the build run proves it with the opt-in real-OpenCode test and cuts the message fixture from the answer before the adapter relies on it. `Unwired` answers `not-implemented` for both.
+**D15. The real implementations.** *(decided by the preparer, to be confirmed at the plan check)* `holler-adapter-host`: `attached_clients` reads `#{session_attached}` through the exact-target listing `ps` uses, with a parser as strict as `ps`'s (a value that is not an unsigned integer is `unavailable`; a missing session is `pane-not-found`). `holler-adapter-opencode`: a new module `agents.rs` (so `lib.rs`, 741 lines, grows by the method and its `mod` line only) implements `agent_view` from `GET /session/:id/message` and `GET /agent`, existing routes (E20); the "usable as a default" rule is `server::usable`'s, shared. Unknown session is `session-not-found` (the check `abort` makes). A reply that is not the JSON a step needs is `unavailable` and quotes no reply (the adapter's rule). The message field that names the agent of a user turn is **not verified on 1.19.0** (the SDK types of 1.14.39 give `UserMessage.agent`; see "Facts measured outside the repository"): the build run proves it with the opt-in real-OpenCode test and cuts the message fixture from the answer before the adapter relies on it. `Unwired` answers `not-implemented` for both. `ClaudeHarness` (`holler-adapter-claude`) and the kit's `FakeClaude` answer an empty view (D2); `HarnessRouter` and the kit's `FakeHarnesses` route it by endpoint, and `Wired<dyn HarnessPort>` forwards it (E23).
 
 **D16. What `--fix` does: nothing new.** *(operator, the issue)* `--fix` repairs `shown-driven-mismatch` only. For both new findings `fix` is `not-fixable`. A second `doctor` run reports each standing finding again exactly once and writes nothing for them ("once per pass", the 2026-10-09 split).
 
-**D17. Finding order and the `ALL` pin.** *(decided by the preparer, to be confirmed at the plan check)* The two kinds are appended to `FindingKind` and `ALL` in this order, `Unattached` then `AgentCannotDispatch`, **after the last kind present on `main` at build time** (E7: `unmanaged-stalled` today; #831 adds `pane-waiting` and `claude-login-missing`, #665 adds `profile-drift`). `findings_test.rs` pins every code in order (E16); the build run edits that list, not a copy. Codes: `unattached`, `agent-cannot-dispatch`; neither equals a closed error code or an import finding code (`import_test.rs` checks the import side).
+**D17. Finding order and the `ALL` pin.** *(decided by the preparer, to be confirmed at the plan check)* The two kinds are appended to `FindingKind` and `ALL` in this order, `Unattached` then `AgentCannotDispatch`, **after the last kind present on `main` at build time** (E7: the 16 kinds on `main`, the last `profile-drift` (#665), after `pane-waiting` and `claude-login-missing` (#831); the build run's list has 18). `findings_test.rs` pins every code in order (E16); the build run edits that list, not a copy. Codes: `unattached`, `agent-cannot-dispatch`; neither equals a closed error code or an import finding code (`import_test.rs` checks the import side).
 
 **D18. Review rigor: `second-opinion`.** *(decided by the preparer, to be confirmed at the plan check)* The issue's Pipeline line says `rigor: in-session`; part 1 ran `second-opinion` on the orchestrator's instruction (its brief, C-1). This story amends two traits, adds a real implementation in two adapters, and edits the ADR, so the outside model (`deepseek-v4-pro`, DeepSeek's hosted chat endpoint) reads the brief and the diff. The CLAUDE.md prerequisites hold: `.env` with the managed block and `DUAL_REVIEW=1`, `DEEPSEEK_API_KEY` from the operator's store (never printed), one real completion proven before the run is journalled above `in-session`. Rejected: `in-session` (the issue's line, written before the contract change was allowed); `panel` (no cross-vendor reason).
 
@@ -72,8 +72,8 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 ## Scope
 
-1. **Contract first, its own commit, before any test:** the ADR-0021 amendment in the next section, and the module doc of `crates/holler-pane/src/ports.rs` (the amendment list, "Four amendments since", becomes five).
-2. **`holler-pane`:** the two required methods and the types `AgentView` and `TurnAgent` (in `ports.rs` if it stays under 800 lines after #835 and #831, else in a new `crates/holler-pane/src/agent_view.rs` re-exported from `lib.rs`); two `FindingKind`s with `code()`, `remedy_for`, `Finding::with_agent`; the reads in `reconcile/observe.rs`.
+1. **Contract first, its own commit, before any test:** the ADR-0021 amendment in the next section, and the module doc of `crates/holler-pane/src/ports.rs` (the list that begins "Amended since:" has five bullets, E1; part 2 adds a sixth).
+2. **`holler-pane`:** the two required methods and the types `AgentView` and `TurnAgent` (in a new `crates/holler-pane/src/agent_view.rs` re-exported from `lib.rs`: `ports.rs` is 621 lines on `main` and the two methods and their two doc tests add about 70, so the types would pass the 700-line mark the table below sets); two `FindingKind`s with `code()`, `remedy_for`, `Finding::with_agent`; the reads in `reconcile/observe.rs`.
 3. **Test kit:** `FakeHost`, `FakeHarness`, their ops and conformance cases (D14).
 4. **Adapters:** `holler-adapter-host` (`attached_clients`), `holler-adapter-opencode` (`agent_view`, new `agents.rs`) (D15).
 5. **Wiring:** `BindingHost`, `Wired<dyn HostPort>`, `Wired<dyn HarnessPort>`, `Unwired` forward or refuse both (the "Wrapper forwarding" section).
@@ -82,9 +82,9 @@ It starts from the operator's decision of 2026-10-11, the last comment on #647: 
 
 ## The ADR-0021 amendment that lands first
 
-One commit, `docs(adr): contract amendment for the attached-clients and agent-view reads (#647)`, before any test or code. Locate each edit by its words (line numbers move when #835 and #831 merge). Text in quotation marks is verbatim.
+One commit, `docs(adr): contract amendment for the attached-clients and agent-view reads (#647)`, before any test or code. Locate each edit by its words (the line numbers of the ADR move whenever a story lands; every quoted anchor below was checked against `main` at `6eff9cc`). Text in quotation marks is verbatim.
 
-**1. Section 2, the port table.** In the `HostPort` row, after the last method listed, add: "`attached_clients(name)` (#647 part 2, section 12)". In the `HarnessPort` row, after the last method listed, add: "and the required `agent_view(port, session, max_turns)` (#647 part 2, section 12)". Each cell's last column is unchanged.
+**1. Section 2, the port table.** In the `HostPort` row, change "and the read-only `foreground_commands(name)` (#835, section 13; #831, section 15)" to "the read-only `foreground_commands(name)` (#835, section 13; #831, section 15) and the required `attached_clients(name)` (#647 part 2, section 12)". In the `HarnessPort` row, after "`locate_process` and `login_status`", add: ", and the required `agent_view(at, session, max_turns)` (#647 part 2, section 12)". Each cell's last column is unchanged.
 
 **2. Section 2, after the sentence that ends "…where a default would answer silently in place of a port the wrapper did not forward"** (#835's), add this sentence: "#647 part 2 adds two more required reads, `HostPort::attached_clients` and `HarnessPort::agent_view` (section 12), for the same reason; #649's wrappers forward both."
 
@@ -95,17 +95,17 @@ One commit, `docs(adr): contract amendment for the attached-clients and agent-vi
 > **Decided (#647, part 2): `unattached` and `agent-cannot-dispatch`, each from one new read-only port method.** Reconcile reads the world only through the ports (I6), and no port could observe either finding. The operator allowed the contract change on 2026-10-11 (decisions taken, below). Both methods are **required**, with no default, for the reason in section 2 (#835): a default answers silently in place of a port a wrapper did not forward, and the compiler finds a wrapper that left one out. #649's wrappers forward both, and a test per wrapper pins it.
 >
 > - **`HostPort::attached_clients(name) -> Result<u32, PaneError>`**: the number of tmux clients attached to the session `name`, as tmux counts them (`#{session_attached}`). A fresh session made by `ensure_session` has none. A missing session is `pane-not-found`, as `ps` answers. A count only: never a client's name, tty or process (I7).
-> - **`HarnessPort::agent_view(port, session, max_turns) -> Result<AgentView, PaneError>`** (keyed by `&HarnessEndpoint` instead of `port` once #831 has merged): what the harness server says about the agents of `session`, in one call. `AgentView` is `#[non_exhaustive]`, with builders and an empty default, as `PaneObservation` is.
+> - **`HarnessPort::agent_view(at, session, max_turns) -> Result<AgentView, PaneError>`** (`at` is the pane's `HarnessEndpoint`, #831): what the harness server says about the agents of `session`, in one call. `HarnessRouter` routes it by endpoint, and a single-process harness answers an empty view. `AgentView` is `#[non_exhaustive]`, with builders and an empty default, as `PaneObservation` is.
 >   - `turns`: for each of the last `max_turns` user turns of `session`, oldest first, a `TurnAgent { agent, can_dispatch }`. `agent` is the key the server recorded for the turn, `None` when it recorded none or a name that is not an `AgentKey`. `can_dispatch` is `Some(false)` only when the server's permission rules for that agent deny the `task` permission for every subagent (OpenCode: the last rule whose permission is `task` or `*` and whose pattern is `*` is `deny`, and no later `task` rule allows another pattern), `Some(true)` when they do not, and `None` when the server does not say, the agent is not in its list, or the rules have a shape the adapter does not know.
 >   - `dispatchers`: the agents the server lists that a pane could run as its default (not a subagent and not hidden: the rule `verify_serving` applies), that are not the harness's own (OpenCode: `native` is false), and whose `can_dispatch` is `Some(true)`. Sorted by key, without duplicates; a name that is not an `AgentKey` is left out.
 >   - An implementation that cannot tell answers an empty view, never a guess. A session the server does not have is `session-not-found`; a reply of the wrong shape is `unavailable`. The OpenCode adapter reads `GET /session/:id/message` and `GET /agent`, and never a file.
 > - **`unattached`** is raised when `host.ps` answered for the pane (the session exists) and `attached_clients` is `0`. The rule is "no tmux client at all", not "a client in the Herdr pane the record names": telling which Herdr pane displays a tmux session needs Herdr's `pane.process_info`, whose answer is whole command lines (I7; section 13 refuses it), so a client attached in some other terminal hides the finding. `HerdrSnapshot` and `HerdrPane` do not change. The finding names no command: no Holler verb attaches a tmux client to a Herdr pane (`launch` and `relaunch` attach the TUI inside the tmux session; `launch` refuses a registered pane), and its message says so.
-> - **`agent-cannot-dispatch`** is raised when all of these hold: the record names no agent (`opencode_agent` is absent; a pane whose record names one chose it, `build` included); the pane's harness is OpenCode; its server is healthy and lists the session of record; `agent_view(port, session_of_record, 3)` answers at least one turn and every turn has `can_dispatch` `Some(false)`; and `dispatchers` is not empty, which is what "the project ships an orchestrator" means. "Recent hub-delivered turns" are the recent turns of the session of record, which I2 makes the session the hub drives: OpenCode records a turn's agent, not who sent it. The remedy is `holler pane relaunch PANE --agent=KEY` when `dispatchers` holds exactly one KEY; with several there is no remedy and the message lists up to three. `--fix` does nothing for either finding.
-> - **Reads and writes.** A chain makes at most nine port calls, each bounded by I5 (`attached_clients` and `agent_view` are the two new ones). Neither finding writes the record, and each is raised once per pass.
+> - **`agent-cannot-dispatch`** is raised when all of these hold: the record names no agent (`opencode_agent` is absent; a pane whose record names one chose it, `build` included); the pane's harness is OpenCode; its server is healthy and lists the session of record; `agent_view(at, session_of_record, 3)` answers at least one turn and every turn has `can_dispatch` `Some(false)`; and `dispatchers` is not empty, which is what "the project ships an orchestrator" means. "Recent hub-delivered turns" are the recent turns of the session of record, which I2 makes the session the hub drives: OpenCode records a turn's agent, not who sent it. The remedy is `holler pane relaunch PANE --agent=KEY` when `dispatchers` holds exactly one KEY; with several there is no remedy and the message lists up to three. `--fix` does nothing for either finding.
+> - **Reads and writes.** A server's chain makes at most nine port calls, each bounded by I5 (`attached_clients` and `agent_view` are the two new ones), and a single process's chain gains `attached_clients`. Neither finding writes the record, and each is raised once per pass.
 
 **5. "Deferred to named stories"**, a new bullet: "A Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached`: no story owns it; until one does, the finding names no command (section 12)."
 
-**6. "Decisions taken"**, one new item with the next free number at merge time: "**Part 2 of #647 may add read-only port methods** (operator, 2026-10-11, #647, section 12): `HostPort::attached_clients` and `HarnessPort::agent_view`, required like #835's, so a wrapper that does not forward one is a compile error."
+**6. "Decisions taken"**, one new item with the next free number at merge time: "**Part 2 of #647 may add read-only port methods** (operator, 2026-10-11, #647, section 12): `HostPort::attached_clients` and `HarnessPort::agent_view`, required like #835's, so a wrapper that does not forward one is a compile error." On `main` today the list ends at item 33 (#853's two items follow #835's 30 and 31), so the item is 34 unless another story lands first; renumber at merge.
 
 ## Acceptance
 
@@ -120,7 +120,7 @@ Each item is a test. Every test fails on `main` (for a new method, by not compil
 **Test kit.**
 5. `FakeHost`: a fresh session has 0 clients; `attach_client` twice gives 2; `detach_clients` gives 0; a missing session is `pane-not-found`; `faults` fails the call with `HostOp::AttachedClients` and changes nothing.
 6. The host conformance suite has a case "attached-clients of a fresh session is zero and of a missing one is `pane-not-found`"; the suite's `Mutant` (a host that always answers 1, one that answers 0 for a missing session) fails it; the real tmux adapter passes it in the opt-in real run.
-7. `FakeHarness`: `agent_view` of a seeded session returns the newest `max_turns` seeded turns, oldest first, and the seeded dispatchers; an unseeded session on a live server returns an empty view; an unknown session is `session-not-found`; a killed or frozen server fails as the other reads do. The harness conformance suite has the matching case, and its `Mutant` fails it.
+7. `FakeHarness`: `agent_view` of a seeded session returns the newest `max_turns` seeded turns, oldest first, and the seeded dispatchers; an unseeded session on a live server returns an empty view; an unknown session is `session-not-found`; a killed or frozen server fails as the other reads do. The harness conformance suite has the matching case, and its `Mutant` fails it. `FakeClaude` and `ClaudeHarness` answer an empty view for the endpoint they are given (D2), pinned by one case of the Claude conformance suite (`conformance/claude.rs`) that `claude_conformance_test.rs`'s `Mutant` fails; `FakeHarnesses` and `HarnessRouter` route the call by endpoint, so a `Port` endpoint reaches the server fake and a `Process` endpoint the Claude fake.
 
 **Adapters.**
 8. `holler-adapter-host` over the fake tmux: `#{session_attached}` values `0`, `1`, `2` give 0, 1, 2; an empty or non-numeric value is `unavailable` naming the call and quoting no output; a missing session is `pane-not-found`; the tmux argv is built without a shell and with the exact target (`=NAME:`), as `ps`'s.
@@ -133,13 +133,13 @@ Each item is a test. Every test fails on `main` (for a new method, by not compil
 13. `agent-cannot-dispatch`, negatives (each its own test): the record names `build`, and the record names `orchestrator` (opted in): nothing; `dispatchers` empty: nothing; one of the three turns is `Some(true)` or `None`: nothing; an empty view: nothing; two dispatchers: the finding with **no remedy** and a message that lists both quoted; an unhealthy server, a server without the session of record, a record without a session: `agent_view` is never called (the fake's calls show no `AgentView`) and nothing is raised.
 14. Once per pass: a second pass over the same world reports the same two findings once each, nothing new, and the stored records are equal after both passes (these rules write nothing).
 15. `read_only.rs`: the allowlist is extended by exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`, and the full pass with and without `--fix` makes no other call (E15).
-16. The existing doctor tests all pass unchanged in meaning: the rig attaches a client to each pane it builds (E52), and a test proves that a world built without that call would raise `unattached` for every pane (so the attach is what keeps them clean, not the rule being off).
+16. The existing doctor tests all pass unchanged in meaning: both rigs that build a live world attach a client to each pane they build (`doctor/rig.rs` `make_live`, E52, and `pane_claude/rig.rs` `seed_claude` and `seed_opencode`, which also build the worlds of `pane_claude/doctor.rs` and `mixed.rs`), and a test proves that a world built without that call would raise `unattached` for every pane (so the attach is what keeps them clean, not the rule being off).
 
 **Wrapper forwarding** is its own section below (items W1 to W6 are acceptance items too).
 
 **Docs and gates.**
 17. `docs_pane_control_test`: section 5 names both codes (E36); the table rows say "none" for `unattached`'s command and `holler pane relaunch PANE --agent=KEY` for the other; the guide states the limit of `unattached` (a client in any terminal counts).
-18. The opt-in scenario's end-state assertion (E44) is changed to "no finding except `unattached` for each scratch pane", with a comment saying why (a detached scratch tmux session has no client by design); #667 moves that helper, so whichever of the two merges second applies the change to the helper's current home. The default run still compiles and passes.
+18. The shared end-state helper `assert_end_state` (E44; #667 moved it to `pane_integration/scratch/verbs.rs`, and #649's scenario and `profile_apply_scenario/{scenario,grid,probe}.rs` all call it) asserts "no finding except `unattached` for each scratch pane", with a comment saying why (a detached scratch tmux session has no client by design). The default run still compiles and passes.
 19. `cli-surface.txt`, ADR 0003 and the clap tree are unchanged (no verb or flag is added); `scripts/lint.sh` passes (no file reaches 900 lines, E39); `cargo fmt` is run per file, never workspace-wide; clippy is clean; no `unsafe`; the privacy grep of the added lines finds no personal host, user, path or tool name.
 20. The ADR amendment is its own, first commit, and the code commits cite the section.
 
@@ -151,58 +151,59 @@ Each item is a test. Every test fails on `main` (for a new method, by not compil
 |---|---|---|
 | `HostPort::attached_clients` | `BindingHost` (E22); `Wired<dyn HostPort>` (E24) | **W1** `pane_integration/forwarding.rs` (new): over a recording inner host that answers `Ok(7)` for one name and `Err(Unavailable)` for another, each wrapper returns 7 and the same error, and the inner host recorded exactly one `attached_clients` call per ask, with the name given. **W2** the host conformance suite (its new case, D14) runs over `BindingHost` and over `WiredHost` (E27 is the model): the missing-session case fails for a wrapper that answers a constant. |
 | `HostPort::attached_clients` | `Wired` built from a misconfiguration; `Unwired` | **W3** a misconfigured `WiredHost` answers its configuration error from `attached_clients`, and `wired.rs`'s socket list gains `host.attached_clients` (E28); `Unwired` (E29) answers `not-implemented` (the existing `Unwired` test is extended). |
-| `HarnessPort::agent_view` | `Wired<dyn HarnessPort>` (E23); after #831, `HarnessRouter` | **W4** `bind.rs`: `Recording` answers a distinctive `AgentView` (one turn as `orchestrator`, one dispatcher `reviewer`) and records its arguments; `call_every_method` gains `agent_view`; the expected-calls list gains `"agent_view"`; the test asserts the wrapper's answer equals the inner one's and the inner call saw `(48100, "ses_1", 3)` (E25). **W5** `a_misconfigured_wired_harness_answers_its_error_from_every_method` loops over `call_every_method`, so it covers the new method with the same edit; `wired.rs` gains `harness.agent_view`. |
-| both | the test doubles `LinkedHost` (three copies), `Recording`, `Resolving`, `HealthGate`, `WriterInSelect`, `SeamHarness`, `HookedHarness` (two), `LostChain` (#835), `TestHost`, `TestHarness`, the two `Mutant`s | compile-enforced. **W6** a double that wraps a fake forwards to it in one line; the doctor tests of items 10 and 16 attach their client through the fake that a wrapping double wraps, so a double that answered a constant would make them fail. |
+| `HarnessPort::agent_view` | `Wired<dyn HarnessPort>` (E23); `HarnessRouter` (routes by endpoint) and the kit's `FakeHarnesses` (one forward) | **W4** `bind.rs`: `Recording` answers a distinctive `AgentView` (one turn as `orchestrator`, one dispatcher `reviewer`) and records its arguments; `call_every_method` gains `agent_view`; the expected-calls list gains `"agent_view"`; the test asserts the wrapper's answer equals the inner one's and the inner call saw `(48100, "ses_1", 3)` (E25). **W5** `a_misconfigured_wired_harness_answers_its_error_from_every_method` loops over `call_every_method`, so it covers the new method with the same edit; `wired.rs` gains `harness.agent_view`. |
+| both | the test doubles: for the host `LinkedHost` (four copies: `pane_integration/bind.rs`, `pane_claude/rig.rs`, `profile_verbs/apply/rig.rs`, `pane_verbs/launch/rig.rs`), `LostChain` (#835), `TestHost`, the host `Mutant`; for the harness `Recording` (two: `pane_integration/bind.rs` and the real-OpenCode rig), `Resolving`, `HealthGate`, `WriterInSelect`, `SeamHarness`, `HookedHarness` (two), `ServerOnly` (`holler-pane/tests/claude_kind_test.rs`), `TestHarness`, the two `Mutant`s (OpenCode's and Claude's conformance tests) | compile-enforced. **W6** a double that wraps a fake forwards to it in one line; the doctor tests of items 10 and 16 attach their client through the fake that a wrapping double wraps, so a double that answered a constant would make them fail. |
 
 Also required: **W7** (T verifies, F records in its handoff) a **mutation check**: replace each wrapper's body in turn with a constant (`Ok(0)`, `Ok(AgentView::default())`) and show that W1, W2, W4 fail for it; revert. **W8** the module doc of `bind.rs` (E21) is edited so that it names the new methods, and says that no method of these wrappers has a default to fall back on.
 
 ## Blast radius
 
-Re-measured with `wc -l`: "main" is this worktree after the merge of `bda1069`; "#835" and "#831" are the files in their branches at `e5e35ee` and `b3f0295` (read only; a dash is a file that branch does not have). `scripts/lint.sh` fails a `crates/**/*.rs` file at 900 lines and warns at 600 (E39); docs are not under the gate.
+Re-measured with `wc -l` on 2026-10-12: the numbers are this worktree, which is `main` at `6eff9cc` merged in (so #835 and #831 are counted); a dash is a file that does not exist yet. `scripts/lint.sh` fails a `crates/**/*.rs` file at 900 lines and warns at 600 (E39); docs are not under the gate.
 
-| File | main | #835 | #831 | Change | Fits |
-|---|---|---|---|---|---|
-| `crates/holler-pane/src/ports.rs` | 423 | 497 | 551 | two methods; `AgentView`/`TurnAgent` (in this file, or a new `agent_view.rs` re-exported from `lib.rs` if the file would pass 700); the module doc; two doc tests | yes |
-| `crates/holler-pane/src/findings.rs` | 357 | 357 | 373 | two kinds, `remedy_for`, `Finding::with_agent` | yes |
-| `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs` | 450, 391 | same | 532, 449 | module docs; the two reads and the rule; `RECENT_TURNS` | yes |
-| `crates/holler-pane/src/lib.rs` | 80 | 80 | 81 | re-exports | yes |
-| `crates/holler-pane/tests/findings_test.rs`, `ports_test.rs` | 45, 596 | 45, 603 | 45, 596 | the code list; `TestHost`/`TestHarness` methods | `ports_test.rs` stays under 650 |
-| `crates/holler-pane-testkit/src/host.rs` | 234 | 278 | 278 | `attach_client`, `detach_clients`, `HostOp::AttachedClients` | yes |
-| `crates/holler-pane-testkit/src/harness.rs` | 599 | 599 | 631 | `seed_turns`, `seed_dispatchers`, `HarnessOp::AgentView`, the impl | about 700 after #831: warn, under 900 |
-| `crates/holler-pane-testkit/src/conformance/host.rs`, `conformance/harness.rs` | 271, 588 | 319, 588 | 271, 606 | one case each | harness.rs near 660: warn |
-| `crates/holler-pane-testkit/tests/host_conformance_test.rs`, `harness_conformance_test.rs` | 225, 337 | 254, 337 | 225, 337 | the `Mutant`s | yes |
-| `crates/holler-pane-testkit/tests/fake_host_test.rs`, `fake_harness_test.rs` | 300, 764 | 372, 764 | 300, 764 | the fake's cases; **the harness cases go in a new `fake_harness_agent_test.rs`**, not in the 764-line file | yes |
-| `crates/holler-adapter-host/src/lib.rs`, `src/tmux.rs` | 499, 299 | 521, 336 | 521, 336 | `attached_clients`, its listing and parser | yes |
-| `crates/holler-adapter-host/tests/attached_test.rs` (new) | | | | the cases of item 8 (**not** in `fake_tmux_test.rs`, 818 lines) | yes |
-| `crates/holler-adapter-opencode/src/lib.rs`, new `src/agents.rs` | 741 | 741 | 741 | `mod agents;` and a one-line method in `lib.rs`; the logic in `agents.rs` | yes |
-| `crates/holler-adapter-opencode/tests/agent_view_test.rs` (new), `tests/fixtures/agents/*.json` (new), `tests/real_opencode/**` | | | | the hermetic cases; the opt-in real case | yes |
-| `crates/holler-cli/src/pane/wiring.rs`, `wiring/bind.rs` | 396, 439 | 400, 448 | 396, 439 | `Unwired` arms; the forwarding arms; the module doc | yes |
-| `crates/holler-cli/tests/pane_integration/bind.rs`, `wired.rs`, `scenario.rs`, `main.rs`, new `forwarding.rs` | 580, 141, 394, 163 | 592, 142, 394, 163 | 681, 141, 394, 163 | W1 to W6; `mod forwarding;`; the scenario end state | yes |
-| `crates/holler-cli/tests/pane_verbs/doctor.rs`, `doctor/rig.rs`, `doctor/read_only.rs`, new `doctor/attach.rs` and `doctor/agent.rs` | 560, 434, 147 | same | same | two `mod` lines; the client in `make_live`; the allowlist; the two rule suites | yes |
-| test doubles that gain a one-line forward | | | | `pane_verbs/launch/rig.rs` (835 on main, 839 after #835), `profile_verbs/apply/rig.rs` (759, 763), **`pane_verbs/switch.rs` (868 on main and after #835; 833 after #831)**, `pane_integration/bind.rs`, `pane_integration/observe.rs`, `pane_verbs/doctor/surface.rs` (591), `pane_verbs/import/{harness,seams}.rs` (340, 120; `harness.rs` is #835's) | **`switch.rs` has two doubles: each new method is a one-line forward, 876 at most if #831 has not shrunk it; if a double would carry the file past 890, F moves the two doubles to a sibling file first. `launch/rig.rs` is at 839 and takes three lines.** |
-| `crates/holler-cli/tests/docs_pane_control_test.rs` | 523 | | | none expected (it reads the code's tables) | yes |
-| `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md` | 1121, 794, 982 | 1176, | 1307, | the amendment; section 5; one bullet at the top of `### Enhancements` (E45), linking /issues/647 | docs |
+| File | lines | Change | Fits |
+|---|---|---|---|
+| `crates/holler-pane/src/ports.rs` | 621 | the two required methods; two `compile_fail,E0046` doc tests (one per method, modelled on `PidsOnly`, E5); the module doc's sixth bullet; `mod agent_view;` | about 700: warn, under 900 |
+| `crates/holler-pane/src/agent_view.rs` (new) | | `AgentView`, `TurnAgent`, builders, the `E0639` doc test, re-exported from `lib.rs` | yes |
+| `crates/holler-pane/src/ports/router.rs` | 145 | the `agent_view` arm (by endpoint) and a row of the routing table in its module doc | yes |
+| `crates/holler-pane/src/findings.rs` | 379 | two kinds, `remedy_for`, `Finding::with_agent` | yes |
+| `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs`, `reconcile/observe/process.rs` | 533, 449, 239 | module docs (the bound; the single process's list); the two reads and the rule; `RECENT_TURNS` | observe.rs about 540: warn |
+| `crates/holler-pane/src/lib.rs` | 81 | re-exports | yes |
+| `crates/holler-pane/tests/findings_test.rs`, `ports_test.rs` | 55, 613 | `CODES` (16 to 18); `TestHost`/`TestHarness` methods | `ports_test.rs` about 640 |
+| `crates/holler-pane-testkit/src/host.rs` | 278 | `attach_client`, `detach_clients`, `HostOp::AttachedClients` | yes |
+| `crates/holler-pane-testkit/src/harness.rs` | 631 | `seed_turns`, `seed_dispatchers`, `HarnessOp::AgentView`, the impl | about 700: warn, under 900 |
+| `crates/holler-pane-testkit/src/claude.rs`, `harnesses.rs` | 623, 150 | `FakeClaude`: an empty view; `FakeHarnesses`: one forward | yes |
+| `crates/holler-pane-testkit/src/conformance/host.rs`, `conformance/harness.rs`, `conformance/claude.rs` | 319, 612, 494 | one case each | harness.rs about 660: warn |
+| `crates/holler-pane-testkit/tests/host_conformance_test.rs`, `harness_conformance_test.rs`, `claude_conformance_test.rs` | 254, 346, 297 | the `Mutant`s | yes |
+| `crates/holler-pane-testkit/tests/fake_host_test.rs`, `fake_harness_test.rs` | 372, 783 | the fake's cases; **the harness cases go in a new `fake_harness_agent_test.rs`**, not in the 783-line file | yes |
+| `crates/holler-adapter-host/src/lib.rs`, `src/tmux.rs` | 521, 336 | `attached_clients`, its listing and parser | yes |
+| `crates/holler-adapter-host/tests/attached_test.rs` (new) | | the cases of item 8 (**not** in `fake_tmux_test.rs`, 820 lines; `foreground_test.rs` is the file of the same kind for `foreground_commands`) | yes |
+| `crates/holler-adapter-opencode/src/lib.rs`, new `src/agents.rs` | 764 | `mod agents;` and a one-line method in `lib.rs`; the logic in `agents.rs` | lib.rs about 775: warn |
+| `crates/holler-adapter-opencode/tests/agent_view_test.rs` (new), `tests/fixtures/agents/*.json` (new), `tests/real_opencode/**` | rig 580 | the hermetic cases; the opt-in real case; the rig's `Recording` gains a forward | yes |
+| `crates/holler-adapter-claude/src/lib.rs` | 375 | `agent_view`: an empty view (the crate has its own `agents.rs`, which this story does not touch) | yes |
+| `crates/holler-cli/src/pane/wiring.rs`, `wiring/bind.rs` | 468, 489 | `Unwired` arms; the forwarding arms (`BindingHost`, `Wired` x2); the module doc | bind.rs about 530: warn |
+| `crates/holler-cli/tests/pane_integration/bind.rs`, `wired.rs`, `main.rs`, new `forwarding.rs`; `scratch/verbs.rs` | 693, 142, 126; 146 | W1 to W6; `mod forwarding;`; the scenario end state (`assert_end_state`, E44) | yes |
+| `crates/holler-cli/tests/pane_verbs/doctor.rs`, `doctor/rig.rs`, `doctor/read_only.rs`, new `doctor/attach.rs` and `doctor/agent.rs` | 562, 449, 147 | two `mod` lines; the client in `make_live`; the allowlist; the two rule suites | yes |
+| `crates/holler-cli/tests/pane_claude/rig.rs` | 482 | the client in `seed_claude` and `seed_opencode`; `LinkedHost`'s forward | yes |
+| test doubles that gain a one-line forward | | `pane_verbs/launch/rig.rs` (852), `profile_verbs/apply/rig.rs` (776), **`pane_verbs/switch.rs` (893)**, `pane_integration/bind.rs`, `pane_integration/observe.rs`, `pane_verbs/doctor/surface.rs` (601), `pane_verbs/import/harness.rs` (341; `LostChain` is #835's), `holler-pane/tests/claude_kind_test.rs` (300) | **`switch.rs` is already at 893 with two harness doubles that each need the new method (about nine lines each after `rustfmt`), so F first moves the two doubles to a sibling file `pane_verbs/switch/doubles.rs` in a commit of their own, a pure move; `launch/rig.rs` takes about thirteen lines (865).** |
+| `crates/holler-cli/tests/docs_pane_control_test.rs` | 610 | none expected (it reads the code's tables) | yes |
+| `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md` | 1604, 1008, 1079 | the amendment; section 5; one bullet at the top of `### Enhancements` (E45), linking /issues/647 | docs |
 
-Not edited: `crates/holler-pane/src/profile_diff.rs` (D12), `crates/holler-cli/src/pane/doctor.rs` (generic over kinds), `crates/holler-cli/tests/fixtures/cli-surface.txt`, the hub and proto crates, and the `Ports` struct (this story adds methods, not a port, so it adds no field to the `Ports` literals #839 changes).
+Not edited: `crates/holler-pane/src/profile_diff.rs` (D12), `crates/holler-cli/src/pane/doctor.rs` (generic over kinds), `crates/holler-cli/tests/fixtures/cli-surface.txt`, the hub and proto crates, and the `Ports` struct (this story adds methods, not a port, so it adds no field to the `Ports` literals #839 changes), and `crates/holler-pane/src/ports/process.rs` (the endpoint type, unchanged).
 
 ## Depends on
 
-Verified with `gh issue view` on 2026-10-11: closed and on `main`: #637, #638, #642 (the OpenCode adapter and the agent), #644 (launch, relaunch, `--agent`, the `SpecField` row), #645, #649 (the wiring), #684 (the kit), #700 (`Pane.opencode_agent`), #802, #808, #832, and part 1 of #647 (PR #701). **Open and this story starts after them (D2): #835** (import leaves panes alone; makes the required-method rule; at `e5e35ee`, anti-duplication PASS) **and #831** (the Claude Code harness; `HarnessEndpoint`; at T-red PASS, `b3f0295`). #654 (the live cutover, operator-run) is open: see Q2.
+Verified with `gh issue view` and `git log origin/main` on 2026-10-12: closed and on `main`: #637, #638, #642 (the OpenCode adapter and the agent), #644 (launch, relaunch, `--agent`, the `SpecField` row), #645, #649 (the wiring), #684 (the kit), #700 (`Pane.opencode_agent`), #802, #808, #832, part 1 of #647 (PR #701), **#835** (PR #860, `4e691d9`: import leaves panes alone; the required-method rule), **#665** (PR #858), **#667** (`0f5835e`), **#648** (PR #856), **#853** (PR #861, `6eff9cc`). **#831** (PR #857, `b76f4d2`: the Claude Code harness, `HarnessEndpoint`) is merged, and the issue stays open for its adoption step, `say --pane` and a real-binary test, none of which this story touches. #654 (the live cutover, operator-run) is open: see Q2. Open and not needed: #839, #803.
 
 ## Clashes with stories in flight
 
-Read-only look on 2026-10-11 at the branches and briefs named. "Shared" files are those both stories edit.
+Read-only look on 2026-10-12. The first text of this section (2026-10-11) compared the story with #835, #831, #667, #665 and #648; all five are now merged and are no longer clashes, they are the code the story is built on (D2). What is left:
 
 | Story | Shared files and hunks | What it means here |
 |---|---|---|
-| **#835** import leaves panes alone (`e5e35ee`; excerpts at `b488a33`) | `ports.rs` (the module doc, `observe_pane`'s doc, `HostPort` gains `foreground_commands`), the same wrappers and doubles (`bind.rs`, `wiring.rs`, `LinkedHost` x3, `host.rs` kit, conformance), ADR-0021 sections 2, 9, 13, 14 and the decisions list, `CHANGELOG.md`, `docs/pane-control.md` | Mechanical, and this story is written to follow it (D2, D3). Merge #835 first. |
-| **#831** Claude Code harness (`b3f0295`) | `ports.rs` (every `HarnessPort` method keyed by `HarnessEndpoint`), `findings.rs` (adds `pane-waiting`, `claude-login-missing`), `reconcile.rs`, `reconcile/observe.rs` (110 lines changed), `tx_switch.rs`, the kit (`harness.rs`, conformance), `bind.rs` tests (+195), ADR-0021 (a new section 15, decisions 22 to 25), `CHANGELOG.md` | The widest clash. Merge #831 first (D2): `agent_view` is then written with `&HarnessEndpoint`, `ALL` appends after #831's kinds (D17), and rule (2) of D6 is a real `match` on two harness kinds. |
-| **#839** DRIVEN follows the session of record (brief at `1e1f203`, no code) | `ports.rs` only for a new port `HubPort` (this story adds methods to existing traits, so it adds no field to the 15 `Ports` literals #839 changes); `reconcile.rs`, `reconcile/observe.rs` (reads `hub.advertised()` once per pass, records `driven`, adds a finding); `findings.rs`; `pane_integration/bind.rs`; ADR-0021 sections 2, 5, 8, 11 and the "Deferred" DRIVEN bullet; `CHANGELOG.md`; `docs/pane-control.md` sections 3, 4, 10, 12 (E42, E43) | Mechanical. No dependency either way: D6 uses the session of record, which stays right when DRIVEN is observed (I2). The chain's call bound (D13) is edited by both: whoever merges second sums them. Its end-state helper edit and item 18 touch the same scenario assertion as #667. |
-| **#648** roster SHOWN and DRIVEN | `docs/pane-control.md` (the roster paragraphs of section 4), `CHANGELOG.md`; its brief does not touch `ports.rs`, `findings.rs` or `reconcile*` | CHANGELOG and guide only; no order needed. |
-| **#667** `profile apply` scenario (brief at `bc965ae`, A PASS at `bcb6031`; the 4-file crate diff in its worktree is uncommitted and was not read) | moves `assert_end_state` ("`doctor` reports no finding") from `pane_integration/scenario.rs` into a shared helper; builds a `Ports` literal from the real adapters | **Real clash with item 18**: every scratch pane is `unattached`, so a clean `doctor` no longer means no finding. Land #667's helper with the `unattached` allowance, or this story edits the helper where it then lives. Recommend #667 merges after this story (below). |
-| **#665** `holler profile rename/export/import`, `profile-drift` (no code; another preparer is writing its brief) | `findings.rs` and `reconcile.rs`: "the `ProfileDrift` kind and the one call that raises it only"; `findings_test.rs`; the guide's section 5 | Appends one more kind after ours (D17), and a call in the same `reconcile.rs`. Mechanical; it should merge after this story, and its `CODES` edit takes the list as it is then. |
+| **#839** DRIVEN follows the session of record (brief at `1e1f203`, no code; its worktree has a refreshed brief, unmerged) | `ports.rs` only for a new port `HubPort` (this story adds methods to existing traits, so it adds no field to the 15 `Ports` literals #839 changes); `reconcile.rs`, `reconcile/observe.rs` (reads `hub.advertised()` once per pass, records `driven`, adds a finding); `findings.rs`; `pane_integration/bind.rs`; ADR-0021 sections 2, 5, 8, 11 and the "Deferred" DRIVEN bullet; `CHANGELOG.md`; `docs/pane-control.md` sections 3, 4, 10, 12 (E42, E43) | Mechanical. No dependency either way: D6 uses the session of record, which stays right when DRIVEN is observed (I2). The chain's call bound (D13) is edited by both: whoever merges second sums them. The `ALL` pin (D17) and the `CODES` list are appended to by both: whoever merges second appends after the other's kinds. |
+| **#803** the wizard builds panes through `profile apply` (brief refreshed, unmerged) | `CHANGELOG.md` and the guide at most (the wizard and `profile apply` are not in the Blast radius) | None. |
 
-**Recommended merge order:** #835, then #831, then #839, then **this story (#647 part 2)**, then #667, then #665; #648 anywhere. Reasons: this story edits the traits and wrappers that #835 and #831 rewrite, so it is smaller to write after them than to rebase them onto it. #839 has no code yet and its engine changes in `reconcile*` are a smaller rebase either way; putting #839 before this story means this story's chain-bound and finding sort run against the final engine, but nothing in the code depends on it, so the order of #839 and this story is the operator's to swap. #667 and #665 have no merged code yet and are written against the merged findings and clean-doctor meaning. Shared ADR-0021 and CHANGELOG hunks resolve mechanically: each story adds a bullet at the top of `### Enhancements`, a row in the section 2 table, a "Decisions taken" item (renumber to the next free number), and the "Deferred" list is appended to by this story and #839.
+**Merge order.** The five stories the first text ordered ahead of or behind this one have merged. Of the two that remain, nothing in the code depends on the order of #839 and this story, which is the operator's to swap; whichever lands second re-reads the other's hunks of the shared files above. Shared ADR-0021 and CHANGELOG hunks resolve mechanically: each story adds a bullet at the top of `### Enhancements`, a row in the section 2 table, a "Decisions taken" item (renumber to the next free number), and the "Deferred" list is appended to by this story and #839.
 
 ## Pipeline
 
@@ -210,7 +211,7 @@ Read-only look on 2026-10-11 at the branches and briefs named. "Shared" files ar
 
 **The pipeline script cannot write a different handoff directory.** The release `claude-pipeline-v0.1.7` (`.aftersight/releases/claude/workflow/coding-pipeline.workflow.mjs`) fixes the run's handoff directory as `docs/handoffs/<issueNumber>` (E46, E47); there is no `slug`, `handoffDir` or `handoffRoot` argument. The brief gate's files are named `docs/handoffs/<issueNumber>-brief-sidecar-r<N>.md` and `...-brief-result-r<N>.md`, and the diff gate's the same with `diff` (E48). Only `briefPath` is an argument. The branch is `issue-<N>-implementation` and the PR is `Implements #<N>` with body `Closes #<N>.` (E50). `issueNumber` must be an integer. So a run with `issueNumber: 647` writes into **part 1's record** (`docs/handoffs/647/`, and the loose `docs/handoffs/647-brief*` files) and its role phases read every file there as a prior phase's handoff. The earlier attempt did exactly that.
 
-**Launch arguments** (the rest as CLAUDE.md gives them): `issueNumber: 647`, `briefPath: 'docs/handoffs/647-part2-brief.md'`, `uiSurface: false`, `rigor: 'second-opinion'`, `models: { F: 'claude-opus-5-5' }`, `removeHandoffsBeforePr` **not set** (its cleanup does `git rm -r docs/handoffs/647 docs/handoffs/647-*`, which would delete this story's record and part 1's: E49). Run from a fresh worktree on `origin/main` after #835 and #831 have merged, with the brief and the slug directory brought in by cherry-pick.
+**Launch arguments** (the rest as CLAUDE.md gives them): `issueNumber: 647`, `briefPath: 'docs/handoffs/647-part2-brief.md'`, `uiSurface: false`, `rigor: 'second-opinion'`, `models: { F: 'claude-opus-5-5' }`, `removeHandoffsBeforePr` **not set** (its cleanup does `git rm -r docs/handoffs/647 docs/handoffs/647-*`, which would delete this story's record and part 1's: E49). Run from this worktree: it is a fresh worktree on `issue-647-implementation`, with `origin/main` at `6eff9cc` (#835, #831, #853 merged) merged in and the brief and the slug directory committed on it.
 
 **Least-bad route: move part 1 aside before the run, and move the run's files into the slug after it.** Both steps are commits on the run's branch; the squash merge shows only the net change.
 1. **Before the launch** (one commit, `chore(handoffs): set part 1's record aside for the part-2 run (#647)`): `mkdir docs/handoffs/647-part1-record`; `git mv docs/handoffs/647/* docs/handoffs/647-part1-record/` (the directory itself disappears); `git mv docs/handoffs/647-brief.md docs/handoffs/647-brief-result-r1.md docs/handoffs/647-brief-result-r1.md.prompt.txt docs/handoffs/647-brief-result-r1.md.usage.json docs/handoffs/647-brief-sidecar-r1.md.prompt.txt docs/handoffs/647-part1-record/`. Now `docs/handoffs/647/` is empty for the run, and no `647-brief*` file exists to be overwritten. `docs/handoffs/647-part2-brief.md` and `docs/handoffs/647-part2/` stay.
@@ -240,118 +241,19 @@ Measured on 2026-10-11 with OpenCode 1.19.0 (the installed CLI), in a temporary 
 - The older SDK type definitions (version 1.14.39, a different shape for `permission`) give a user message an `agent: string` field. **Not verified on 1.19.0:** that field on a message of `GET /session/:id/message`; and that `GET /agent` serves the same info as `debug agent`. The first fixtures are therefore cut from the opt-in real run (D15), and the fixtures above are the starting point for the rule tests.
 - To regenerate the agent fixtures: run the two `opencode debug agent` commands above in such a directory with the config shown and save the JSON, trimming `prompt` and every `external_directory` rule that names a path.
 
-## Evidence (verbatim, from `main` at `bda1069`)
+## Evidence (verbatim, from `main` at `6eff9cc`, merged into this branch)
 
-Each excerpt is cut by the command shown; the line numbers on the left come from `awk`, not from typing. An excerpt marked in flight is cut from a named commit of another story's branch (`git show <sha>:<file>`), so it is stable but is not `main`'s. Run the commands from the root of a worktree of this repository (the `.aftersight/releases/claude` link must exist for the pipeline excerpts) with those commits available.
+Each excerpt is cut by the command shown; the line numbers on the left come from `awk`, not from typing. An excerpt marked in flight (E42 and E43, #839's brief) is cut from a named commit of that story's branch (`git show <sha>:<file>`), so it is stable but is not `main`'s; every other excerpt is `main`'s at `6eff9cc`. Run the commands from the root of a worktree of this repository (the `.aftersight/releases/claude` link must exist for the pipeline excerpts) with that commit available.
 
-**E1.** The module doc of `ports.rs` on main lists two amendments (#645, #802); #832's is in the trait below it, and #835's branch rewrites this list to four.
+**E1.** The module doc of `ports.rs` on main lists five amendments (#645, #802, #832, #835, #831); part 2 adds a sixth.
 
-`sed -n '12,24p' crates/holler-pane/src/ports.rs | awk -v n=12 '{printf "%d| %s\n", n+NR-1, $0}'`
-
-````text
-12| //! **Frozen when #637 merges**, after which a change goes through the epic's
-13| //! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
-14| //! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
-15| //! the spike #635 (OpenCode) confirmed it, and #642 built it. Two amendments since:
-16| //!
-17| //! - #645's two default-armed seam methods, [`HarnessPort::send_prompt`] and
-18| //!   [`HarnessPort::session_activity`], whose defaults keep every impl that does not
-19| //!   override them as it was;
-20| //! - #802's: `serve` became the pure [`HarnessPort::serve_command`], which takes a
-21| //!   [`ServeSpec`] and returns the server's argv, beside the required
-22| //!   [`HarnessPort::verify_serving`]; and [`HostPort::run`] takes the directory it starts
-23| //!   its program in. The host starts and stops a pane's processes, its harness server
-24| //!   among them.
-````
-
-**E2.** #832's `observe_pane` is default-armed on main: a wrapper that forgets it answers an empty observation, silently.
-
-`sed -n '196,208p' crates/holler-pane/src/ports.rs | awk -v n=196 '{printf "%d| %s\n", n+NR-1, $0}'`
-
-````text
-196|     /// What Herdr says about the pane `pane` that a record does not hold: its working
-197|     /// directory and when its screen last changed (#832). It is an observation (I6), read
-198|     /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
-199|     /// names.
-200|     ///
-201|     /// The default answers an empty [`PaneObservation`]: an implementation that cannot
-202|     /// tell says so with `None` fields and never guesses, so one that does not override
-203|     /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
-204|     /// pane.
-205|     fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
-206|         let _ = pane;
-207|         Ok(PaneObservation::default())
-208|     }
-````
-
-**E3.** `HostPort` on main has four methods and no default; `foreground_commands` is #835's.
-
-`sed -n '253,275p' crates/holler-pane/src/ports.rs | awk -v n=253 '{printf "%d| %s\n", n+NR-1, $0}'`
-
-````text
-253| /// The machine a pane lives on: tmux sessions and the processes in them (the adapter
-254| /// is `holler-adapter-host`, #641).
-255| ///
-256| /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
-257| /// thread) in async code. Every method returns within I5's bound (default 10 s) or
-258| /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
-259| pub trait HostPort: Send + Sync {
-260|     /// Make the tmux session `name` exist, working in `cwd`.
-261|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;
-262| 
-263|     /// Run `argv` (never through a shell) in the session `name`, starting it in `cwd`,
-264|     /// which need not be the directory the session was made in (#802: the launch engine
-265|     /// passes the pane spec's directory, for the spec's command and for the harness
-266|     /// server alike).
-267|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError>;
-268| 
-269|     /// Stop the processes the session `name` owns: what `run` started there, the pane's
-270|     /// harness server among them (#802).
-271|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError>;
-272| 
-273|     /// The process ids running in the session `name`.
-274|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
-275| }
-````
-
-**E4.** `HarnessPort`'s two default-armed methods (#645), the shape this story does not repeat.
-
-`sed -n '344,365p' crates/holler-pane/src/ports.rs | awk -v n=344 '{printf "%d| %s\n", n+NR-1, $0}'`
-
-````text
-344|     /// Queue `text` as a prompt to `session` on the server at `port`, through the
-345|     /// harness API, never by typing into a TUI (I4). `pane reset --first` calls it (#645).
-346|     ///
-347|     /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
-348|     /// prompts says so as a stable refusal, which the real adapter replaces (#642).
-349|     fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-350|         let _ = (port, session, text);
-351|         Err(PaneError::Refused {
-352|             code: PROMPT_UNSUPPORTED,
-353|             message: "this harness does not queue a prompt".to_owned(),
-354|         })
-355|     }
-356| 
-357|     /// What `session` on the server at `port` is doing now (#645: `pane reset` refuses a
-358|     /// conversation that is not [`Activity::Idle`]).
-359|     ///
-360|     /// The default answers [`Activity::Idle`], so an impl that does not report activity
-361|     /// refuses nothing.
-362|     fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-363|         let _ = (port, session);
-364|         Ok(Activity::Idle)
-365|     }
-````
-
-**E5.** (in flight) #835 (branch `issue-835-implementation`, `b488a33`) makes the rule: required methods, so the compiler finds every implementation, a wrapper included.
-
-`git show b488a33:crates/holler-pane/src/ports.rs | sed -n '12,31p' | awk -v n=12 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '12,41p' crates/holler-pane/src/ports.rs | awk -v n=12 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 12| //! **Frozen when #637 merges**, after which a change goes through the epic's
 13| //! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
 14| //! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
-15| //! the spike #635 (OpenCode) confirmed it, and #642 built it. Four amendments since:
+15| //! the spike #635 (OpenCode) confirmed it, and #642 built it. Amended since:
 16| //!
 17| //! - #645's two default-armed seam methods, [`HarnessPort::send_prompt`] and
 18| //!   [`HarnessPort::session_activity`], whose defaults keep every impl that does not
@@ -363,107 +265,243 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 24| //!   among them;
 25| //! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
 26| //!   what Herdr says about a pane that no record names;
-27| //! - #835's: the required [`HostPort::foreground_commands`], the command name of each pane
-28| //!   process of a tmux session (how the import tells a pane that runs Claude Code), and
-29| //!   [`HerdrPort::observe_pane`] lost its default. Both are required so that the compiler
-30| //!   finds every implementation, a wrapper port included: a default answers silently in place
-31| //!   of a port a wrapper forgot to forward.
+27| //! - #835's: the required [`HostPort::foreground_commands`], the command name of the
+28| //!   foreground process of each pane of a tmux session (how the import tells a pane that
+29| //!   runs Claude Code), and [`HerdrPort::observe_pane`] lost its default. Both are required
+30| //!   so that the compiler finds every implementation, a wrapper port included: a default
+31| //!   answers silently in place of a port a wrapper forgot to forward;
+32| //! - #831's, a second harness (ADR-0021 section 15): every [`HarnessPort`] method keyed by a
+33| //!   server's `port: u16` is keyed by a [`HarnessEndpoint`] instead (a port, or a single
+34| //!   process), the change of the port that #802 decision 2 set as the pattern, so a call
+35| //!   site that forgets the endpoint does not compile; `shown_session` and `attach_tui` take
+36| //!   one too. Four default-armed methods for a single-process harness, each defaulting to
+37| //!   the refusal [`PROCESS_UNSUPPORTED`] ([`HarnessPort::process_command`],
+38| //!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
+39| //!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
+40| //!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
+41| //!   shapes, so [`Ports`] keeps one harness.
 ````
 
-**E6.** (in flight) #835's `HostPort::foreground_commands`: names only, one list per session, `pane-not-found` for a missing session. The model for `attached_clients`.
+**E2.** #832's `observe_pane` was default-armed; #835 made it required, for the reason the doc gives: a wrapper that forgot it answered an empty observation, silently. The shape this story follows.
 
-`git show b488a33:crates/holler-pane/src/ports.rs | sed -n '339,349p' | awk -v n=339 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '284,295p' crates/holler-pane/src/ports.rs | awk -v n=284 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-339| 
-340|     /// The command name of the foreground process of every live pane in the session `name`,
-341|     /// one per pane, in the order tmux lists them (#835): what tmux reports as
-342|     /// `#{pane_current_command}`, the basename of that process's `argv[0]`. Names only, never
-343|     /// an argv, a command line or a program's configuration (I7). A session with no pane
-344|     /// process answers an empty list; a missing session is `pane-not-found`, as `ps` answers.
-345|     ///
-346|     /// The import reads it to leave alone a pane that runs Claude Code
-347|     /// ([`crate::pane::is_claude_code_command`]).
-348|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
-349| }
+284|     /// What Herdr says about the pane `pane` that a record does not hold: its working
+285|     /// directory and when its screen last changed (#832). It is an observation (I6), read
+286|     /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
+287|     /// names.
+288|     ///
+289|     /// An implementation that cannot tell says so with `None` fields (an empty
+290|     /// [`PaneObservation`]) and never guesses. `pane-not-found` when Herdr has no such pane.
+291|     ///
+292|     /// Required since #835, with no default. The default answered an empty observation, so a
+293|     /// wrapper port that did not forward it reported nothing, silently, over the real wiring;
+294|     /// now the compiler finds every implementation.
+295|     fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError>;
 ````
 
-**E7.** The end of `FindingKind` and `ALL` on main (13 kinds). Part 2 appends two after the last kind present at build time.
+**E3.** `HostPort` on main has five methods and no default; the first four are the ones that came before #835.
 
-`sed -n '70,94p' crates/holler-pane/src/findings.rs | awk -v n=70 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '371,386p' crates/holler-pane/src/ports.rs | awk -v n=371 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-70|     ShownDrivenMismatch,
-71|     /// A session on a pane's server that is the session of record of no pane.
-72|     StraySession,
-73|     /// A Herdr pane no record names has shown the same screen for longer than the
-74|     /// operator's threshold (#832). Only a whole-fleet pass with a threshold looks.
-75|     UnmanagedStalled,
-76| }
-77| 
-78| impl FindingKind {
-79|     /// Every kind, in declaration order.
-80|     pub const ALL: &'static [FindingKind] = &[
-81|         FindingKind::HerdrVersionUnsupported,
-82|         FindingKind::ObserveFailed,
-83|         FindingKind::UnregisteredHerdrPane,
-84|         FindingKind::HerdrPaneMissing,
-85|         FindingKind::TmuxSessionMissing,
-86|         FindingKind::ServerWedged,
-87|         FindingKind::ServerDown,
-88|         FindingKind::NoSessionOfRecord,
-89|         FindingKind::SessionOfRecordMissing,
-90|         FindingKind::TuiForeignSession,
-91|         FindingKind::ShownDrivenMismatch,
-92|         FindingKind::StraySession,
-93|         FindingKind::UnmanagedStalled,
-94|     ];
+371| pub trait HostPort: Send + Sync {
+372|     /// Make the tmux session `name` exist, working in `cwd`.
+373|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;
+374| 
+375|     /// Run `argv` (never through a shell) in the session `name`, starting it in `cwd`,
+376|     /// which need not be the directory the session was made in (#802: the launch engine
+377|     /// passes the pane spec's directory, for the spec's command and for the harness
+378|     /// server alike).
+379|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError>;
+380| 
+381|     /// Stop the processes the session `name` owns: what `run` started there, the pane's
+382|     /// harness server among them (#802).
+383|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError>;
+384| 
+385|     /// The process ids running in the session `name`.
+386|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
+````
+
+**E4.** `HarnessPort`'s two default-armed methods (#645), the shape this story does not repeat; #831 added four more default-armed methods on top of them (lines 519-559), each defaulting to a refusal, none an answer.
+
+`sed -n '490,517p' crates/holler-pane/src/ports.rs | awk -v n=490 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+490|     /// Queue `text` as a prompt to `session` at `at`, through the harness API, never by
+491|     /// typing into a TUI (I4). `pane reset --first` calls it (#645).
+492|     ///
+493|     /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
+494|     /// prompts says so as a stable refusal, which the real adapter replaces (#642).
+495|     fn send_prompt(
+496|         &self,
+497|         at: &HarnessEndpoint,
+498|         session: &str,
+499|         text: &str,
+500|     ) -> Result<(), PaneError> {
+501|         let _ = (at, session, text);
+502|         Err(PaneError::Refused {
+503|             code: PROMPT_UNSUPPORTED,
+504|             message: "this harness does not queue a prompt".to_owned(),
+505|         })
+506|     }
+507| 
+508|     /// What `session` at `at` is doing now (#645: `pane reset` refuses a conversation that
+509|     /// is not [`Activity::Idle`]). A single process holds one session at a time, so its
+510|     /// activity is the process's.
+511|     ///
+512|     /// The default answers [`Activity::Idle`], so an impl that does not report activity
+513|     /// refuses nothing.
+514|     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+515|         let _ = (at, session);
+516|         Ok(Activity::Idle)
+517|     }
+````
+
+**E5.** #835 made the rule: `HostPort` has no default method, and a doc test (`PidsOnly`) pins that an implementation that omits one does not compile (`compile_fail,E0046`). Part 2's per-method doc tests (acceptance 1) are modelled on it.
+
+`sed -n '341,370p' crates/holler-pane/src/ports.rs | awk -v n=341 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+341| /// The machine a pane lives on: tmux sessions and the processes in them (the adapter
+342| /// is `holler-adapter-host`, #641).
+343| ///
+344| /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
+345| /// thread) in async code. Every method returns within I5's bound (default 10 s) or
+346| /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+347| ///
+348| /// No method has a default (#835), so an implementation that answers only the four methods
+349| /// that came before `foreground_commands`, a wrapper port included, does not compile:
+350| ///
+351| /// ```compile_fail,E0046
+352| /// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+353| ///
+354| /// struct PidsOnly;
+355| ///
+356| /// impl HostPort for PidsOnly {
+357| ///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+358| ///         Ok(())
+359| ///     }
+360| ///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+361| ///         Ok(())
+362| ///     }
+363| ///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+364| ///         Ok(())
+365| ///     }
+366| ///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+367| ///         Ok(Vec::new())
+368| ///     }
+369| /// }
+370| /// ```
+````
+
+**E6.** `HostPort::foreground_commands` (#835): names only, one list per session, `pane-not-found` for a missing session. The model for `attached_clients`.
+
+`sed -n '388,397p' crates/holler-pane/src/ports.rs | awk -v n=388 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+388|     /// The command name of the foreground process of every live pane in the session `name`,
+389|     /// one per pane, in the order tmux lists them (#835): what tmux reports as
+390|     /// `#{pane_current_command}`, the basename of that process's `argv[0]`. Names only, never
+391|     /// an argv, a command line or a program's configuration (I7). A session with no pane
+392|     /// process answers an empty list; a missing session is `pane-not-found`, as `ps` answers.
+393|     ///
+394|     /// The import reads it to leave alone a pane that runs Claude Code
+395|     /// ([`crate::pane::is_claude_code_command`]), and a Claude Code launch to refuse a session
+396|     /// that already runs one (`process-in-use`, #831).
+397|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
+````
+
+**E7.** The end of `FindingKind` and `ALL` on main (16 kinds; the last is `ProfileDrift`, #665; #831 added `PaneWaiting` and `ClaudeLoginMissing` before it). Part 2 appends two after the last kind present at build time.
+
+`sed -n '76,108p' crates/holler-pane/src/findings.rs | awk -v n=76 '{printf "%d| %s\n", n+NR-1, $0}'`
+
+````text
+76|     /// A pane's single process (Claude Code) waits for a person: a permission prompt or a
+77|     /// question; the message names which (#831). No Holler verb answers one.
+78|     PaneWaiting,
+79|     /// The processes of the Claude Code panes do not use the subscription login (#831): once
+80|     /// per pass that holds such a pane. The message names the login, never a command that
+81|     /// reads one, and no Holler verb sets a login (I7).
+82|     ClaudeLoginMissing,
+83|     /// The pane's record differs from its profile's spec on at least one field of
+84|     /// `profile_diff`'s table, the comparison `profile show` makes (#665). The message names
+85|     /// the fields and no value. Which side is right is the operator's choice, so no remedy.
+86|     ProfileDrift,
+87| }
+88| 
+89| impl FindingKind {
+90|     /// Every kind, in declaration order.
+91|     pub const ALL: &'static [FindingKind] = &[
+92|         FindingKind::HerdrVersionUnsupported,
+93|         FindingKind::ObserveFailed,
+94|         FindingKind::UnregisteredHerdrPane,
+95|         FindingKind::HerdrPaneMissing,
+96|         FindingKind::TmuxSessionMissing,
+97|         FindingKind::ServerWedged,
+98|         FindingKind::ServerDown,
+99|         FindingKind::NoSessionOfRecord,
+100|         FindingKind::SessionOfRecordMissing,
+101|         FindingKind::TuiForeignSession,
+102|         FindingKind::ShownDrivenMismatch,
+103|         FindingKind::StraySession,
+104|         FindingKind::UnmanagedStalled,
+105|         FindingKind::PaneWaiting,
+106|         FindingKind::ClaudeLoginMissing,
+107|         FindingKind::ProfileDrift,
+108|     ];
 ````
 
 **E8.** The one remedy table. `remedy(self, pane, fix)` has an outside caller (`tx_switch.rs`), so part 2 adds `remedy_for` and leaves this signature.
 
-`sed -n '116,149p' crates/holler-pane/src/findings.rs | awk -v n=116 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '133,171p' crates/holler-pane/src/findings.rs | awk -v n=133 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-116|     /// The command a finding of this kind tells the operator to run, for the pane `pane`
-117|     /// (`None` when it is about no pane) once `--fix` left it at `fix`; `None` when no Holler
-118|     /// verb repairs it. The one table of remedies:
-119|     ///
-120|     /// - a read that failed: run the pass again, `holler pane doctor [<pane>]`;
-121|     /// - the pane's process or its harness is gone or wrong: `holler pane relaunch <pane>`;
-122|     /// - the pane has no usable session of record: `holler pane reset <pane>`, which creates
-123|     ///   one (choosing an existing session is the operator's, never a guess);
-124|     /// - a mismatch: `holler pane doctor <pane> --fix` while a fix can repair it, relaunch when
-125|     ///   it cannot or failed, nothing once it is fixed.
-126|     pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
-127|         match self {
-128|             FindingKind::HerdrVersionUnsupported
-129|             | FindingKind::UnregisteredHerdrPane
-130|             | FindingKind::UnmanagedStalled
-131|             | FindingKind::StraySession => None,
-132|             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
-133|             FindingKind::HerdrPaneMissing
-134|             | FindingKind::TmuxSessionMissing
-135|             | FindingKind::ServerWedged
-136|             | FindingKind::ServerDown
-137|             | FindingKind::TuiForeignSession => pane.map(relaunch_command),
-138|             FindingKind::NoSessionOfRecord | FindingKind::SessionOfRecordMissing => {
-139|                 pane.map(reset_command)
-140|             }
-141|             FindingKind::ShownDrivenMismatch => match fix {
-142|                 FixState::Fixable | FixState::Skipped => {
-143|                     pane.map(|pane| doctor_command(Some(pane), true))
-144|                 }
-145|                 FixState::NotFixable | FixState::Failed => pane.map(relaunch_command),
-146|                 FixState::Fixed => None,
-147|             },
-148|         }
-149|     }
+133|     /// The command a finding of this kind tells the operator to run, for the pane `pane`
+134|     /// (`None` when it is about no pane) once `--fix` left it at `fix`; `None` when no Holler
+135|     /// verb repairs it. The one table of remedies:
+136|     ///
+137|     /// - a read that failed: run the pass again, `holler pane doctor [<pane>]`;
+138|     /// - the pane's process or its harness is gone or wrong: `holler pane relaunch <pane>`;
+139|     /// - the pane has no usable session of record: `holler pane reset <pane>`, which creates
+140|     ///   one (choosing an existing session is the operator's, never a guess);
+141|     /// - a mismatch: `holler pane doctor <pane> --fix` while a fix can repair it, relaunch when
+142|     ///   it cannot or failed, nothing once it is fixed;
+143|     /// - a pane that waits for a person, and a login that is not the subscription's (#831):
+144|     ///   none, since only a person answers the one and logs in for the other.
+145|     pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
+146|         match self {
+147|             FindingKind::HerdrVersionUnsupported
+148|             | FindingKind::UnregisteredHerdrPane
+149|             | FindingKind::UnmanagedStalled
+150|             | FindingKind::StraySession
+151|             | FindingKind::PaneWaiting
+152|             | FindingKind::ClaudeLoginMissing
+153|             | FindingKind::ProfileDrift => None,
+154|             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
+155|             FindingKind::HerdrPaneMissing
+156|             | FindingKind::TmuxSessionMissing
+157|             | FindingKind::ServerWedged
+158|             | FindingKind::ServerDown
+159|             | FindingKind::TuiForeignSession => pane.map(relaunch_command),
+160|             FindingKind::NoSessionOfRecord | FindingKind::SessionOfRecordMissing => {
+161|                 pane.map(reset_command)
+162|             }
+163|             FindingKind::ShownDrivenMismatch => match fix {
+164|                 FixState::Fixable | FixState::Skipped => {
+165|                     pane.map(|pane| doctor_command(Some(pane), true))
+166|                 }
+167|                 FixState::NotFixable | FixState::Failed => pane.map(relaunch_command),
+168|                 FixState::Fixed => None,
+169|             },
+170|         }
+171|     }
 ````
 
-**E9.** The chain's port-call bound is written in the module doc: seven calls. Part 2 makes it nine and says so.
+**E9.** The chain's port-call bound is written in the module doc: seven calls for a server's chain, and a single process's chain (#831) is the child module `process` with its own list. Part 2 makes the server's chain nine and says so; `attached_clients` is called from `check_tmux`, which both chains share, so the single process's list gains it too.
 
-`sed -n '1,9p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=1 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1,10p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=1 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 1| //! One pane's chain in a reconcile pass (#647): observe the pane's tmux session, harness
@@ -471,83 +509,108 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 3| //! what was observed. A pass runs one chain per pane, each on a thread of its own; the
 4| //! parent module has the rules and what the record write means.
 5| //!
-6| //! A chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
+6| //! A server's chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
 7| //! `list_sessions`, `shown_session`, and with `--fix` `select_session` and `shown_session`
-8| //! again, then one `cas_put`.
-9| 
+8| //! again, then one `cas_put`. A single process's chain (#831) is the child module `process`:
+9| //! at most `ps`, `health`, `shown_session` and `session_activity`, then with `--fix` the
+10| //! caller's relaunch (a launch engine run, under its own budget) or one `cas_put`.
 ````
 
-**E10.** `check_pane` is the chain: `check_tmux`, `observe_server`, `observe_screen`, `check_session_of_record`, `check_screen`, `record`.
+**E10.** `check_pane` is the chain: `check_tmux`, then (for a single-process harness, #831) the child module `process`, otherwise `observe_server`, `observe_screen`, `check_session_of_record`, `check_screen`, `record`. The agent check is a server-shape step, so a Claude Code pane never reaches it.
 
-`sed -n '95,109p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=95 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '104,138p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=104 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-95| /// Run the chain of `pane`: observe, compare, repair, record.
-96| pub(super) fn check_pane(ports: Ports<'_>, request: &ReconcileRequest<'_>, pane: &Pane) -> Checked {
-97|     let mut findings = Vec::new();
-98|     check_tmux(ports, pane, &mut findings);
-99|     let server = observe_server(ports, pane, &mut findings);
-100|     let screen = observe_screen(ports, pane, &mut findings);
-101|     check_session_of_record(pane, &server, &mut findings);
-102|     let screen = check_screen(ports, request, pane, &server, screen, &mut findings);
-103|     findings.extend(record(ports, request, pane, &server, &screen));
-104|     Checked {
-105|         findings,
-106|         summary: summary(pane, screen.shown(), server.health()),
-107|         listed: server.into_sessions(),
-108|     }
-109| }
+104| /// Run the chain of `pane`: observe, compare, repair, record. A single process's chain is
+105| /// the child module `process`'s, with `relaunch` as its repair (#831).
+106| pub(super) fn check_pane(
+107|     ports: Ports<'_>,
+108|     request: &ReconcileRequest<'_>,
+109|     relaunch: Option<Relaunch<'_>>,
+110|     pane: &Pane,
+111| ) -> Checked {
+112|     let mut findings = Vec::new();
+113|     check_tmux(ports, pane, &mut findings);
+114|     let at = match pane.harness.endpoint(&pane.name) {
+115|         Ok(at) => at,
+116|         Err(error) => {
+117|             findings.push(observe_failed(pane, PANE_HARNESS, &error));
+118|             return Checked {
+119|                 findings,
+120|                 summary: summary(pane, None, ObservedHealth::Unknown),
+121|                 listed: None,
+122|             };
+123|         }
+124|     };
+125|     if pane.harness.kind.shape() == Shape::SingleProcess {
+126|         return process::check(ports, request, relaunch, pane, &at, findings);
+127|     }
+128|     let server = observe_server(ports, pane, &at, &mut findings);
+129|     let screen = observe_screen(ports, pane, &at, &mut findings);
+130|     check_session_of_record(pane, &server, &mut findings);
+131|     let screen = check_screen(ports, request, pane, &server, screen, &mut findings);
+132|     findings.extend(record(ports, request, pane, &server, &screen));
+133|     Checked {
+134|         findings,
+135|         summary: summary(pane, screen.shown(), server.health()),
+136|         listed: server.into_sessions(),
+137|     }
+138| }
 ````
 
 **E11.** `check_tmux` reads `host.ps` only; `unattached` extends it.
 
-`sed -n '132,146p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=132 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '161,175p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=161 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-132| /// `tmux-session-missing` when the pane's tmux session (named as the pane) is gone.
-133| fn check_tmux(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) {
-134|     match ports.host.ps(&pane.name) {
-135|         Ok(_) => {}
-136|         Err(PaneError::PaneNotFound { .. }) => {
-137|             let message = format!("the tmux session {} does not exist", pane.name);
-138|             findings.push(Finding::about(
-139|                 FindingKind::TmuxSessionMissing,
-140|                 pane,
-141|                 message,
-142|             ));
-143|         }
-144|         Err(error) => findings.push(observe_failed(pane, HOST_PS, &error)),
-145|     }
-146| }
+161| /// `tmux-session-missing` when the pane's tmux session (named as the pane) is gone.
+162| fn check_tmux(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) {
+163|     match ports.host.ps(&pane.name) {
+164|         Ok(_) => {}
+165|         Err(PaneError::PaneNotFound { .. }) => {
+166|             let message = format!("the tmux session {} does not exist", pane.name);
+167|             findings.push(Finding::about(
+168|                 FindingKind::TmuxSessionMissing,
+169|                 pane,
+170|                 message,
+171|             ));
+172|         }
+173|         Err(error) => findings.push(observe_failed(pane, HOST_PS, &error)),
+174|     }
+175| }
 ````
 
 **E12.** `check_session_of_record` is the trust rule for the session of record: the agent rule runs only where the healthy server listed it.
 
-`sed -n '197,218p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=197 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '235,260p' crates/holler-pane/src/reconcile/observe.rs | awk -v n=235 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-197| /// `no-session-of-record`, or `session-of-record-missing` when the pane's healthy server
-198| /// listed its sessions without it.
-199| fn check_session_of_record(pane: &Pane, server: &Server, findings: &mut Vec<Finding>) {
-200|     let Some(record) = pane.session_of_record.as_deref() else {
-201|         let message = "the record names no session of record, and doctor never picks one";
-202|         findings.push(Finding::about(
-203|             FindingKind::NoSessionOfRecord,
-204|             pane,
-205|             message.to_owned(),
-206|         ));
-207|         return;
-208|     };
-209|     if server.sessions().is_some() && !server.has(record) {
-210|         let port = pane.harness.port;
-211|         let message = format!(
-212|             "the harness server on port {port} does not have the session of record {}",
-213|             quoted(record)
-214|         );
-215|         let finding = Finding::about(FindingKind::SessionOfRecordMissing, pane, message);
-216|         findings.push(finding.with_session(Some(record)).with_ports(vec![port]));
-217|     }
-218| }
+235| /// `no-session-of-record`, or `session-of-record-missing` when the pane's healthy server
+236| /// listed its sessions without it.
+237| fn check_session_of_record(pane: &Pane, server: &Server, findings: &mut Vec<Finding>) {
+238|     let Some(record) = pane.session_of_record.as_deref() else {
+239|         let message = "the record names no session of record, and doctor never picks one";
+240|         findings.push(Finding::about(
+241|             FindingKind::NoSessionOfRecord,
+242|             pane,
+243|             message.to_owned(),
+244|         ));
+245|         return;
+246|     };
+247|     if server.sessions().is_some() && !server.has(record) {
+248|         let port = port_text(pane);
+249|         let message = format!(
+250|             "the harness server on {port} does not have the session of record {}",
+251|             quoted(record)
+252|         );
+253|         let finding = Finding::about(FindingKind::SessionOfRecordMissing, pane, message);
+254|         findings.push(
+255|             finding
+256|                 .with_session(Some(record))
+257|                 .with_ports(own_ports(pane)),
+258|         );
+259|     }
+260| }
 ````
 
 **E13.** Reconcile never infers state from files (I6) and reaches the world only through the ports.
@@ -571,14 +634,14 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E14.** DRIVEN is not observed on main: reconcile compares SHOWN with the session of record. #839 changes that; this story does not depend on it.
 
-`sed -n '32,36p' crates/holler-pane/src/reconcile.rs | awk -v n=32 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '51,55p' crates/holler-pane/src/reconcile.rs | awk -v n=51 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-32| //!   then). `None` with `at > 0` is an observed home screen, or a pane with no TUI.
-33| //! - `last_observed.driven` is left as stored. No port observes DRIVEN before #649, so the
-34| //!   mismatch compares SHOWN with `session_of_record` ([`shown_differs`]), which I2 makes
-35| //!   the session the hub drives.
-36| //! - A record is written only when one of those values changed, or on its first
+51| //!   then). `None` with `at > 0` is an observed home screen, or a pane with no TUI.
+52| //! - `last_observed.driven` is left as stored. No port observes DRIVEN before #649, so the
+53| //!   mismatch compares SHOWN with `session_of_record` ([`shown_differs`]), which I2 makes
+54| //!   the session the hub drives.
+55| //! - A record is written only when one of those values changed, or on its first
 ````
 
 **E15.** The read-only allowlist of the doctor pass: part 2 adds exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`.
@@ -617,36 +680,60 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 98|     assert!(calls.profiles.is_empty(), "{:?}", calls.profiles);
 ````
 
-**E16.** `findings_test.rs` pins every kind code in order (13 on main).
+**E16.** `findings_test.rs` pins every kind code in order (16 on main) and its module doc names who appended which kind.
 
-`sed -n '1,25p' crates/holler-pane/tests/findings_test.rs | awk -v n=1 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1,49p' crates/holler-pane/tests/findings_test.rs | awk -v n=1 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 1| #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #647
-2| //! The finding vocabulary of reconcile and `holler pane doctor` (#647 AC 25): twelve kinds
+2| //! The finding vocabulary of reconcile and `holler pane doctor` (#647 AC 25): sixteen kinds
 3| //! with stable kebab-case codes, each equal to the kind's JSON form. A code is stable once
-4| //! merged (ADR-0021 section 9), so the list is pinned in order; #665 appends
-5| //! `profile-drift` and edits this list.
-6| 
-7| use std::collections::BTreeSet;
-8| 
-9| use holler_pane::error::is_valid_code;
-10| use holler_pane::findings::FindingKind;
-11| 
-12| const CODES: [&str; 13] = [
-13|     "herdr-version-unsupported",
-14|     "observe-failed",
-15|     "unregistered-herdr-pane",
-16|     "herdr-pane-missing",
-17|     "tmux-session-missing",
-18|     "server-wedged",
-19|     "server-down",
-20|     "no-session-of-record",
-21|     "session-of-record-missing",
-22|     "tui-foreign-session",
-23|     "shown-driven-mismatch",
-24|     "stray-session",
-25|     "unmanaged-stalled",
+4| //! merged (ADR-0021 section 9), so the list is pinned in order; #832 appended
+5| //! `unmanaged-stalled`, #831 `pane-waiting` and `claude-login-missing`, and #665
+6| //! `profile-drift`, a kind that is also an error code of the closed list, classed a failure.
+7| 
+8| use std::collections::BTreeSet;
+9| 
+10| use holler_pane::error::{class_of, is_valid_code, ErrorClass};
+11| use holler_pane::findings::FindingKind;
+12| 
+13| const CODES: [&str; 16] = [
+14|     "herdr-version-unsupported",
+15|     "observe-failed",
+16|     "unregistered-herdr-pane",
+17|     "herdr-pane-missing",
+18|     "tmux-session-missing",
+19|     "server-wedged",
+20|     "server-down",
+21|     "no-session-of-record",
+22|     "session-of-record-missing",
+23|     "tui-foreign-session",
+24|     "shown-driven-mismatch",
+25|     "stray-session",
+26|     "unmanaged-stalled",
+27|     "pane-waiting",
+28|     "claude-login-missing",
+29|     "profile-drift",
+30| ];
+31| 
+32| #[test]
+33| fn finding_kind_codes_are_stable() {
+34|     let codes: Vec<&str> = FindingKind::ALL.iter().map(|k| k.code()).collect();
+35|     assert_eq!(codes, CODES, "the kinds, in declaration order");
+36| 
+37|     let unique: BTreeSet<&str> = codes.iter().copied().collect();
+38|     assert_eq!(unique.len(), codes.len(), "a duplicate code: {codes:?}");
+39| 
+40|     for kind in FindingKind::ALL {
+41|         assert!(
+42|             is_valid_code(kind.code()),
+43|             "{:?} is not kebab-case",
+44|             kind.code()
+45|         );
+46|         let json = serde_json::to_value(kind).unwrap();
+47|         assert_eq!(json, kind.code(), "{kind:?} serializes as its code");
+48|     }
+49| }
 ````
 
 **E17.** `AgentKey::parse` accepts a leading `-` and capitals, so a remedy must render `--agent=KEY`.
@@ -757,225 +844,260 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E20.** The routes the adapter knows: `GET_AGENT` and `GET_MESSAGES` exist, nothing new to declare.
 
-`sed -n '449,475p' crates/holler-adapter-opencode/src/lib.rs | awk -v n=449 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '472,498p' crates/holler-adapter-opencode/src/lib.rs | awk -v n=472 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-449| const GET_AGENT: Route = Route {
-450|     method: "GET",
-451|     label: "/agent",
-452| };
-453| const PROMPT_ASYNC: Route = Route {
-454|     method: "POST",
-455|     label: "/session/:id/prompt_async",
-456| };
-457| const GET_QUESTION: Route = Route {
-458|     method: "GET",
-459|     label: "/question",
-460| };
-461| const GET_PERMISSION: Route = Route {
-462|     method: "GET",
-463|     label: "/permission",
-464| };
-465| const GET_MESSAGES: Route = Route {
-466|     method: "GET",
-467|     label: "/session/:id/message",
-468| };
-469| 
-470| /// One port call in flight: the server's port, the method's `op` and its deadline.
-471| struct Call {
-472|     port: u16,
-473|     op: &'static str,
-474|     /// [`Timeouts::call`] from the method's entry (I5).
-475|     deadline: Instant,
+472| const GET_AGENT: Route = Route {
+473|     method: "GET",
+474|     label: "/agent",
+475| };
+476| const PROMPT_ASYNC: Route = Route {
+477|     method: "POST",
+478|     label: "/session/:id/prompt_async",
+479| };
+480| const GET_QUESTION: Route = Route {
+481|     method: "GET",
+482|     label: "/question",
+483| };
+484| const GET_PERMISSION: Route = Route {
+485|     method: "GET",
+486|     label: "/permission",
+487| };
+488| const GET_MESSAGES: Route = Route {
+489|     method: "GET",
+490|     label: "/session/:id/message",
+491| };
+492| 
+493| /// One port call in flight: the server's port, the method's `op` and its deadline.
+494| struct Call {
+495|     port: u16,
+496|     op: &'static str,
+497|     /// [`Timeouts::call`] from the method's entry (I5).
+498|     deadline: Instant,
 ````
 
-**E21.** The wiring's rule: every wrapper forwards every method, defaults included (D31 W-4, D33). The sentence names the default-armed methods; part 2 edits it.
+**E21.** The wiring's rule: every wrapper forwards every method, defaults included (D31 W-4, D33). The sentence names the default-armed methods (now also #831's four process methods) and says `observe_pane` and `foreground_commands` have no default (#835); part 2 edits it.
 
-`sed -n '15,20p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=15 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '15,23p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=15 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 15| //! **Every method is forwarded (D31 W-4, D33).** Each wrapper here overrides every method of its
 16| //! port, the ones the port gives a default included: `HarnessPort`'s `send_prompt` and
-17| //! `session_activity`, and `HerdrPort`'s `observe_pane` and `observe_panes` (#832). A default
-18| //! never answers in place of the inner port, and `observe_panes` goes to the inner port's own
-19| //! `observe_panes`, so a list of panes stays one read of Herdr (ADR-0021 section 14), never one
-20| //! `observe_pane` per pane.
+17| //! `session_activity`, its four process methods (#831: `process_command`, `new_session_id`,
+18| //! `locate_process` and `login_status`, whose defaults refuse `process-unsupported`), and
+19| //! `HerdrPort`'s `observe_panes` (#832). A default never answers in place of the inner port, and
+20| //! `observe_panes` goes to the inner port's own `observe_panes`, so a list of panes stays one read
+21| //! of Herdr (ADR-0021 section 14), never one `observe_pane` per pane. `HerdrPort::observe_pane`
+22| //! and `HostPort::foreground_commands` have no default (#835), so the compiler holds every wrapper
+23| //! to them.
 ````
 
-**E22.** `BindingHost` on main: four methods forwarded one by one.
+**E22.** `BindingHost` on main: five methods forwarded one by one.
 
-`sed -n '162,183p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=162 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '168,193p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=168 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-162| impl HostPort for BindingHost {
-163|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-164|         let offered = self.bindings.claim();
-165|         self.inner.ensure_session(name, cwd)?;
-166|         if let Some(pane) = offered {
-167|             self.bindings.bind(pane, name.clone());
-168|         }
-169|         Ok(())
-170|     }
-171| 
-172|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-173|         self.inner.run(name, cwd, argv)
-174|     }
-175| 
-176|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-177|         self.inner.stop_owned(name)
-178|     }
-179| 
-180|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-181|         self.inner.ps(name)
-182|     }
-183| }
+168| impl HostPort for BindingHost {
+169|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+170|         let offered = self.bindings.claim();
+171|         self.inner.ensure_session(name, cwd)?;
+172|         if let Some(pane) = offered {
+173|             self.bindings.bind(pane, name.clone());
+174|         }
+175|         Ok(())
+176|     }
+177| 
+178|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+179|         self.inner.run(name, cwd, argv)
+180|     }
+181| 
+182|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
+183|         self.inner.stop_owned(name)
+184|     }
+185| 
+186|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+187|         self.inner.ps(name)
+188|     }
+189| 
+190|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+191|         self.inner.foreground_commands(name)
+192|     }
+193| }
 ````
 
-**E23.** `Wired<dyn HarnessPort>` forwards eleven methods explicitly.
+**E23.** `Wired<dyn HarnessPort>` forwards fifteen methods explicitly (every one of `HarnessPort`, #831's four process methods included).
 
-`sed -n '284,338p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=284 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '295,379p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=295 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-284| impl HarnessPort for Wired<dyn HarnessPort> {
-285|     fn serve_command(
-286|         &self,
-287|         name: &PaneName,
-288|         port: u16,
-289|         spec: &ServeSpec,
-290|     ) -> Result<Argv, PaneError> {
-291|         self.port()?.serve_command(name, port, spec)
-292|     }
-293| 
-294|     fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-295|         self.port()?.verify_serving(port, spec)
-296|     }
-297| 
-298|     fn health(&self, port: u16) -> Result<bool, PaneError> {
-299|         self.port()?.health(port)
-300|     }
-301| 
-302|     fn create_session(&self, port: u16) -> Result<String, PaneError> {
-303|         self.port()?.create_session(port)
-304|     }
-305| 
-306|     fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-307|         self.port()?.list_sessions(port)
-308|     }
-309| 
-310|     fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-311|         self.port()?.abort(port, session)
-312|     }
-313| 
-314|     fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-315|         self.port()?.attach_tui(pane, port, session)
-316|     }
-317| 
-318|     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
-319|         self.port()?.select_session(pane, session)
-320|     }
-321| 
-322|     fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-323|         self.port()?.shown_session(pane)
-324|     }
-325| 
-326|     fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-327|         self.port()?.send_prompt(port, session, text)
-328|     }
-329| 
-330|     fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-331|         self.port()?.session_activity(port, session)
+295| impl HarnessPort for Wired<dyn HarnessPort> {
+296|     fn serve_command(
+297|         &self,
+298|         name: &PaneName,
+299|         port: u16,
+300|         spec: &ServeSpec,
+301|     ) -> Result<Argv, PaneError> {
+302|         self.port()?.serve_command(name, port, spec)
+303|     }
+304| 
+305|     fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+306|         self.port()?.verify_serving(at, spec)
+307|     }
+308| 
+309|     fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+310|         self.port()?.health(at)
+311|     }
+312| 
+313|     fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+314|         self.port()?.create_session(at)
+315|     }
+316| 
+317|     fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+318|         self.port()?.list_sessions(at)
+319|     }
+320| 
+321|     fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+322|         self.port()?.abort(at, session)
+323|     }
+324| 
+325|     fn attach_tui(
+326|         &self,
+327|         pane: &PaneId,
+328|         at: &HarnessEndpoint,
+329|         session: &str,
+330|     ) -> Result<(), PaneError> {
+331|         self.port()?.attach_tui(pane, at, session)
 332|     }
-333| }
-334| 
-335| impl HostPort for Wired<dyn HostPort> {
-336|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-337|         self.port()?.ensure_session(name, cwd)
-338|     }
+333| 
+334|     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
+335|         self.port()?.select_session(pane, session)
+336|     }
+337| 
+338|     fn shown_session(
+339|         &self,
+340|         pane: &PaneId,
+341|         at: &HarnessEndpoint,
+342|     ) -> Result<Option<String>, PaneError> {
+343|         self.port()?.shown_session(pane, at)
+344|     }
+345| 
+346|     fn send_prompt(
+347|         &self,
+348|         at: &HarnessEndpoint,
+349|         session: &str,
+350|         text: &str,
+351|     ) -> Result<(), PaneError> {
+352|         self.port()?.send_prompt(at, session, text)
+353|     }
+354| 
+355|     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+356|         self.port()?.session_activity(at, session)
+357|     }
+358| 
+359|     fn process_command(
+360|         &self,
+361|         name: &PaneName,
+362|         spec: &ServeSpec,
+363|         session: &SessionChoice,
+364|     ) -> Result<Argv, PaneError> {
+365|         self.port()?.process_command(name, spec, session)
+366|     }
+367| 
+368|     fn new_session_id(&self) -> Result<String, PaneError> {
+369|         self.port()?.new_session_id()
+370|     }
+371| 
+372|     fn locate_process(&self, name: &PaneName, session: &str) -> Result<Option<u32>, PaneError> {
+373|         self.port()?.locate_process(name, session)
+374|     }
+375| 
+376|     fn login_status(&self) -> Result<LoginStatus, PaneError> {
+377|         self.port()?.login_status()
+378|     }
+379| }
 ````
 
-**E24.** `Wired<dyn HostPort>` forwards four methods.
+**E24.** `Wired<dyn HostPort>` forwards five methods.
 
-`sed -n '335,351p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=335 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '381,401p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v n=381 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-335| impl HostPort for Wired<dyn HostPort> {
-336|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-337|         self.port()?.ensure_session(name, cwd)
-338|     }
-339| 
-340|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-341|         self.port()?.run(name, cwd, argv)
-342|     }
-343| 
-344|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-345|         self.port()?.stop_owned(name)
-346|     }
-347| 
-348|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-349|         self.port()?.ps(name)
-350|     }
-351| }
+381| impl HostPort for Wired<dyn HostPort> {
+382|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+383|         self.port()?.ensure_session(name, cwd)
+384|     }
+385| 
+386|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+387|         self.port()?.run(name, cwd, argv)
+388|     }
+389| 
+390|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
+391|         self.port()?.stop_owned(name)
+392|     }
+393| 
+394|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+395|         self.port()?.ps(name)
+396|     }
+397| 
+398|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+399|         self.port()?.foreground_commands(name)
+400|     }
+401| }
 ````
 
-**E25.** The existing pin for `WiredHarness`: a recording harness that answers what no default would, and a list of the calls. Part 2 adds `agent_view` to `Recording`, `call_every_method` and the expected calls.
+**E25.** The existing pin for `WiredHarness`: a recording harness (`Recording`, lines 164-247 of the file; each of its fifteen methods answers what no default would) and `call_every_method` (lines 249-317) are the inputs; this test asserts the answers by index and lists the calls. Part 2 adds `agent_view` to `Recording`, `call_every_method` (appended last, so every index above stays) and the expected-calls list.
 
-`sed -n '228,281p' crates/holler-cli/tests/pane_integration/bind.rs | awk -v n=228 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '319,366p' crates/holler-cli/tests/pane_integration/bind.rs | awk -v n=319 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-228| fn call_every_method(harness: &dyn HarnessPort) -> Vec<Result<String, String>> {
-229|     let (pane, port, spec) = (PaneId::new("w1:p1"), 48100, ServeSpec::default());
-230|     let code = |e: PaneError| e.code().to_owned();
-231|     vec![
-232|         harness.serve_command(&name("demo-c1r1"), port, &spec).map(|_| "serve_command".into()).map_err(code),
-233|         harness.verify_serving(port, &spec).map(|()| "verify_serving".into()).map_err(code),
-234|         harness.health(port).map(|_| "health".into()).map_err(code),
-235|         harness.create_session(port).map(|_| "create_session".into()).map_err(code),
-236|         harness.list_sessions(port).map(|_| "list_sessions".into()).map_err(code),
-237|         harness.abort(port, "ses_1").map(|()| "abort".into()).map_err(code),
-238|         harness.attach_tui(&pane, port, "ses_1").map(|()| "attach_tui".into()).map_err(code),
-239|         harness.select_session(&pane, "ses_1").map(|()| "select_session".into()).map_err(code),
-240|         harness.shown_session(&pane).map(|_| "shown_session".into()).map_err(code),
-241|         harness.send_prompt(port, "ses_1", "hello").map(|()| "send_prompt".into()).map_err(code),
-242|         harness.session_activity(port, "ses_1").map(|a| format!("{a:?}")).map_err(code),
-243|     ]
-244| }
-245| 
-246| #[test]
-247| fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
-248|     let inner = Arc::new(Recording::default());
-249|     let port: Arc<dyn HarnessPort> = inner.clone();
-250|     let wired = WiredHarness::new(Ok(port));
-251|     let answers = call_every_method(&wired);
-252|     assert_eq!(
-253|         answers.last(),
-254|         Some(&Ok("Busy".to_owned())),
-255|         "session_activity is the inner one's, not the default Idle"
-256|     );
-257|     assert_eq!(
-258|         answers[9],
-259|         Ok("send_prompt".to_owned()),
-260|         "send_prompt is the inner one's, not the default prompt-unsupported"
-261|     );
-262|     assert_eq!(
-263|         *inner.calls.lock().unwrap(),
-264|         vec![
-265|             "serve_command",
-266|             "verify_serving",
-267|             "health",
-268|             "create_session",
-269|             "list_sessions",
-270|             "abort",
-271|             "attach_tui",
-272|             "select_session",
-273|             "shown_session",
-274|             "send_prompt",
-275|             "session_activity",
-276|         ],
-277|         "each method reached the inner harness once"
-278|     );
-279| }
-280| 
-281| #[test]
+319| #[test]
+320| fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
+321|     let inner = Arc::new(Recording::default());
+322|     let port: Arc<dyn HarnessPort> = inner.clone();
+323|     let wired = WiredHarness::new(Ok(port));
+324|     let answers = call_every_method(&wired);
+325|     assert_eq!(
+326|         answers[10],
+327|         Ok("Busy".to_owned()),
+328|         "session_activity is the inner one's, not the default Idle"
+329|     );
+330|     assert_eq!(
+331|         answers[9],
+332|         Ok("send_prompt".to_owned()),
+333|         "send_prompt is the inner one's, not the default prompt-unsupported"
+334|     );
+335|     assert_eq!(
+336|         answers[11..],
+337|         [
+338|             Ok("process_command".to_owned()),
+339|             Ok("new_session_id".to_owned()),
+340|             Ok("Some(4242)".to_owned()),
+341|             Ok("Missing".to_owned()),
+342|         ],
+343|         "#831's four process methods are the inner one's, not the process-unsupported defaults"
+344|     );
+345|     assert_eq!(
+346|         *inner.calls.lock().unwrap(),
+347|         vec![
+348|             "serve_command",
+349|             "verify_serving",
+350|             "health",
+351|             "create_session",
+352|             "list_sessions",
+353|             "abort",
+354|             "attach_tui",
+355|             "select_session",
+356|             "shown_session",
+357|             "send_prompt",
+358|             "session_activity",
+359|             "process_command",
+360|             "new_session_id",
+361|             "locate_process",
+362|             "login_status",
+363|         ],
+364|         "each method reached the inner harness once"
+365|     );
+366| }
 ````
 
 **E26.** How #849-era review pinned `observe_pane` through `BindingHerdr` and `LazyHerdr`: the conformance suite over the wrapper, one recording check per wrapper, the failed-build case.
@@ -999,26 +1121,24 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 14| //!   stored error (pinned in `bind.rs`'s every-method test).
 ````
 
-**E27.** (in flight) #835 adds the same pin for the host: the host conformance suite over `WiredHost`.
+**E27.** #835 added the same pin for the host: the host conformance suite over `WiredHost`.
 
-`git show b488a33:crates/holler-cli/tests/pane_integration/bind.rs | sed -n '326,335p' | awk -v n=326 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '413,420p' crates/holler-cli/tests/pane_integration/bind.rs | awk -v n=413 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-326| /// #835 (A's W6): the production host is `BindingHost` over `WiredHost` over the adapter, so
-327| /// `WiredHost` forwards every `HostPort` method too; the suite's `foreground_commands` case
-328| /// pins the method #835 adds.
-329| #[test]
-330| fn the_wired_host_passes_the_host_conformance_suite() {
-331|     let result = run_host_conformance(|| (WiredHost::new(Ok(Arc::new(FakeHost::new()))), ()));
-332|     assert_eq!(result, Ok(()));
-333| }
-334| 
-335| // --- the resolver (D8, W-5) ---------------------------------------------------------------
+413| /// #835 (A's W6): the production host is `BindingHost` over `WiredHost` over the adapter, so
+414| /// `WiredHost` forwards every `HostPort` method too; the suite's `foreground_commands` case
+415| /// pins the method #835 adds.
+416| #[test]
+417| fn the_wired_host_passes_the_host_conformance_suite() {
+418|     let result = run_host_conformance(|| (WiredHost::new(Ok(Arc::new(FakeHost::new()))), ()));
+419|     assert_eq!(result, Ok(()));
+420| }
 ````
 
-**E28.** (in flight) #835 adds its method to the misconfigured-socket list in `wired.rs`; part 2 adds its two.
+**E28.** #835 added its method to the misconfigured-socket list in `wired.rs`, and #831 keyed the harness calls by endpoint; part 2 adds its two (`host.attached_clients`, `harness.agent_view`).
 
-`git show b488a33:crates/holler-cli/tests/pane_integration/wired.rs | sed -n '104,116p' | awk -v n=104 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '104,118p' crates/holler-cli/tests/pane_integration/wired.rs | awk -v n=104 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 104|         let wiring = Wiring::connect().expect("connect needs only the hub (D2, D26)");
@@ -1029,36 +1149,116 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 109|             usage_naming_the_socket("host.ensure_session", ports.host.ensure_session(&name, "/tmp")),
 110|             usage_naming_the_socket("host.ps", ports.host.ps(&name)),
 111|             usage_naming_the_socket("host.foreground_commands", ports.host.foreground_commands(&name)),
-112|             usage_naming_the_socket("harness.health", ports.harness.health(48199)),
-113|             usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane)),
+112|             usage_naming_the_socket("harness.health", ports.harness.health(&HarnessEndpoint::Port(48199))),
+113|             usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane, &HarnessEndpoint::Port(48199))),
 114|         ]
 115|         .into_iter()
 116|         .flatten()
+117|         .collect::<Vec<_>>()
+118|     });
 ````
 
-**E29.** `Unwired` is the not-implemented port set; every new required method needs an arm here.
+**E29.** `Unwired` is the not-implemented port set; every new required method needs an arm here (the four process methods answer `not-implemented` too, never their `process-unsupported` defaults, #831).
 
-`sed -n '311,328p' crates/holler-cli/src/pane/wiring.rs | awk -v n=311 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '347,442p' crates/holler-cli/src/pane/wiring.rs | awk -v n=347 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-311| impl HostPort for Unwired {
-312|     fn ensure_session(&self, _name: &PaneName, _cwd: &str) -> Result<(), PaneError> {
-313|         Err(PaneError::NotImplemented)
-314|     }
-315| 
-316|     fn run(&self, _name: &PaneName, _cwd: &str, _argv: &Argv) -> Result<(), PaneError> {
-317|         Err(PaneError::NotImplemented)
-318|     }
-319| 
-320|     fn stop_owned(&self, _name: &PaneName) -> Result<(), PaneError> {
-321|         Err(PaneError::NotImplemented)
-322|     }
-323| 
-324|     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
-325|         Err(PaneError::NotImplemented)
-326|     }
-327| }
-328| 
+347| impl HostPort for Unwired {
+348|     fn ensure_session(&self, _name: &PaneName, _cwd: &str) -> Result<(), PaneError> {
+349|         Err(PaneError::NotImplemented)
+350|     }
+351| 
+352|     fn run(&self, _name: &PaneName, _cwd: &str, _argv: &Argv) -> Result<(), PaneError> {
+353|         Err(PaneError::NotImplemented)
+354|     }
+355| 
+356|     fn stop_owned(&self, _name: &PaneName) -> Result<(), PaneError> {
+357|         Err(PaneError::NotImplemented)
+358|     }
+359| 
+360|     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
+361|         Err(PaneError::NotImplemented)
+362|     }
+363| 
+364|     fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
+365|         Err(PaneError::NotImplemented)
+366|     }
+367| }
+368| 
+369| impl HarnessPort for Unwired {
+370|     fn serve_command(
+371|         &self,
+372|         _name: &PaneName,
+373|         _port: u16,
+374|         _spec: &ServeSpec,
+375|     ) -> Result<Argv, PaneError> {
+376|         Err(PaneError::NotImplemented)
+377|     }
+378| 
+379|     fn verify_serving(&self, _at: &HarnessEndpoint, _spec: &ServeSpec) -> Result<(), PaneError> {
+380|         Err(PaneError::NotImplemented)
+381|     }
+382| 
+383|     fn health(&self, _at: &HarnessEndpoint) -> Result<bool, PaneError> {
+384|         Err(PaneError::NotImplemented)
+385|     }
+386| 
+387|     fn create_session(&self, _at: &HarnessEndpoint) -> Result<String, PaneError> {
+388|         Err(PaneError::NotImplemented)
+389|     }
+390| 
+391|     fn list_sessions(&self, _at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+392|         Err(PaneError::NotImplemented)
+393|     }
+394| 
+395|     fn abort(&self, _at: &HarnessEndpoint, _session: &str) -> Result<(), PaneError> {
+396|         Err(PaneError::NotImplemented)
+397|     }
+398| 
+399|     fn attach_tui(
+400|         &self,
+401|         _pane: &PaneId,
+402|         _at: &HarnessEndpoint,
+403|         _session: &str,
+404|     ) -> Result<(), PaneError> {
+405|         Err(PaneError::NotImplemented)
+406|     }
+407| 
+408|     fn select_session(&self, _pane: &PaneId, _session: &str) -> Result<(), PaneError> {
+409|         Err(PaneError::NotImplemented)
+410|     }
+411| 
+412|     fn shown_session(
+413|         &self,
+414|         _pane: &PaneId,
+415|         _at: &HarnessEndpoint,
+416|     ) -> Result<Option<String>, PaneError> {
+417|         Err(PaneError::NotImplemented)
+418|     }
+419| 
+420|     // The four process methods answer `not-implemented` too, never their `process-unsupported`
+421|     // defaults (#831): an unwired port is not a server harness.
+422|     fn process_command(
+423|         &self,
+424|         _name: &PaneName,
+425|         _spec: &ServeSpec,
+426|         _session: &SessionChoice,
+427|     ) -> Result<Argv, PaneError> {
+428|         Err(PaneError::NotImplemented)
+429|     }
+430| 
+431|     fn new_session_id(&self) -> Result<String, PaneError> {
+432|         Err(PaneError::NotImplemented)
+433|     }
+434| 
+435|     fn locate_process(&self, _name: &PaneName, _session: &str) -> Result<Option<u32>, PaneError> {
+436|         Err(PaneError::NotImplemented)
+437|     }
+438| 
+439|     fn login_status(&self) -> Result<LoginStatus, PaneError> {
+440|         Err(PaneError::NotImplemented)
+441|     }
+442| }
 ````
 
 **E30.** `SpecField::ALL` already has 16 fields and `OpencodeAgent` is one (#644): the `SpecField` row of the plan-check finding W-7 is done.
@@ -1101,42 +1301,40 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E31.** ADR-0021 'Decisions taken' items 16 to 18: a relaunch keeps the recorded agent, `--agent` only sets one, and `opencode_agent` is a `SpecField` (the plan-check finding W-7 is settled by #644).
 
-`sed -n '1104,1109p' docs/adr/ADR-0021.md | awk -v n=1104 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1542,1547p' docs/adr/ADR-0021.md | awk -v n=1542 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-1104| 16. **`pane relaunch` without `--agent` keeps the recorded agent** (operator, 2026-10-11, #644): a relaunch never changes
-1105|     the agent silently.
-1106| 17. **`--agent` only sets an agent** (operator, 2026-10-11, #644): no flag clears one; removing an agent is a separate
-1107|     decision and is not planned.
-1108| 18. **`opencode_agent` is a field of `profile_diff`'s table** (operator, 2026-10-11, #644, section 3): `SpecField::ALL` has
-1109|     16 fields, so `profile show` and `profile apply` (#664) see an agent difference. #644 owns the field.
+1542| 16. **`pane relaunch` without `--agent` keeps the recorded agent** (operator, 2026-10-11, #644): a relaunch never changes
+1543|     the agent silently.
+1544| 17. **`--agent` only sets an agent** (operator, 2026-10-11, #644): no flag clears one; removing an agent is a separate
+1545|     decision and is not planned.
+1546| 18. **`opencode_agent` is a field of `profile_diff`'s table** (operator, 2026-10-11, #644, section 3): `SpecField::ALL` has
+1547|     16 fields, so `profile show` and `profile apply` (#664) see an agent difference. #644 owns the field.
 ````
 
-**E32.** ADR-0021 section 14 says 'A wrapper port must delegate it' for `observe_pane`.
+**E32.** ADR-0021 section 14 says `observe_pane` is a contract, not a default, since #835: "a wrapper port by forwarding it, and one that leaves it out does not compile".
 
-`sed -n '974,978p' docs/adr/ADR-0021.md | awk -v n=974 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1116,1122p' docs/adr/ADR-0021.md | awk -v n=1116 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-974| - **`HerdrPort::observe_pane(pane) -> PaneObservation { cwd?, last_screen_change? }`** is the one new port method. It has a
-975|   default (`Ok` with both `None`), so an implementation that cannot tell says so and a port that does not override it keeps
-976|   compiling; `pane-not-found` for a pane Herdr does not have. A wrapper port must delegate it. `observe_panes(&[PaneId])` is the same
-977|   for several panes at once (an empty observation for a pane that cannot be observed), so a list of many unmanaged panes costs
-978|   one call: the Herdr adapter reads every `cwd` from the `PaneInfo` of **one** `session.snapshot` (any tab, grid cell or not).
+1116| - **`HerdrPort::observe_pane(pane) -> PaneObservation { cwd?, last_screen_change? }`** is the one new port method. It has a
+1117|   contract, not a default, since #835: every implementation answers it, a wrapper port by forwarding it, and one that leaves it
+1118|   out does not compile. (#832 gave it a default, `Ok` with both `None`, which would answer silently in place of a wrapper that
+1119|   did not forward it; #649's wrappers forward it.) An implementation that cannot tell answers `Ok` with both `None`;
+1120|   `pane-not-found` for a pane Herdr does not have. `observe_panes(&[PaneId])`, which keeps its default, is the same
+1121|   for several panes at once (an empty observation for a pane that cannot be observed), so a list of many unmanaged panes costs
+1122|   one call: the Herdr adapter reads every `cwd` from the `PaneInfo` of **one** `session.snapshot` (any tab, grid cell or not).
 ````
 
-**E33.** (in flight) #835's ADR decision 23: required, for the reason of the wrapper that did not forward a default.
+**E33.** #835's ADR decision 31: `HerdrPort::observe_pane` and `HostPort::foreground_commands` are required, for the reason of the wrapper that did not forward a default.
 
-`git show b488a33:docs/adr/ADR-0021.md | sed -n '1168,1175p' | awk -v n=1168 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1587,1590p' docs/adr/ADR-0021.md | awk -v n=1587 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-1168| 22. **`pane import` leaves a pane whose tmux session runs Claude Code alone, and `--adopt-claude-code` will adopt it**
-1169|     (operator, 2026-10-11, #835, section 13): #654's option (b), changed to a default plus a switch. The switch is refused
-1170|     until the Claude Code harness (#831) lands.
-1171| 23. **`HerdrPort::observe_pane` is required** (operator, 2026-10-11, #835, section 14): the operator folded this change to
-1172|     #832's method into #835, which makes `HostPort::foreground_commands` required for the same reason. A wrapper port that
-1173|     does not forward a defaulted method answers the default silently over the real wiring, where a required method is a
-1174|     compile error.
-1175| 
+1587| 31. **`HerdrPort::observe_pane` is required** (operator, 2026-10-11, #835, section 14): the operator folded this change to
+1588|     #832's method into #835, which makes `HostPort::foreground_commands` required for the same reason. A wrapper port that
+1589|     does not forward a defaulted method answers the default silently over the real wiring, where a required method is a
+1590|     compile error.
 ````
 
 **E34.** A pane's TUI is an `opencode attach` that runs inside the pane's tmux session; nothing in Holler attaches a tmux client to a Herdr pane.
@@ -1156,115 +1354,95 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E35.** The guide: one Herdr pane shows one tmux session, named as the pane.
 
-`sed -n '38,42p' docs/pane-control.md | awk -v n=38 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '43,47p' docs/pane-control.md | awk -v n=43 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-38| One Herdr pane shows one tmux session, named as the pane. The harness server (OpenCode) runs **inside that tmux
-39| session**: the host adapter starts it from the argv the harness adapter builds, and stops it with everything else the
-40| session owns, by `TERM` to every owned process group, one shared grace (2 s by default), then `KILL` to every group that
-41| still has a member. A launch is a transaction: it makes the Herdr pane and the tmux session, starts and checks the
-42| server, creates the session of record over the harness API, attaches the TUI to it, observes that the TUI shows it, and
+43| One Herdr pane shows one tmux session, named as the pane. The harness server (OpenCode) runs **inside that tmux
+44| session**: the host adapter starts it from the argv the harness adapter builds, and stops it with everything else the
+45| session owns, by `TERM` to every owned process group, one shared grace (2 s by default), then `KILL` to every group that
+46| still has a member. A launch is a transaction: it makes the Herdr pane and the tmux session, starts and checks the
+47| server, creates the session of record over the harness API, attaches the TUI to it, observes that the TUI shows it, and
 ````
 
 **E36.** The docs test forces `docs/pane-control.md` section 5 to name every `FindingKind::ALL` code.
 
-`sed -n '188,198p' crates/holler-cli/tests/docs_pane_control_test.rs | awk -v n=188 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '173,183p' crates/holler-cli/tests/docs_pane_control_test.rs | awk -v n=173 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-188| #[test]
-189| fn section_5_names_every_finding_kind() {
-190|     let s5 = section(&guide(), 5);
-191|     let missing = FindingKind::ALL
-192|         .iter()
-193|         .map(|k| ticked(k.code()))
-194|         .filter(|t| !s5.contains(t))
-195|         .collect();
-196|     assert_none("section 5 (doctor) does not name these finding kinds", missing);
-197| }
-198| 
+173| #[test]
+174| fn section_5_names_every_finding_kind() {
+175|     let s5 = section(&guide(), 5);
+176|     let missing = FindingKind::ALL
+177|         .iter()
+178|         .map(|k| ticked(k.code()))
+179|         .filter(|t| !s5.contains(t))
+180|         .collect();
+181|     assert_none("section 5 (doctor) does not name these finding kinds", missing);
+182| }
+183| 
 ````
 
-**E37.** `FakeHost` on main: sessions, `ps`, `faults.enter(HostOp::..)` on every method.
+**E37.** `FakeHost` on main: sessions, `ps`, `foreground_commands` (#835), `faults.enter(HostOp::..)` on every method.
 
-`sed -n '176,232p' crates/holler-pane-testkit/src/host.rs | awk -v n=176 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '190,226p' crates/holler-pane-testkit/src/host.rs | awk -v n=190 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-176| impl HostPort for FakeHost {
-177|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-178|         self.faults.enter(HostOp::EnsureSession)?;
-179|         self.lock()
-180|             .sessions
-181|             .entry(name.clone())
-182|             .or_insert_with(|| Session {
-183|                 cwd: cwd.to_owned(),
-184|                 pids: Vec::new(),
-185|             });
-186|         Ok(())
-187|     }
-188| 
-189|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-190|         self.faults.enter(HostOp::Run)?;
-191|         self.lock().start(name, cwd, argv)
-192|     }
-193| 
-194|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-195|         self.faults.enter(HostOp::StopOwned)?;
-196|         if let Some(session) = self.lock().sessions.get_mut(name) {
-197|             session.pids.clear();
-198|         }
-199|         Ok(())
-200|     }
-201| 
-202|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-203|         self.faults.enter(HostOp::Ps)?;
-204|         self.lock()
-205|             .sessions
-206|             .get(name)
-207|             .map(|session| session.pids.clone())
-208|             .ok_or_else(|| not_found(name))
-209|     }
-210| }
-211| 
-212| impl HostState {
-213|     /// `run`'s work: refuse a missing session, then an empty argv; otherwise give the
-214|     /// session a new pid and log the argv as given, with its `cwd`.
-215|     fn start(&mut self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-216|         let session = self.sessions.get_mut(name).ok_or_else(|| not_found(name))?;
-217|         if argv.as_slice().is_empty() {
-218|             return Err(PaneError::Usage {
-219|                 message: "an empty argv has no program to run".to_owned(),
-220|             });
-221|         }
-222|         session.pids.push(FIRST_PID + self.pids_minted);
-223|         self.pids_minted += 1;
-224|         self.runs.push((name.clone(), cwd.to_owned(), argv.clone()));
-225|         Ok(())
-226|     }
-227| }
-228| 
-229| /// The error for a session `name` that does not exist (or a pid it does not hold).
-230| fn not_found(name: &PaneName) -> PaneError {
-231|     PaneError::PaneNotFound {
-232|         what: name.to_string(),
+190| impl HostPort for FakeHost {
+191|     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
+192|         self.faults.enter(HostOp::EnsureSession)?;
+193|         self.lock()
+194|             .sessions
+195|             .entry(name.clone())
+196|             .or_insert_with(|| Session {
+197|                 cwd: cwd.to_owned(),
+198|                 processes: Vec::new(),
+199|             });
+200|         Ok(())
+201|     }
+202| 
+203|     fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+204|         self.faults.enter(HostOp::Run)?;
+205|         self.lock().start(name, cwd, argv)
+206|     }
+207| 
+208|     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
+209|         self.faults.enter(HostOp::StopOwned)?;
+210|         if let Some(session) = self.lock().sessions.get_mut(name) {
+211|             session.processes.clear();
+212|         }
+213|         Ok(())
+214|     }
+215| 
+216|     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+217|         self.faults.enter(HostOp::Ps)?;
+218|         self.lock().each_process(name, |process| process.pid)
+219|     }
+220| 
+221|     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+222|         self.faults.enter(HostOp::ForegroundCommands)?;
+223|         self.lock()
+224|             .each_process(name, |process| process.command.clone())
+225|     }
+226| }
 ````
 
 **E38.** `HarnessOp` of the fake harness lists the ports' calls; the default-armed two are not there.
 
-`sed -n '47,58p' crates/holler-pane-testkit/src/harness.rs | awk -v n=47 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '49,60p' crates/holler-pane-testkit/src/harness.rs | awk -v n=49 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-47| pub enum HarnessOp {
-48|     ServeCommand,
-49|     VerifyServing,
-50|     Health,
-51|     CreateSession,
-52|     ListSessions,
-53|     Abort,
-54|     AttachTui,
-55|     SelectSession,
-56|     ShownSession,
-57| }
-58| 
+49| pub enum HarnessOp {
+50|     ServeCommand,
+51|     VerifyServing,
+52|     Health,
+53|     CreateSession,
+54|     ListSessions,
+55|     Abort,
+56|     AttachTui,
+57|     SelectSession,
+58|     ShownSession,
+59| }
+60| 
 ````
 
 **E39.** The file-size gate: fails at 900 lines for `crates/**/*.rs`.
@@ -1286,34 +1464,39 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E40.** An outside caller of `FindingKind::remedy`.
 
-`sed -n '290,300p' crates/holler-pane/src/tx_switch.rs | awk -v n=290 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '362,373p' crates/holler-pane/src/tx_switch.rs | awk -v n=362 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-290|     let port = record.harness.port;
-291|     if ports.harness.health(port)? {
-292|         return Ok(());
-293|     }
-294|     let pane = Some(&record.name);
-295|     let remedy = match FindingKind::ServerDown.remedy(pane, FixState::NotFixable) {
-296|         Some(remedy) => remedy,
-297|         None => doctor_command(pane, false),
-298|     };
-299|     Err(PaneError::Refused {
-300|         code: SERVER_UNHEALTHY,
+362| fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+363|     if ports.harness.health(at)? {
+364|         return Ok(());
+365|     }
+366|     let pane = Some(&record.name);
+367|     let remedy = match FindingKind::ServerDown.remedy(pane, FixState::NotFixable) {
+368|         Some(remedy) => remedy,
+369|         None => doctor_command(pane, false),
+370|     };
+371|     let state = match at {
+372|         HarnessEndpoint::Port(port) => {
+373|             format!(
 ````
 
-**E41.** (in flight) #831 (branch `issue-831-implementation`, `b3f0295`) keys every `HarnessPort` method by `HarnessEndpoint`: a harness method added now would be rewritten by it.
+**E41.** #831 keyed every `HarnessPort` method by `HarnessEndpoint` (section 15 item 3): a harness method is written with `at: &HarnessEndpoint`, as every other.
 
-`git show b3f0295:docs/adr/ADR-0021.md | sed -n '1040,1046p' | awk -v n=1040 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1199,1209p' docs/adr/ADR-0021.md | awk -v n=1199 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-1040| 3. **The endpoint.** A Claude Code process has no port. `holler_pane::ports` gains
-1041|    `enum HarnessEndpoint { Port(u16), Process { pane: PaneName, pid: u32 } }`, and **every `HarnessPort` method keyed by
-1042|    `port: u16` is keyed by `&HarnessEndpoint` instead** (`verify_serving`, `health`, `create_session`, `list_sessions`,
-1043|    `abort`, `send_prompt`, `session_activity`; `attach_tui` and `shown_session` gain it too, `shown_session(pane, endpoint)`,
-1044|    since a single process is read through its endpoint and not through a TUI). This changes the port rather than adding
-1045|    default-armed twins, as #802 decided (decision 2 there): a call site that forgets the endpoint is a compile error, and
-1046|    every implementation is in this workspace. `HarnessInfo.port` becomes `Option<u16>` (`#[serde(default,
+1199| 3. **The endpoint.** A Claude Code process has no port. `holler_pane::ports` gains
+1200|    `enum HarnessEndpoint { Port(u16), Process { pane: PaneName, pid: u32 } }`, and **every `HarnessPort` method keyed by
+1201|    `port: u16` is keyed by `&HarnessEndpoint` instead** (`verify_serving`, `health`, `create_session`, `list_sessions`,
+1202|    `abort`, `send_prompt`, `session_activity`; `attach_tui` and `shown_session` gain it too, `shown_session(pane, endpoint)`,
+1203|    since a single process is read through its endpoint and not through a TUI). This changes the port rather than adding
+1204|    default-armed twins, as #802 decided (decision 2 there): a call site that forgets the endpoint is a compile error, and
+1205|    every implementation is in this workspace. `HarnessInfo.port` becomes `Option<u16>` (`#[serde(default,
+1206|    skip_serializing_if = "Option::is_none")]`), so every stored `opencode` record reads and writes the same bytes. A record
+1207|    is valid only when `opencode` has a `port`, and `claude` has no `port` and a `pid`; anything else does not load
+1208|    (`deny_unknown_fields` and the fail-closed registry, section 7). `HarnessInfo::endpoint(&self, pane: &PaneName)` is the
+1209|    one place a record becomes an endpoint.
 ````
 
 **E42.** (in flight) #839's brief (commit `1e1f203`) adds a `HubPort` with required methods and a field of `Ports`; this story adds methods, not a port, so it adds no `Ports` literal field.
@@ -1344,31 +1527,35 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 316| **Recommended merge order:** #835, then #831, then #648 (any order among these three, as each is nearly or fully built and none depends on #839), then **#839**, then #667. Reasons: #839 adds a field to `Ports` (15 literals) and rewrites the engine's tail, and it has no code yet, while #831 and #835 have code and tests written against the current `Ports` and the current `send_prompt` step; rebasing #839 onto them is smaller than rebasing both onto it. #831's ADR "Deferred" bullet edit lands first and #839 supersedes it with the text above. #667 has no code yet and should be written against `Ports` with `hub`. If #831 must land before #839 with its `reset_first_reaches_the_new_process` as it is, #839's run changes that one test and the sentence of its ADR item 18 that says the story proves delivery "through `reset --first`" (E89, line 1176) in the same change; the plan check should confirm this with the operator because it edits another story's contract text.
 ````
 
-**E44.** The opt-in scenario ends with 'doctor reports no finding'; with real detached tmux sessions every scratch pane is `unattached`, so part 2 changes this assertion (and #667's moved copy).
+**E44.** The shared end-state helper `assert_end_state` (moved here by #667, used by #649's scenario and by `profile_apply_scenario/{scenario,grid,probe}.rs`) asserts `doctor` reports no finding; with real detached tmux sessions every scratch pane is `unattached`, so part 2 changes this one assertion, here.
 
-`sed -n '232,240p' crates/holler-cli/tests/pane_integration/scenario.rs | awk -v n=232 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '95,104p' crates/holler-cli/tests/pane_integration/scratch/verbs.rs | awk -v n=95 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-232| }
-233| 
-234| /// The end state after the repairs: `doctor` reports no finding, `pane list` equals Herdr's
-235| /// snapshot for the scratch panes of the scenario's workspace, and none of them is in the
-236| /// unmanaged table.
-237| fn assert_end_state(scratch: &Scratch) {
-238|     let report = scratch.json(&["pane", "doctor"], 0).data();
-239|     assert_eq!(report["findings"], json!([]), "doctor reports no finding: {report}");
-240|     let observed: BTreeSet<(String, String)> = scratch
+95|     /// The end state: `doctor` reports no finding, the records of `panes` equal Herdr's
+96|     /// snapshot of the scratch panes in `workspaces` (pane id and cell), and none of them is in
+97|     /// `pane list`'s unmanaged table.
+98|     pub fn assert_end_state(&self, panes: &[&str], workspaces: &[&str]) {
+99|         let report = self.json(&["pane", "doctor"], 0).data();
+100|         assert_eq!(
+101|             report["findings"],
+102|             json!([]),
+103|             "doctor reports no finding: {report}"
+104|         );
 ````
 
 **E45.** The CHANGELOG shape: one bullet at the top of `### Enhancements`.
 
-`sed -n '8,11p' CHANGELOG.md | awk -v n=8 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '8,14p' CHANGELOG.md | awk -v n=8 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
 8| ## [Unreleased]
 9| 
 10| ### Enhancements
-11| - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+11| - Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+12|   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
+13|   Code process, recorded by its pid and with no port, and the pane verbs drive it
+14|   ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
 ````
 
 **E46.** The pipeline script fixes the handoff directory as `docs/handoffs/<issueNumber>`: no argument.
@@ -1429,72 +1616,91 @@ Each excerpt is cut by the command shown; the line numbers on the left come from
 
 **E51.** ADR-0021 'Decisions taken' items 12 and 13 (#802): the operator changed the port rather than adding a default-armed method, so an omission is a compile error.
 
-`sed -n '1090,1094p' docs/adr/ADR-0021.md | awk -v n=1090 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '1528,1532p' docs/adr/ADR-0021.md | awk -v n=1528 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-1090| 12. **The agent reaches `HarnessPort` by changing the port** (operator, 2026-10-11, #802): `serve` became
-1091|     `serve_command(name, port, &ServeSpec)`, so an omitted agent is a compile error at every call site; no additive
-1092|     default-armed method.
-1093| 13. **`ServeSpec`** (operator, 2026-10-11, #802): a `#[non_exhaustive]` struct holding `agent: Option<AgentKey>` today. New
-1094|     fields of the pane's spec for its server go into it, never into new parameters.
+1528| 12. **The agent reaches `HarnessPort` by changing the port** (operator, 2026-10-11, #802): `serve` became
+1529|     `serve_command(name, port, &ServeSpec)`, so an omitted agent is a compile error at every call site; no additive
+1530|     default-armed method.
+1531| 13. **`ServeSpec`** (operator, 2026-10-11, #802): a `#[non_exhaustive]` struct holding `agent: Option<AgentKey>` today. New
+1532|     fields of the pane's spec for its server go into it, never into new parameters.
 ````
 
-**E52.** The doctor test rig builds every world in `make_live`: the place where a healthy fake world gets its tmux client (a fresh fake session has none, as a fresh real one has none).
+**E52.** The doctor test rig builds every server world in `make_live`: the place where a healthy fake world gets its tmux client (a fresh fake session has none, as a fresh real one has none).
 
-`sed -n '367,397p' crates/holler-cli/tests/pane_verbs/doctor/rig.rs | awk -v n=367 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '374,406p' crates/holler-cli/tests/pane_verbs/doctor/rig.rs | awk -v n=374 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-367| fn make_live(
-368|     herdr: &FakeHerdr,
-369|     host: &FakeHost,
-370|     harness: &FakeHarness,
-371|     seed: &Seed,
-372|     port: u16,
-373| ) -> Live {
-374|     let name = PaneName::parse(seed.name).expect("a pane name");
-375|     let spec = HerdrSpec {
-376|         session: SCRATCH.to_owned(),
-377|         workspace: SCRATCH.to_owned(),
-378|         grid: seed.grid,
-379|     };
-380|     let pane = herdr.ensure_pane(&spec).expect("place the pane");
-381|     host.ensure_session(&name, "/srv/demo")
-382|         .expect("the tmux session");
-383|     if let Some(dir) = seed.data_dir {
-384|         harness.set_data_dir(port, dir);
-385|     }
-386|     start_server(harness, &name, port);
-387|     let session = harness.create_session(port).expect("a session");
-388|     harness
-389|         .attach_tui(&pane.pane_id, port, &session)
-390|         .expect("attach the TUI");
-391|     Live {
-392|         name,
-393|         herdr: pane,
-394|         port,
-395|         session,
-396|     }
-397| }
+374| fn make_live(
+375|     herdr: &FakeHerdr,
+376|     host: &FakeHost,
+377|     harness: &FakeHarness,
+378|     seed: &Seed,
+379|     port: u16,
+380| ) -> Live {
+381|     let name = PaneName::parse(seed.name).expect("a pane name");
+382|     let spec = HerdrSpec {
+383|         session: SCRATCH.to_owned(),
+384|         workspace: SCRATCH.to_owned(),
+385|         grid: seed.grid,
+386|     };
+387|     let pane = herdr.ensure_pane(&spec).expect("place the pane");
+388|     host.ensure_session(&name, "/srv/demo")
+389|         .expect("the tmux session");
+390|     if let Some(dir) = seed.data_dir {
+391|         harness.set_data_dir(port, dir);
+392|     }
+393|     start_server(harness, &name, port);
+394|     let session = harness
+395|         .create_session(&HarnessEndpoint::Port(port))
+396|         .expect("a session");
+397|     harness
+398|         .attach_tui(&pane.pane_id, &HarnessEndpoint::Port(port), &session)
+399|         .expect("attach the TUI");
+400|     Live {
+401|         name,
+402|         herdr: pane,
+403|         port,
+404|         session,
+405|     }
+406| }
 ````
 
-**E53.** The host conformance suite is one table of cases; part 2 adds one.
+**E53.** The host conformance suite is one table of cases (ten on main, `foreground-commands-names-what-run-started` last, #835); part 2 adds one.
 
-`sed -n '43,57p' crates/holler-pane-testkit/src/conformance/host.rs | awk -v n=43 '{printf "%d| %s\n", n+NR-1, $0}'`
+`sed -n '53,84p' crates/holler-pane-testkit/src/conformance/host.rs | awk -v n=53 '{printf "%d| %s\n", n+NR-1, $0}'`
 
 ````text
-43| const CASES: [(&str, Case); 9] = [
-44|     (
-45|         "ps-of-missing-session-is-pane-not-found",
-46|         ps_of_missing_session_is_pane_not_found,
-47|     ),
-48|     (
-49|         "run-in-missing-session-is-pane-not-found",
-50|         run_in_missing_session_is_pane_not_found,
-51|     ),
-52|     ("run-adds-a-process", run_adds_a_process),
-53|     ("ensure-session-is-idempotent", ensure_session_is_idempotent),
-54|     ("run-empty-argv-is-usage", run_empty_argv_is_usage),
-55|     (
-56|         "stop-owned-stops-every-owned-process",
-57|         stop_owned_stops_every_owned_process,
+53| /// The suite, in order: the one table that the runner iterates and [`host_cases`]
+54| /// lists.
+55| const CASES: [(&str, Case); 10] = [
+56|     (
+57|         "ps-of-missing-session-is-pane-not-found",
+58|         ps_of_missing_session_is_pane_not_found,
+59|     ),
+60|     (
+61|         "run-in-missing-session-is-pane-not-found",
+62|         run_in_missing_session_is_pane_not_found,
+63|     ),
+64|     ("run-adds-a-process", run_adds_a_process),
+65|     ("ensure-session-is-idempotent", ensure_session_is_idempotent),
+66|     ("run-empty-argv-is-usage", run_empty_argv_is_usage),
+67|     (
+68|         "stop-owned-stops-every-owned-process",
+69|         stop_owned_stops_every_owned_process,
+70|     ),
+71|     (
+72|         "stop-owned-of-missing-session-is-ok",
+73|         stop_owned_of_missing_session_is_ok,
+74|     ),
+75|     (
+76|         "stop-owned-leaves-other-sessions",
+77|         stop_owned_leaves_other_sessions,
+78|     ),
+79|     ("ps-lists-only-its-session", ps_lists_only_its_session),
+80|     (
+81|         "foreground-commands-names-what-run-started",
+82|         foreground_commands_names_what_run_started,
+83|     ),
+84| ];
 ````
