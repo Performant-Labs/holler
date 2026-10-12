@@ -314,3 +314,29 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
   0 failed (handoff-F-rework.md); `lint.sh` and `changelog-check.sh` pass; `bash -n` and `shellcheck` clean; S's
   repro and four variants run by hand under gawk, mawk and busybox awk; seven evidence.md entries for the unchanged
   code relied on.
+
+## T, verify / GREEN after F's rework (Phase 7, rework 1): 2026-10-12T11:17-06:00 (MDT)
+
+- **Decided:**
+  - Added S item 2's test, `panes_803::a_layout_over_several_lines_is_refused_so_a_later_workspace_is_never_dropped`.
+    It asserts `layout` and "one line" (F's option (a)), not `workspace`. It also asserts that `plan` exits 1 with an
+    empty stdout, so no step is planned under a label the user never named. Its positive control is the same panes
+    with a one-line `layout`.
+  - Added three text pins for S's items 1, 3 and 4, which no test covered:
+    - the door verbs, and no bare `holler pane VERB`, in Stage 11's first note and the docs' basics;
+    - `--as-operator` on every `pane reset PANE`, plus `stray-session`;
+    - no restated creation order in the docs, and the pointer to section 6.
+  - The bare-verb scan is a whole-text rule over the two user-facing notes, not a single-phrase check. That way a
+    reworded bare verb is still caught.
+- **Assumed:** the agent-run mentions of `holler pane ...` elsewhere in the skill (Stage 3, "If a stage fails") are
+  the agent's calls through the door, as the stage text says. So the bare-verb rule is scoped to the text the user
+  runs from their own shell, not the whole skill.
+- **Hedged:** the flaky `profile_rename_faults_test` (ext4 inode reuse) passed in my one full run. It is unrelated to
+  #803, but a later run here may hit it.
+- **Evidence:**
+  - `wizard_scripts`: 307 passed under gawk, mawk and busybox awk.
+  - The CI command with `--no-fail-fast`: 167 binaries, 2628 passed, 0 failed.
+  - Clippy, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test`, `docs_pane_control_test` and
+    `wire_selftest` pass.
+  - Each new test fails against the pre-rework file from `7a9dbec`, plus one bare-verb mutation (handoff-T-green.md,
+    rework 1).

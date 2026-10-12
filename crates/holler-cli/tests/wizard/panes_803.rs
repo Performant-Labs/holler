@@ -364,6 +364,31 @@ fn a_column_taller_than_the_one_to_its_left_is_refused_naming_layout_and_the_col
     s.passes(&config("", &[&["alpha", "beta"], &["o1"]], "", &names));
 }
 
+/// S's REWORK 2: `instance.sh` reads a line starting with `[` as a table header, so after a
+/// `layout` spread over several lines it never reads `workspace`. `panes.sh` must not then
+/// build under the default label: the layout is refused, naming `layout`, and nothing is planned.
+#[test]
+fn a_layout_over_several_lines_is_refused_so_a_later_workspace_is_never_dropped() {
+    let s = Scratch::new();
+    let panes =
+        pane("o1", "orchestrator", "") + &pane("a1", "agent", "") + &pane("b1", "agent", "");
+    let open = "layout = [\n  [\"o1\", \"a1\"],\n  [\"b1\"]\n]\n";
+    for ws in ["my relay", "a=b"] {
+        let body = format!("{DEFAULTS}{open}workspace = \"{ws}\"\n\n{panes}");
+        s.refuses(&body, &["layout", "one line"]);
+        let o = s.verb("plan", &body, &["holler"]);
+        assert_eq!(o.status.code(), Some(1), "plan ran:\n{}", out(&o));
+        assert!(out(&o).is_empty(), "plan printed lines: {}", out(&o));
+    }
+    // The same panes with `layout` on one line keep the label the user named.
+    let one = format!(
+        "{DEFAULTS}layout = [[\"o1\", \"a1\"], [\"b1\"]]\nworkspace = \"my relay\"\n\n{panes}"
+    );
+    let g = s.stdout("grid", &one, &[]);
+    assert_eq!(keyed(&g, "workspace").as_deref(), Some("my relay"), "{g}");
+    assert_eq!(keyed(&g, "profile").as_deref(), Some("my relay"), "{g}");
+}
+
 #[test]
 fn every_retired_table_and_key_is_refused_by_name_with_the_word_attach() {
     let s = Scratch::new();

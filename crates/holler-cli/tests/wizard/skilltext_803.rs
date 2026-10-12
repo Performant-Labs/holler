@@ -542,3 +542,84 @@ fn the_docs_readme_index_guide_and_changelog_carry_the_change() {
     );
     assert!(e < b, "Breaking Changes after Enhancements");
 }
+
+/// Every `holler pane VERB` in `text` runs through the door: preceded by `herdr.sh `.
+fn pane_verbs_outside_the_door(text: &str) -> Vec<String> {
+    text.match_indices("holler pane ")
+        .filter(|(at, _)| !text[..*at].ends_with("herdr.sh "))
+        .map(|(at, _)| text[at..].chars().take(40).collect())
+        .collect()
+}
+
+/// S's REWORK 1: a pane verb the user runs from their own shell goes through the door with the
+/// instance's literals, never with `HOLLER_STATE_DIR` alone (a close would stop another
+/// instance's tmux session of that name on tmux's default server).
+#[test]
+fn the_users_own_pane_verbs_go_through_the_door_with_the_literals_stage_ten_prints() {
+    let note = flat(&section(
+        &stage(11),
+        "- **The wizard's panes are Holler's.**",
+        "\n- **",
+    ));
+    let basics = flat(&section(&docs(), "\n## Basic Herdr commands", "\n## "));
+    for (name, text) in [("Stage 11's first note", &note), ("docs' basics", &basics)] {
+        for verb in [
+            "herdr.sh holler pane close",
+            "herdr.sh holler pane relaunch",
+        ] {
+            assert!(text.contains(verb), "{name} lacks `{verb}`: {text}");
+        }
+        let bare = pane_verbs_outside_the_door(text);
+        assert!(
+            bare.is_empty(),
+            "{name}: a pane verb around the door: {bare:?}"
+        );
+    }
+    let report = flat(&section(
+        &stage(10),
+        "**Every stage green or skipped = done.**",
+        "\n1. ",
+    ));
+    assert!(
+        report.contains("<herdr_env>") && report.contains("$WIZARD_LIB"),
+        "Stage 10's report prints the door's literals: {report}"
+    );
+}
+
+/// S's REWORK 3: the orchestrator's reset is refused without `--as-operator`
+/// (`orchestrator-pane`), and it leaves the old OpenCode session as a `stray-session`.
+#[test]
+fn the_orchestrators_reset_is_as_operator_and_names_the_stray_session_it_leaves() {
+    for (name, text) in [("Stage 10", flat(&stage(10))), ("docs", flat(&docs()))] {
+        let resets: Vec<String> = text
+            .match_indices("pane reset PANE")
+            .map(|(at, _)| text[at..].chars().take(30).collect())
+            .collect();
+        assert!(!resets.is_empty(), "{name} never resets the orchestrator");
+        for r in &resets {
+            assert!(
+                r.starts_with("pane reset PANE --as-operator"),
+                "{name}: {r}"
+            );
+        }
+        assert!(
+            text.contains("stray-session"),
+            "{name} omits the stray session"
+        );
+    }
+}
+
+/// S's REWORK 4 (Amendment (d)): the docs point to apply's creation order, not restate it.
+#[test]
+fn the_docs_point_to_applys_creation_order_and_do_not_restate_it() {
+    let builds = flat(&section(
+        &docs(),
+        "\n## How the wizard builds panes",
+        "\n## ",
+    ));
+    assert!(!builds.contains("column 1 by row"), "{builds}");
+    assert!(
+        builds.contains("creation order") && builds.contains("pane-control.md#6-profiles"),
+        "{builds}"
+    );
+}
