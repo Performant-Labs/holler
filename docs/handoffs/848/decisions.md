@@ -1,0 +1,5 @@
+## A (up-front plan review) — 2026-10-12T17:16:23Z
+- **Decided:** PASS. The seam split plus a mirrored `starts_with("docs/handoffs")` predicate is consistent with `docs_cli_test::is_cli_doc` (#462). Not sharing the helper is justified in writing, since there are only two test binaries and no third consumer. Two warns: the duplicated rule (keep the origin comment and mirrored cases), and AC 4's "touches only one file" must be read as outside `docs/handoffs/`.
+- **Assumed:** `docs/handoffs/` is removed before the PR is pushed (per #462 and the brief), so the PR diff is the single test file. The brief's description of `tests/wizard/` as not including `tests/support/` is correct (not exhaustively verified beyond `main.rs`'s module list).
+- **Hedged:** nothing material. No separate survey.md exists, so the brief's Reuse check was the Reuse map.
+- **Evidence:** read the brief, `skilltext_w5_rename.rs` in full, `docs_cli_test.rs:35-70,210-240`, `Cargo.toml` tempfile and wizard_scripts entries, and `rg "ls-files|docs/handoffs" crates/`.
