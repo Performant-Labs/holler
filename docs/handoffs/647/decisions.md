@@ -181,3 +181,29 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
     - `with_fix` and `remedy` call sites;
     - `gh pr list` (#839 is PR #863, open);
     - `gh api .../compare/6eff9cc...ef14b1a` (remote `main` moved by #847's test-only fix, no overlap).
+
+## F (Phase 6 call, S REWORK round) — 2026-10-12T12:15-06:00
+- **Decided:**
+  - S's item 1 is done. The W-3 clause of `agent-cannot-dispatch`'s message (`reconcile/observe/agent.rs`) quotes the profile name in both places it appears:
+    - `quoted` in the prose, as S asked;
+    - POSIX single quotes for the suggested `--profile` argument, through the new `findings::single_quoted` (`pub(crate)`, typed `&ProfileName`), per #662 B1.
+  - The remedy is unchanged.
+  - This deviates from S's literal fix, which was `quoted` in both places. The argument takes #662 B1's form for two reasons:
+    - `quoted`'s double quotes let a shell run `$(...)` and a backtick.
+    - Every message in the repository that suggests a command with a profile name single-quotes it: `delete.rs` twice, `create.rs`, `import/writes.rs` twice, and `profile_scope.rs`'s reconcile step, which ADR-0021 section 3 states.
+  - The helper lives in `findings.rs`, beside `quoted` and `embedded`, because `holler-pane` cannot reach `holler-cli`'s two copies. The module doc's untrusted-text bullet now names it.
+  - S's item 2, the pinning test, is T's. The handoff gives T the exact expected text: `--profile 'Some Profile'` and the prose `profile "Some Profile"`.
+  - archChanged: false. The change is a `pub(crate)` helper and a message string, with no public interface, module boundary or dependency change.
+- **Assumed:**
+  - S accepts the single-quoted argument as meeting item 1. It is the rule S cited, and S's own Hedged entry names it as the stronger protection.
+  - The operator pastes the suggested argument into a POSIX shell (bash, zsh, dash), as #662 B1 assumes.
+- **Hedged:**
+  - A profile name with a leading `-` still does not parse as `--profile '-x'`, because clap reads it as an option. `profile_scope.rs`'s doc already accepts that limit for the reconcile step. The joined `--profile='-x'` would parse, but no message in the repository uses it, so F kept the precedent's space form.
+  - Folding `holler-cli`'s two `single_quoted` copies onto this one is a follow-up, not done here, because that code is outside this story. All six `holler-cli` call sites quote a `ProfileName`, so the typed helper fits them.
+- **Evidence:**
+  - Read: `handoff-S.md` and S's journal entry; `agent.rs`; `findings.rs` (`quoted`, `embedded`, the module doc); `error.rs:691-698` (`excerpt`); `profile.rs:27-105` (`ProfileName`); `drift.rs:72-83`; every `single_quoted` site in `holler-cli` (`delete.rs:158-208`, `create.rs:251-259`, `import/writes.rs:76-86, 179-192`, `profile_scope.rs:40-56, 270, 549-560`); the sites S listed (`tx_apply.rs`, `tx_apply/run.rs`, `close.rs`, `launch.rs`, `park.rs`, all prose); ADR-0021 lines 530-531; `doctor.rs:128`; the pipeline's routing (`coding-pipeline-logic.mjs` case 10, the script's Phase 6 F call).
+  - Probe (scratch, outside the repository): the clause prints `--profile 'Some Profile'` and `--profile 'It'\''s $(id) Demo'`. A shell reads each back as one word, with nothing expanded. The `{:?}` form expanded `$(...)`.
+  - Tier 1: rustfmt clean on both files; `cargo test -p holler-pane` all ok; `pane_verbs -- doctor` 71 of 71; clippy `--workspace --all-targets -D warnings` exit 0; rustdoc `-D warnings` (with and without private items) exit 0; `lint.sh` exit 0; changelog-check ok.
+  - Workspace (`test.unit.command`): 2686 passed, 2 failed, 39 ignored, at a load average of 25 to 31 from other sessions' suites. The two failures are outside this story's code, and each binary passes 3 of 3 alone:
+    - `body_run_test::fresh_hello_and_presence_on_every_reconnect`: a restarted hub exited before it listened;
+    - `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`: an inode was reused, in the hub's own profile registry.

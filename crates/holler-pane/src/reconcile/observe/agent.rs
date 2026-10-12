@@ -24,7 +24,7 @@
 //!
 //! [`HarnessPort::agent_view`]: crate::HarnessPort::agent_view
 
-use crate::findings::{quoted, Finding, FindingKind};
+use crate::findings::{quoted, single_quoted, Finding, FindingKind};
 use crate::{AgentKey, AgentView, HarnessEndpoint, Pane, Ports};
 
 use super::{observe_failed, own_ports, Server};
@@ -88,7 +88,10 @@ fn cannot_dispatch(pane: &Pane, record: &str, view: &AgentView) -> Option<Findin
 
 /// The finding's message: the agents the turns ran as, the orchestrator to relaunch with (or up
 /// to three to choose from), and for a pane in a profile that the relaunch needs `--profile`, or
-/// the profile keeps the old agent (plan review W-3). Every value the server gave is quoted.
+/// the profile keeps the old agent (plan review W-3). Every value the server gave is quoted, and
+/// so is the profile name: [`quoted`] where the message names it, and POSIX-single-quoted
+/// (`single_quoted`, #662 B1) as the `--profile` argument it suggests, so that argument pastes
+/// into a shell as one word.
 fn message(pane: &Pane, record: &str, view: &AgentView) -> String {
     let turns = match view.turns.len() {
         1 => "the last user turn".to_owned(),
@@ -128,8 +131,10 @@ fn message(pane: &Pane, record: &str, view: &AgentView) -> String {
     );
     if let Some(profile) = &pane.profile {
         message.push_str(&format!(
-            "; the pane is in the profile {profile}, so relaunch it with --profile {profile} too, \
-             or the profile keeps the old agent and the next pass reports profile-drift"
+            "; the pane is in the profile {}, so relaunch it with --profile {} too, or the \
+             profile keeps the old agent and the next pass reports profile-drift",
+            quoted(profile.as_str()),
+            single_quoted(profile)
         ));
     }
     message

@@ -229,3 +229,99 @@ Source facts in **unchanged** code that F's change (Phase 5) relies on. Line num
   >     std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
   > }
   > ```
+
+## Added by F in the S REWORK round (Phase 6 call, at `af34a4f`)
+
+Source facts in unchanged code that the quoting of the W-3 clause (S's item 1) relies on.
+
+- **Fact:** the repository's rule for a profile name in a command that a message suggests is POSIX single quoting (#662 B1), so the command pastes into a shell as one word even for a name with a quote or `$(...)`.
+  **Source:** `crates/holler-cli/src/profile/delete.rs:202-208`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// `text` POSIX-single-quoted, read back by a shell as one word: each `'` becomes the four
+  > /// characters `'\''`, every other character stays, and the whole is wrapped in `'...'`. A
+  > /// profile name in a command that a message suggests goes through it (#662 B1), so the command
+  > /// pastes into a shell as it is, even for `Some Profile` or a name with a quote or `$(...)`.
+  > pub(crate) fn single_quoted(text: &str) -> String {
+  >     format!("'{}'", text.replace('\'', r"'\''"))
+  > }
+  > ```
+
+- **Fact:** a message that both names a profile and suggests a command with it names it `{:?}`-quoted in the prose and POSIX-single-quoted in the command, the shape the W-3 clause now has (the same holds at `delete.rs:173-183`, `create.rs:251-259`, `import/writes.rs:76-86` and `:179-192`).
+  **Source:** `crates/holler-cli/src/profile/delete.rs:158-167`
+  **Verbatim excerpt:**
+  > ```rust
+  > fn has_live_panes(name: &ProfileName, members: &[Pane]) -> PaneError {
+  >     PaneError::ProfileHasLivePanes {
+  >         what: format!(
+  >             "{:?} has {} ({}); run holler profile delete {} --keep-panes to detach them",
+  >             name.as_str(),
+  >             count(members.len(), "live pane"),
+  >             pane_list(members.iter().map(|pane| &pane.name)),
+  >             single_quoted(name.as_str())
+  >         ),
+  >     }
+  > ```
+
+- **Fact:** the reconcile step a profile verb prints suggests `--profile` with P single-quoted, and its test pins the escaping of a name with a quote and `$(...)`.
+  **Source:** `crates/holler-cli/src/pane/profile_scope.rs:54-55`, `:555-559`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let name = single_quoted(profile.as_str());
+  >     format!("to reconcile, run {doctor} --profile {name} and then holler profile show {name}")
+  > ```
+  > ```rust
+  >         let tricky = reconcile_step(Some(&ProfileName::parse("It's $(id) Demo").unwrap()));
+  >         assert!(
+  >             tricky.contains("--profile 'It'\\''s $(id) Demo'"),
+  >             "not single-quoted: {tricky:?}"
+  >         );
+  > ```
+
+- **Fact:** ADR-0021 section 3 states that suggested step with P POSIX-single-quoted.
+  **Source:** `docs/adr/ADR-0021.md:530-531`
+  **Verbatim excerpt:**
+  > The reconcile step is exactly `to reconcile, run holler pane doctor --profile '<P>' and then holler profile show '<P>'`,
+  > with P POSIX-single-quoted, and without `--profile` it is `to reconcile, run holler pane doctor`.
+
+- **Fact:** a `ProfileName` is at most 64 characters and has no control character, and a stored one (a record's `profile`) deserializes through `parse`. So `single_quoted` puts no control character into a message, and `quoted` never cuts the name.
+  **Source:** `crates/holler-pane/src/profile.rs:27-28`, `:42-54`, `:101-105`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// The longest a profile name or an actor may be, in characters.
+  > const MAX_NAME_CHARS: usize = 64;
+  > ```
+  > ```rust
+  >         } else if name.chars().count() > MAX_NAME_CHARS {
+  >             Some("a profile name is at most 64 characters")
+  >         } else if name.chars().any(char::is_control) {
+  >             Some("a profile name must not contain control characters")
+  > ```
+  > ```rust
+  > impl<'de> Deserialize<'de> for ProfileName {
+  >     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+  >         deserialize_parsed(deserializer, ProfileName::parse)
+  >     }
+  > }
+  > ```
+
+- **Fact:** `quoted` is `error::excerpt`: Rust `{:?}` quoting, that is double quotes, inside which a shell still expands `$` and a backtick, cut at 64 characters.
+  **Source:** `crates/holler-pane/src/error.rs:691-698`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub(crate) fn excerpt(text: &str) -> String {
+  >     const LIMIT: usize = 64;
+  >     if text.chars().count() <= LIMIT {
+  >         return format!("{text:?}");
+  >     }
+  >     let head: String = text.chars().take(LIMIT).collect();
+  >     format!("{head:?}...")
+  > }
+  > ```
+
+- **Fact:** doctor's text output prints a finding's message as it is, so the operator sees the single-quoted argument unchanged (the JSON form carries the same string).
+  **Source:** `crates/holler-cli/src/pane/doctor.rs:128`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let mut line = format!("{subject} {}: {}", finding.kind.code(), finding.message);
+  > ```

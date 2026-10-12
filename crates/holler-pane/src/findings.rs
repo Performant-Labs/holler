@@ -24,7 +24,10 @@
 //!   remedy, and its message says why.
 //! - **Untrusted text** (session and Herdr ids, the record's host names, adapter messages)
 //!   reaches a message only through [`quoted`] (one value) or `embedded` (an adapter's
-//!   message), so no control sequence reaches a terminal.
+//!   message), so no control sequence reaches a terminal. A profile name a message names goes
+//!   through [`quoted`] too, and as the argument of a command a message suggests through
+//!   `single_quoted` (POSIX single quotes), so that command pastes into a shell as one word
+//!   (#662 B1).
 //!
 //! **Serde.** A report is output and never read back, so unlike the records (`lib.rs`) it
 //! leaves nothing out: every absent value is `null`, and the JSON shape of `holler pane doctor`
@@ -33,7 +36,7 @@
 use serde::{Serialize, Serializer};
 
 use crate::error::excerpt;
-use crate::{AgentKey, GridPos, HerdrPane, Pane, PaneError, PaneId, PaneName};
+use crate::{AgentKey, GridPos, HerdrPane, Pane, PaneError, PaneId, PaneName, ProfileName};
 
 /// The longest an adapter's message may be inside a finding's message, in characters.
 const EMBED_LIMIT: usize = 200;
@@ -424,6 +427,17 @@ fn reset_command(pane: &PaneName) -> String {
 /// included.
 pub fn quoted(text: &str) -> String {
     excerpt(text)
+}
+
+/// `profile` as one shell word in a command a finding's message suggests: POSIX-single-quoted,
+/// each `'` becoming the four characters `'\''` and every other character kept (#662 B1). The
+/// command then pastes into a shell as it is, even for `Some Profile` or a name with a quote,
+/// `$` or a backtick, which [`quoted`]'s double quotes would let a shell expand. A
+/// [`ProfileName`] has no control character and at most 64 characters, so nothing needs
+/// escaping for a terminal and nothing is cut. `holler-cli` writes its own messages' commands
+/// the same way (`profile/delete.rs`); it depends on this crate, not the reverse.
+pub(crate) fn single_quoted(profile: &ProfileName) -> String {
+    format!("'{}'", profile.as_str().replace('\'', r"'\''"))
 }
 
 /// An adapter's `message`, to embed in a finding's message: one line, with every control

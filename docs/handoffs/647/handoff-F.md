@@ -1,8 +1,62 @@
 # Handoff-F: Phase 5 - #647 part 2: `unattached` and `agent-cannot-dispatch`
 
-**Date:** 2026-10-12 (11:10 MDT)
-**Branch:** `issue-647-implementation` (on top of T's RED `a3a9e2b`)
-**Issue:** #647 (brief `docs/handoffs/647-part2-brief.md`; A's PASS `handoff-A.md`; T's RED `handoff-T-red.md`)
+**Date:** 2026-10-12 (11:10 MDT; S REWORK round at about 12:15 MDT, see "Rework round" below)
+**Branch:** `issue-647-implementation` (on top of T's RED `a3a9e2b`; the rework round on top of S's `af34a4f`)
+**Issue:** #647 (brief `docs/handoffs/647-part2-brief.md`; A's PASS `handoff-A.md`; T's RED `handoff-T-red.md`; S's REWORK `handoff-S.md`)
+
+## Rework round (S REWORK, the script's Phase 6 call at `af34a4f`)
+
+S's verdict had one production item (1) and one test item (2). F did item 1. Item 2 is T's, at T-green.
+
+**Item 1, done: the W-3 clause quotes the profile name.** `crates/holler-pane/src/reconcile/observe/agent.rs` renders `pane.profile` in both places it appears, never through `Display`:
+- in the prose ("the pane is in the profile ..."): `quoted(profile.as_str())`, as S asked and as `reconcile/drift.rs:80` does;
+- as the suggested argument ("relaunch it with --profile ... too"): `single_quoted(profile)`, POSIX single quotes.
+
+For a member of `Some Profile` the clause now reads:
+
+```
+; the pane is in the profile "Some Profile", so relaunch it with --profile 'Some Profile' too, or the profile keeps the old agent and the next pass reports profile-drift
+```
+
+and for `It's $(id) Demo`, `... the profile "It's $(id) Demo", so relaunch it with --profile 'It'\''s $(id) Demo' too, ...`.
+
+The remedy is unchanged: the table's `holler pane relaunch PANE --agent=KEY`, with no profile, as S asked. The doc comment of `message` now says the profile name is quoted, and how.
+
+**One deviation from S's literal fix: the `--profile` argument is single-quoted, not `quoted`.** S prescribed `quoted` in both places. Its own journal entry hedges that choice: `quoted` "does not protect `$` or a backtick in a pasted name, which #662 B1's POSIX single quotes do", and single quotes are "not required" because the helper lives only in `holler-cli` and the message is prose. F used the stronger form for the argument only, for three reasons:
+- **S's stated goal is #662 B1's rule.** S asks for "one shell word, as the repository's rule asks (#662 B1)". That rule (`holler-cli/src/profile/delete.rs:202-205`) is POSIX single quoting for "a profile name in a command that a message suggests ... even for `Some Profile` or a name with a quote or `$(...)`". `quoted` is Rust `{:?}`, and a shell expands inside its double quotes: `--profile "It's $(id) Demo"` runs `id` (probe below).
+- **The repository applies that rule to messages.** Five messages that both name a profile and suggest a command with it use `{:?}` for the prose and `single_quoted` for the command: `delete.rs:158-167` and `:173-183`, `create.rs:251-259`, and `import/writes.rs:76-86` and `:179-192`. The reconcile step does the same (`profile_scope.rs:54-55`, pinned at `:555-559`, and stated by ADR-0021 section 3, lines 530-531).
+- **It is just as safe for a terminal.** A `ProfileName` is at most 64 characters with no control character, and a stored one deserializes through `parse`. So the single-quoted form keeps the findings module's "no control sequence reaches a terminal", and `quoted` never cuts the name.
+
+The prose keeps `quoted`, exactly as S asked.
+
+**Where the helper lives.** `holler-pane` had no POSIX quoting, and it cannot use `holler-cli`'s, because `holler-cli` depends on `holler-pane`. So `findings.rs`, the module of the finding sanitizers, gains `pub(crate) fn single_quoted(profile: &ProfileName)` beside `quoted` and `embedded`, and its module doc's "Untrusted text" bullet names it. It takes a `ProfileName`, not a `&str`, so no value with a control character can reach a message through it. `holler-cli` already keeps two copies of the `&str` form (`profile/delete.rs:206`, `pane/profile_scope.rs:270`). Folding them onto this one, made `pub`, is a follow-up. It is not done here because it would edit `holler-cli` code outside this story (a drive-by).
+
+**Probe.** Outside the repository, a scratch program held copies of `excerpt` and `single_quoted` and the clause's format string, and printed the two lines above. Typed into a shell, `set -- --profile 'Some Profile'` gives two words, the second `Some Profile`, and `set -- --profile 'It'\''s $(id) Demo'` gives `It's $(id) Demo` with nothing expanded. The double-quoted form expanded `$(...)`.
+
+**For T (S's item 2).** `a_profile_members_message_names_its_profile` still passes, because it checks only `--profile` and `blue`, and it still does not pin the quoting. The test S asks for should assert the form built here. For `in_profile("Some Profile")`, the message:
+- contains `--profile 'Some Profile'` and the prose `profile "Some Profile"`;
+- does not contain `--profile Some Profile` or `--profile "Some Profile"`.
+
+S's example string `--profile "Some Profile"` is the form F did not build (see the deviation). A name with a quote and `$(...)`, as `profile_scope.rs:555` uses, would also pin the escaping: `--profile 'It'\''s $(id) Demo'`. S's advisory 1 (a detached Claude Code pane raises one `unattached`) is T's too, if T takes it.
+
+**Tier 1, this round:**
+
+```
+$ rustfmt --edition 2021 --check crates/holler-pane/src/findings.rs crates/holler-pane/src/reconcile/observe/agent.rs   -> clean
+$ cargo test -p holler-pane                                   -> every binary ok (doc tests included), 0 failed
+$ cargo test -p holler-cli --test pane_verbs -- doctor        -> 71 passed, 0 failed (a_profile_members_message_names_its_profile ok)
+$ cargo clippy --workspace --all-targets -- -D warnings       -> exit 0 (re-checked holler-pane after a touch: exit 0)
+$ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane [--document-private-items]   -> exit 0, both
+$ bash scripts/lint.sh                                        -> exit 0 (warns only; findings.rs 458 lines, agent.rs 149)
+$ bash scripts/changelog-check.sh                             -> changelog-check: ok
+$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   -> see "Workspace run" below
+```
+
+**Workspace run.** 171 test binaries: 2686 passed, 2 failed, 39 ignored (the opt-in real tests), exit 101. The machine was shared with other sessions' test suites during the run, at a load average of 25 to 31 on 24 cores. Neither failure is in code this round or this story touches, and both binaries pass 3 of 3 when re-run on their own (at a load of about 6):
+- `holler-cli` `body_run_test::fresh_hello_and_presence_on_every_reconnect`: "hub did not report listening within 10s: Disconnected" (`body_run_test.rs:499`). The restarted hub exited before it listened, after 0.74 s, on the same port as the hub it replaces.
+- `holler-hub` `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`: the `assert_ne!` of the pane file's inode before and after (`profile_rename_faults_test.rs:250`) saw the same number, 60179820. A filesystem may reuse a freed inode for the next atomic write. This is the hub's own profile registry (`hub/profiles.json`), not a pane profile.
+
+T's run at `4bd4e75` passed every test (2688 of 2688), and production code differs from it only by this round's two files.
 
 ## What was done
 
@@ -179,11 +233,13 @@ This answers A's W-7: there is a limit, and it is not used. A limit cannot promi
 
 ## Evidence appendix
 
-`docs/handoffs/647/evidence.md`: 15 entries, each with its `file:line` and a verbatim excerpt.
+`docs/handoffs/647/evidence.md`: 15 entries, each with its `file:line` and a verbatim excerpt. The rework round adds 7 under "Added by F in the S REWORK round": #662 B1's rule, the mixed prose-and-command messages, the reconcile step's pinned single quotes, ADR-0021 section 3's statement, `ProfileName`'s grammar and deserialization, `quoted`'s `{:?}` form, and doctor printing a message as it is.
 
 ## Tests that look wrong (for T)
 
 None.
+
+Rework round: no authored test is wrong. S's item 2 is a missing test, not a wrong one: `a_profile_members_message_names_its_profile` passes with or without item 1. The expected text for the pinning test is under "Rework round", "For T".
 
 T resolved acceptance 9's "a message without an agent is skipped" in favour of the ADR's "`None` when it recorded none": such a message is a turn `TurnAgent { agent: None, can_dispatch: None }`, and that is what was built.
 
@@ -193,6 +249,9 @@ T resolved acceptance 9's "a message without an agent is skipped" in favour of t
 - **W-3, for the operator:** whether the remedy itself should carry `--profile P` for a member. Today the message says it, and the remedy is the table's.
 - **W-2, for whoever merges second of #839 and this story:** fold the two remedy mechanisms in `findings.rs` into one, and file the follow-up A named.
 - **Brief Q1** (a verb that attaches a client) **and Q2** (merging before the cutover sign-off) are still the operator's. The guide's section 12 and the ADR's "Deferred" list name the verb.
+- **Rework round, a follow-up candidate:** `holler-cli` keeps two `&str` copies of `single_quoted` (`profile/delete.rs:206`, `pane/profile_scope.rs:270`), and `holler-pane` now has a third, typed `&ProfileName`. Every `holler-cli` call site quotes a `ProfileName`, so a later change can make the `holler-pane` one `pub` and fold both copies onto it. This story does not, because those files are outside it.
+- **Rework round, two load-sensitive flakes outside this story** (see "Workspace run"): `body_run_test::fresh_hello_and_presence_on_every_reconnect` (a hub restarted on the same port) and `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds` (an inode reused). Each passed 3 of 3 alone. They are follow-up candidates if they recur, and they are not #847's flake.
+- **Rework round, a limit kept from the precedent:** a profile name with a leading `-` (`ProfileName` allows `-x`) is single-quoted too, but clap still reads `--profile '-x'` as an option, so for that name the suggested argument does not parse. `profile_scope.rs`'s doc accepts the same limit for the reconcile step. The joined `--profile='-x'` would parse, but no message in the repository uses that form, so F kept the precedent's.
 
 ## Files changed
 
@@ -225,3 +284,10 @@ crates/holler-cli/src/pane/wiring/bind.rs
 ```
 
 Records: `docs/handoffs/647/handoff-F.md`, `docs/handoffs/647/evidence.md`, and the `decisions.md` entry.
+
+Rework round, production files changed (both already in the list above):
+
+```
+crates/holler-pane/src/findings.rs                    (single_quoted; the module doc's untrusted-text bullet)
+crates/holler-pane/src/reconcile/observe/agent.rs     (the W-3 clause and the doc comment of message)
+```
