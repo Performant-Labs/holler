@@ -207,3 +207,17 @@ Facts in unchanged code that T's tests rely on and F's entries do not cover. Exc
   >             )
   >         });
   > ```
+
+## F (S's REWORK, cycle 2: the merge with `main`)
+
+- **Fact:** once `origin/main` (`4e691d9`, #835's PR #860) is merged in, ADR-0021's "Decisions taken" already holds
+  decisions 30 and 31, both #835's. So #853's pair is numbered 32 and 33, and every #853 cite says 32 or 33. Where an
+  earlier entry of this run says "decision 31" (F's entry on the failure envelope), it means the decision now numbered 33.
+  **Source:** `docs/adr/ADR-0021.md:1584` and `docs/adr/ADR-0021.md:1587`
+  **Verbatim excerpt:**
+  > ```markdown
+  > 30. **`pane import` leaves a pane whose tmux session runs Claude Code alone, and `--adopt-claude-code` will adopt it**
+  > ```
+  > ```markdown
+  > 31. **`HerdrPort::observe_pane` is required** (operator, 2026-10-11, #835, section 14): the operator folded this change to
+  > ```

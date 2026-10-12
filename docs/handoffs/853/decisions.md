@@ -365,3 +365,78 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - private names, IPs, home paths and secrets, in the diff and in each branch commit;
     - consumers of `profile apply` in `src`, `scripts` and `plugins`: none;
     - other tests that run `profile apply` (`pane_claude/mixed.rs`).
+
+## F, S's REWORK (the script's phase 6, cycle 2): merge `origin/main`, renumber #853's decisions to 32 and 33: 2026-10-12T06:47-06:00 (MDT)
+
+- **Decided:** S's item 1 is done for production code and docs (`handoff-F.md`, which replaces cycle 1's handoff at
+  `07a576c`). `archChanged: false`.
+  - **The merge.** I ran `git merge --no-ff --no-commit origin/main`. `origin/main` was at `4e691d9`, #835's PR #860,
+    merged at 06:29 MDT.
+    - It was clean. Git auto-merged `CHANGELOG.md`, ADR-0003, ADR-0021 and the guide.
+    - The staged tree equalled `git merge-tree --write-tree 21b29a0 4e691d9` (`c2941f8`).
+    - F does not commit. `MERGE_HEAD` stays for the script's phase commit, which concludes the merge as a two-parent
+      commit, as #835's `526bbd3` was.
+    - It is not a rebase: `05d8e6a` is already on origin, and the PR phase's push must fast-forward.
+  - **The list.** #853's `30.` and `31.` are now `32.` and `33.`, and the list reads 1 to 33, each once and in order.
+    The blank line the merge left between #835's 31 and #853's pair is gone, so the list is tight again, as on `main`.
+  - **The cites in production code and docs (6 of S's 13):**
+    - ADR-0021 `:742` (now 32), `:744` (33) and `:860`, section 9's row (33);
+    - `CHANGELOG.md:615` ("(32 and 33)");
+    - `profile/apply.rs:12` and `:150` (33).
+  - **The other 7 are test comments, which are T-green's,** and handoff-F lists them for T. They are `order.rs:2,28,95`
+    (30 becomes 32), `refused.rs:2,31,222` (31 becomes 33) and `plan.rs:198` (31 becomes 33). F edits no test.
+  - **S's advisory 2: done.** ADR-0021 `:713` now reads "0 for a dry run that does not fail, or a real run with no
+    failed or refused step, which prints its steps", in S's words. It now agrees with the section's own dry-run
+    paragraph, the guide and the code.
+  - **Not taken, by owner:** advisory 1, the history rewrite (the operator's; F rewrites no history); 3 (#664's entry
+    stays as written); 4 (parked); 5 and 6 (T's); 7 (the merging agent's); 8 (no edit to the test kit's `herdr.rs`).
+- **Assumed:**
+  - The phase commit (`git add -A`, then `git commit -m ... --allow-empty`) concludes the merge in progress, as it did
+    for #835. The hooks allow it:
+    - `commit-msg` accepts the script's Conventional subject;
+    - `prepare-commit-msg` adds the trailer for a `-m` message;
+    - gitleaks scans the staged merge, which is `main`'s reviewed content plus this cycle's text.
+  - `origin/main` stays at `4e691d9` until that commit. I fetched before the merge and again at 07:06 MDT, and
+    `git ls-remote` agreed. If it moves, the next phase merges again.
+- **Hedged:**
+  - **Advisory 2 and the blank line go past item 1's letter.** S offered advisory 2 while F was in the file, and the
+    text is S's own. The blank line sits inside the list S named. Nothing else outside the item changed.
+  - **Advisory 1 is now harder.** With the merge staged on top of `0064fac`, rewriting that commit means replaying the
+    merge (`git rebase --rebase-merges` from `05d8e6a`) or redoing it. S judged that it discloses nothing new.
+  - **A flake on `main`, not this change.** The first workspace run failed 1 test of 2,606:
+    `holler-hub` `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`
+    (#665), at its `assert_ne!` on the pane file's inode (`:250`).
+    - Saving the file back writes a new file, and ext4 can hand it the inode number the first replace just freed.
+      Run alone, the test failed 1 time in 20.
+    - `crates/holler-hub` is byte-identical to `main` and to `21b29a0`.
+    - No issue exists for it (searched). Filing one is for the main session, since it is an outward action.
+    - The rerun's one failure is #847's open load flake (`remote_admin_test`). It passed 6 times in 6 alone.
+- **Evidence:**
+  - **Ran on the merged tree (warm build):**
+    - the workspace verify command with `--no-fail-fast`: 167 binaries, 2,605 passed, 1 failed (the flake above), 37
+      ignored;
+    - the rerun: 2,605 passed and 1 failed, a different test this time. It was `remote_admin_test::
+      remote_admin_traffic_never_moves_the_bodys_last_seen`, the load flake open as #847 (`last_seen` moved 1 s in its 2 s
+      window). The inode test passed. Every test passed in at least one of the two full runs;
+    - `profile_rename_faults_test` alone, 20 times: 19 passed, 1 failed;
+    - `remote_admin_test` alone, 6 times: 6 passed. The file, `holler-hub`, `holler-body` and `holler-proto` are
+      identical to `main` and to `21b29a0`;
+    - from the first run: `docs_pane_control_test` 19 (18 before #835's case), `docs_cli_test` 3, `cli_surface_test` 3,
+      `profile_verbs` 118, `fake_herdr_test` 25, `herdr_conformance_test` 22, `plan_splits_test` 20, `pane_verbs` 347,
+      `wire_selftest` 3;
+    - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0, with `holler-cli` re-checked by touching its
+      sources;
+    - `bash scripts/lint.sh`: exit 0, with every warning on a file this cycle does not touch;
+    - `bash scripts/changelog-check.sh`: ok. `cargo machete`: clean. `git diff --check` and `--cached --check`: clean;
+    - `rustfmt --edition 2021 --check` on `profile/apply.rs`: clean.
+  - **Checks:**
+    - S's grep finds only the 7 test comments.
+    - The decision list holds 1 to 33, each once and in order.
+    - Against `main`, the PR diff covers the same 23 files outside `docs/handoffs/` as before the merge, with the same
+      line counts. The only differences are this cycle's edits.
+  - **Read:**
+    - `handoff-S.md`, `handoff-A-dup.md`, `handoff-T-green.md`, this journal, `evidence.md` and the brief;
+    - #835's journal on `main`, for the `--no-commit` merge precedent;
+    - the script's `buildPhaseCommitTaskPrompt`, and its routing after an S REWORK (F, then T-green);
+    - `.githooks/{pre-commit,commit-msg,prepare-commit-msg}`;
+    - the merged ADR-0021 list and cites, and the guide's diff against `main`.

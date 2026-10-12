@@ -1,192 +1,194 @@
-# Handoff-F: Phase 6 (the script's numbering; F) - `profile apply` creates column 1 first, and a real run with a refused step exits 3
+# Handoff-F: Phase 6 (the script's numbering; F), cycle 2 - S's REWORK: merge `origin/main`, renumber #853's ADR-0021 decisions to 32 and 33
 
-**Date:** 2026-10-12
-**Branch:** issue-853-implementation (on `0064fac`, T's RED)
+**Date:** 2026-10-12, 06:55 MDT
+**Branch:** `issue-853-implementation`, on `21b29a0` (S's REWORK), with `origin/main` (`4e691d9`) merged in but not
+committed
 **Issue:** #853
+
+This replaces cycle 1's handoff, which is in git at `07a576c`. Cycle 1's design decisions, reuse and evidence all still
+hold. This cycle changes no behaviour.
 
 | Field | Value |
 |-------|-------|
 | GitHub issue | #853 |
 | Working branch | `issue-853-implementation` (worktree `.claude/worktrees/0853-apply-grid-order`) |
-| Build plan phase | none; the issue is the spec (epic #633), with the brief `docs/handoffs/853-brief.md` and the amendment in ADR-0021 section 8 |
-| Input documents read | the brief, handoff-A.md (round 2), handoff-T-red.md, decisions.md, the amendment diffs `1f4ab40` and `05d8e6a`, T's RED diff `0064fac`, ADR-0021 sections 8 to 10, the guide's sections 3, 6 and 9 |
-| Acceptance criteria count | 6 (the brief's "Acceptance, as it can be met") |
+| Build plan phase | none. The issue is the spec (epic #633), with the brief `docs/handoffs/853-brief.md` and ADR-0021 section 8 |
+| Input documents read | `handoff-S.md` (the REWORK); `handoff-A-dup.md`, `handoff-T-green.md`, `decisions.md`, `evidence.md`; the brief; cycle 1's `handoff-F.md`. Also #835's journal on `main` (the merge precedent), the script's phase-commit prompt and the repo's git hooks |
+| Acceptance criteria count | 1 REWORK item (S's item 1, parts a to d). S found the brief's 6 criteria met on the branch |
 | Handoff document path | `docs/handoffs/853/handoff-F.md` (this file) |
 
-The run is automated, so the table is recorded here instead of being confirmed by a person. The scope cap did not apply:
-the brief scopes one story, A passed it, and the change is three small production edits plus their docs.
+The run is automated, so this table is recorded here rather than confirmed by a person. The scope cap does not apply:
+the cycle is one REWORK item, made of a merge and text edits.
 
 ## What was done
 
-- `crates/holler-pane/src/tx_apply.rs`: `cell_key` is now `(workspace, col != 1, row, col)`. That is creation order: by
-  workspace, then the workspace's column-1 cells by row, then every other cell by row and column. Its doc names
-  `plan_splits` as the rule it mirrors. The module doc, the doc of `Applied.steps` and the doc of `plan` say the new
-  order. Nothing else in the engine changed.
-- `crates/holler-cli/src/profile/apply.rs`: `refused(&Applied)` sits beside `stopped()`. `run` now asks
-  `stopped(..).or_else(|| refused(..))`, so the exit is 1 for a failed step, else 3 for a real run with a refused step,
-  else 0. The module doc and the `ProfileApply` clap doc (the `--help` text) state the new order and exit code.
-- `crates/holler-pane-testkit/src/herdr.rs`: `check_split` (split-only placement) follows ADR-0021 section 10's rule,
-  with two private helpers, `last_row` and `end_of`. The rule for holes is an `ASSUMPTION (#640)` comment. The docs of
-  `Placement::SplitOnly` and `check_split` are updated, and the stale `GRID_UNREACHABLE` assumption is refreshed.
-- `crates/holler-adapter-herdr/Cargo.toml`: a comment only. The test-kit dev-dependency's comment now also names the
-  cross-check of `FakeHerdr` against `plan_splits`.
-- `docs/pane-control.md`:
-  - section 3's `profile apply` entry (A's warn 5) states the order and the exit 3;
-  - section 6 narrows the take-over-note sentence (A's warn 4, option a).
-- `docs/adr/ADR-0021.md`, section 8: the same narrowing of the take-over-note clause (A's warn 4, option a).
-- `CHANGELOG.md`: a new `### Bug Fixes` under `## [Unreleased]`. It links #853 and states both the order and the exit
-  code.
-- `docs/handoffs/853/evidence.md` (new) and a decisions.md entry.
+- **(a) The merge.** I ran `git merge --no-ff --no-commit origin/main`. `origin/main` was at `4e691d9`, #835's PR #860,
+  merged at 06:29 MDT.
+  - It was clean. Git auto-merged the four files both sides touch: `CHANGELOG.md`, `docs/adr/ADR-0003.md`,
+    `docs/adr/ADR-0021.md` and `docs/pane-control.md`.
+  - Before my edits, the staged tree matched `git merge-tree --write-tree 21b29a0 4e691d9`: both are `c2941f8`.
+  - **I did not commit it.** `MERGE_HEAD` (`4e691d9`) is left for the script's phase commit. That commit runs
+    `git add -A` and `git commit`, which concludes the merge as a two-parent commit. #835's run did the same
+    (`526bbd3`).
+  - It is a merge, not a rebase. `origin/issue-853-implementation` already holds `05d8e6a`, and the PR phase's push
+    must be a fast-forward.
+- **(b) The decision list.** In ADR-0021's "Decisions taken", #853's `30.` is now `32.` (`:1591`) and its `31.` is now
+  `33.` (`:1597`).
+  - The list reads 1 to 33, each number once and in order.
+  - I also removed the blank line the merge left between #835's 31 and #853's pair. The list is one tight list again,
+    as it is on `main`.
+- **(c) The cites in production code and docs.** These are 6 of S's 13:
+  - `docs/adr/ADR-0021.md:742` now cites decision 32, and `:744` cites decision 33.
+  - `docs/adr/ADR-0021.md:860`, section 9's `profile apply` row, cites decision 33.
+  - `CHANGELOG.md:615` says "(32 and 33)".
+  - `crates/holler-cli/src/profile/apply.rs:12` and `:150`, both doc comments, cite decision 33.
+  - The other 7 are comments in test files, which are T-green's. They are listed under "Tests that look wrong" below.
+- **S's advisory 2 (optional): done.** `docs/adr/ADR-0021.md:713` now reads "0 for a dry run that does not fail, or a
+  real run with no failed or refused step, which prints its steps". The wording is S's.
+- `docs/handoffs/853/evidence.md`: one new entry (`main`'s decisions 30 and 31 are #835's).
+- `docs/handoffs/853/decisions.md`: this cycle's entry.
 
 ## Design decisions
 
-- **The key.** `(&str, bool, u16, u16)` with `col != 1` as the second element, so `false` (column 1) sorts first. It is
-  exactly the planner's partition (`plan.rs:98-100`): column-1 cells by row, then the rest by `(row, col)`. The sort is
-  still the stable `sort_by`, so two specs of one cell keep P's order. I considered a key of
-  `(workspace, col.min(2), row, col)`. It gives the same order, but `col != 1` names the rule.
-- **The exit decision lives in one expression in `run`.** `stopped` first, then `refused`, then the data. The exit code
-  comes from `emit` through `class_of` on the first refused step's code. Every refused step's code is refusal-class by
-  construction (`halted` re-codes `usage` as `spec-not-launchable`, and a failure-class code makes a step `failed`), so
-  the verb holds no exit table.
-- **The message.** Built as `stopped()` builds its own: `quoted(&step.pane)`, the error's code, and each acted step's
-  `detail` as `reconciled()` already left it (it ends with the reconcile step, once). `<M>` is the step count minus the
-  refused steps. `refused()` returns `None` for a dry run, so a dry run keeps exit 0 and prints its plan.
-- **The carried detail keys on `Step::acted` alone** (A's warn 3, and T's `rest == ""` assertions for rows a and e, a
-  failed probe and the relaunch rules' `usage`).
-- **A's warn 4: option (a), decided under the standing orders and recorded in decisions.md.** A relaunch refused before
-  its act after a `--take-over` has `acted: false`, so its take-over note is not carried. The ADR's rule sentence
-  already said only an acted step's detail follows; only its "so a take-over note is not lost" clause over-claimed. I
-  narrowed that clause in the ADR and the guide, which now say the pane's new profile shows in `pane list` and
-  `profile show`.
-  - Rejected: (b), carrying every refused step's detail, which changes the rule and contradicts T's tests.
-  - Parked for the operator: carrying a not-acted step's detail when it holds a note. That needs a new `Step` signal
-    or a string test on `detail`, and A ruled out both.
-- **The fake's rule.** In a row that holds a pane, a new cell is accepted only just right of its last pane. A new row
-  is accepted only at `c1`, just below the last row, when that row is one pane at `c1`. An empty workspace accepts only
-  `r1c1`. For a grid with no hole this is exactly the planner's single-cell rule; T's cross-check enumerates every such
-  grid up to 3 by 3. The fake can have holes after `close` or `vanish`, and real Herdr cannot, so the hole rule is an
-  `ASSUMPTION (#640)`: a row's last pane is its rightmost, and the last row is the highest-numbered that holds a pane.
-  The new rule only narrows the old one, so no cell the old fake refused is now accepted. Overflow-safe comparisons
-  (`checked_sub`) avoid a `u16` wrap at the edge.
-- **One message for every fake refusal.** It names the cell, as T requires, and states the rule. The tests compare the
-  engine's detail read back from the engine, never a literal, so the wording is free.
-- **CHANGELOG.** #664's own Unreleased entry still states the old order and exit 0, and I left it as written. The file
-  does not rewrite an earlier entry that a later story supersedes: #664's entry still says the verb answers
-  `not-implemented` until #649, which has since landed. The new Bug Fixes entry says what changed and why.
+- **The merge is staged, not committed.** F does not commit, and the script's phase commit concludes a merge that is
+  in progress.
+  - Precedent: #835's T-red (`526bbd3`) and its later F cycles merged `main` the same way.
+  - The hooks allow it. The `commit-msg` hook accepts the script's Conventional subject. `prepare-commit-msg` adds the
+    `Co-Authored-By` trailer for a `-m` message. The pre-commit gitleaks scan runs on the staged merge.
+- **The blank line.** I dropped it so that `main`'s list stays tight. It sits inside the lines that S's item (b) names.
+- **Advisory 2.** S offered this edit while F was in the file anyway.
+  - It fixes the one sentence in section 8 that leaves out a dry run planning a refused step. The section's own
+    "A `--dry-run` is not changed" paragraph, the guide and the code all give that run exit 0.
+  - I used S's wording and did not rewrap the paragraph, so the diff is one line.
+- **Advisories I did not take, by owner:**
+  - Advisory 1 (rewriting `0064fac` before the push) belongs to the operator, and F rewrites no history. Now that the
+    merge sits on top, a rewrite has to replay the merge (`git rebase --rebase-merges` from `05d8e6a`) or redo it.
+  - Advisory 3 (#664's CHANGELOG entry): left as written, which is the repo's practice.
+  - Advisory 4: still parked for the operator.
+  - Advisories 5 and 6 are test-side options, so they are T's.
+  - Advisory 7 belongs to the merging agent.
+  - Advisory 8 (size): this cycle does not touch the test kit's `herdr.rs`, which stays at 598 lines.
 
 ## Reuse / extend-vs-new
 
-This follows A's map (handoff-A.md, "Reuse & Analogous-Feature map"):
-
-- **EXTEND `cell_key`.** It stays private, and there is no second order function and no public order API.
-- **EXTEND the verb with `refused()` beside `stopped()`.** It reuses `reconciled()`'s details, `quoted` and
-  `ErrorCode::from`. There is no second reconcile builder and no exit table.
-- **EXTEND `FakeHerdr`'s `Placement::SplitOnly` (`check_split`).** There is no new double, and the test kit gains no
-  dependency on the adapter.
-- **`Step` is unchanged.** It gets no new field (A's warn 4).
+No new object: this cycle is a merge and text. Cycle 1's map (handoff-A.md) still stands: `cell_key`, `refused()`
+beside `stopped()`, and `check_split`.
 
 ## Architecture notes for A
 
-- **Layers.** The changes touch the engine (`holler-pane`), one verb (`holler-cli`) and the test kit's fake
-  (`holler-pane-testkit`). There is no new dependency, module or public item.
-  - The new `last_row` and `end_of` are private methods of the fake's private `Workspace`.
-  - `refused` is a private fn of the verb.
-- **Public behaviour.**
-  - The order of `steps` in the output changes, a dry run's included.
-  - A real run with a refused step now exits 3 and prints the failure envelope with the one-line message.
-  - The step shape, the wire, records, codes and `class_of` are unchanged.
-  - The `HerdrPort`, the planner and the adapter are unchanged.
-- **Docs.** The contract was amended first (`1f4ab40`, `05d8e6a`); F's doc edits are A's warns 4 and 5. A's warn 9 (the
-  brief's overlap paragraph with #835, and who renumbers decisions 30 and 31) is O's text, and F changed nothing for
-  it.
+Nothing from #853 changes.
+
+- The merge brings in #835's code exactly as it was merged on `main` and reviewed in #835's own run:
+  `HerdrPort::observe_pane` and `HostPort::foreground_commands` become required, and the import path changes.
+- The merge changes none of #853's code or test files. The only files both sides touch are the four docs.
+- Against `main`, the PR diff is #853's alone. It covers the same 23 files outside `docs/handoffs/`, with the same
+  per-file line counts as against the old base. The only differences are this cycle's edits.
+
+`archChanged: false`.
 
 ## Deviations from spec / wireframe
 
-None in behaviour. One wording decision the brief left open: A's warn 4, option (a). It is above and in decisions.md.
+None. Two edits go slightly past the letter of item 1: the blank line, which is inside the list S named, and advisory
+2, which S offered in S's own words.
 
-## Tier 1 self-check (incl. tests now GREEN)
+## Tier 1 self-check (on the merged tree)
 
-These ran in the worktree on a warm build, and no test file was edited.
+These ran in the worktree on a warm build, on the staged merge plus this cycle's edits. No test file was edited.
 
 ```
-cargo test -p holler-cli --test profile_verbs
-test result: ok. 118 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (RED: 105 passed, 13 failed)
+cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   (the verify command)
+run 1 (06:50-06:57 MDT): 167 binaries, passed=2605 failed=1 ignored=37
+  failed: holler-hub profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds
+          (:250, assert_ne! on the pane file's inode: left 60177415, right 60177415)
+run 2 (07:05-07:12 MDT): 167 binaries, passed=2605 failed=1 ignored=37
+  failed: holler-cli remote_admin_test::remote_admin_traffic_never_moves_the_bodys_last_seen
+          (:380, last_seen 1791810627 vs 1791810628), the load flake open as #847; the inode test passed
+  -> every test passed in at least one of the two full runs
 
-cargo test -p holler-pane-testkit
-fake_herdr_test: ok. 25 passed; 0 failed      (RED: split_only_mode_adds_a_row_only_below_a_last_row_of_one_pane failed)
-herdr_conformance_test: ok. 22 passed; 0 failed   (both placements; split-only still passes)
-every other target: ok
+cargo test -p holler-hub --test profile_rename_faults_test, 20 times   -> 19 passed, 1 failed (ext4 inode reuse, below)
+cargo test -p holler-cli --test remote_admin_test, 6 times             -> 6 passed
+crates/holler-hub, crates/holler-body, crates/holler-proto, remote_admin_test.rs: identical to main and to 21b29a0
 
-cargo test -p holler-adapter-herdr --test plan_splits_test
-test result: ok. 20 passed; 0 failed   (RED: the cross-check failed at r2c1 on the grid [2])
+From run 1, per binary (S's item d names the first three):
+docs_pane_control_test 19 passed (18 before the merge; #835 added one) | docs_cli_test 3 | cli_surface_test 3
+profile_verbs 118 | fake_herdr_test 25 | herdr_conformance_test 22 | plan_splits_test 20 | pane_verbs 347
+profile_apply_scenario 5 passed, 3 ignored (opt-in) | wire_selftest 3 | import_test 5
 
-cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load   (the pipeline's verify command)
-167 test binaries: passed=2594 failed=0 ignored=37; exit=0
+cargo clippy --workspace --all-targets -- -D warnings   -> exit 0 (holler-cli re-checked after touching its sources)
+bash scripts/lint.sh                                    -> exit 0 (all warnings on files this cycle does not touch;
+                                                           profile/apply.rs 225, tx_apply.rs 565, herdr.rs 598)
+bash scripts/changelog-check.sh                         -> changelog-check: ok
+cargo machete                                           -> no unused dependencies
+git diff --check; git diff --cached --check             -> clean
+rustfmt --edition 2021 --check crates/holler-cli/src/profile/apply.rs -> clean
 
-cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test --test cli_surface_test   (re-run on the final docs)
-ok. 18 passed / ok. 3 passed / ok. 3 passed
-
-cargo clippy -p holler-pane -p holler-pane-testkit -p holler-cli -p holler-adapter-herdr --all-targets -- -D warnings
-Finished, no warnings
-
-bash scripts/lint.sh          -> exit 0 (herdr.rs 598 lines, tx_apply.rs 565, profile/apply.rs 225; none newly warned)
-bash scripts/changelog-check.sh -> changelog-check: ok
-rustfmt --edition 2021 --check on the three changed .rs files -> clean (they were clean at HEAD)
-./target/debug/holler profile apply --help -> renders the new order and exit-code text
+S's check 1: git grep -n -i -E "decision(s)? (30|31)\b|\(30 and 31\)" -- crates docs/adr docs/pane-control.md CHANGELOG.md
+  -> only the 7 test comments listed for T below
+S's check 2: ADR-0021 "Decisions taken" -> 1..33, each once, in order
 ```
 
-Not run, because they are T-green's (Tier 2):
+**The two failures are flakes in code that neither #853 nor the merge touches.**
 
-- the opted-in scratch tests (`grid.rs`, `probe.rs`, `scenario.rs`; Herdr 0.9.1 must be first on `PATH`; on this
-  machine it is in `~/.local/bin`, and the default `herdr` is 0.8.2);
-- A's warn 1 check, which reverts `cell_key` on the tightened fake.
+- **The inode test (#665).** It asserts that the pane file has a new inode after a save and a save-back. But each save
+  writes a new file and renames it over the old one, so on ext4 the save-back can be given the inode number that the
+  first replace just freed. No issue tracks it (searched). Filing one is an outward action, so I leave it to the main
+  session.
+- **`remote_admin_test` (#508).** This is #847's open flake: `last_seen` moves 1 s inside its 2 s window under a loaded
+  workspace run. The load average was 7 to 8, with other sessions running.
 
 ## Evidence appendix
 
-`docs/handoffs/853/evidence.md`. It covers:
-
-- the planner's partition and its refusal below a wider row;
-- `halted`'s refused-step invariants;
-- `class_of` for open codes;
-- `emit`'s exit code and its text form;
-- the failure envelope's absent `data`;
-- `reconciled()`;
-- the launch act's `acted = entered` with `ensure_pane` first;
-- the fake's check order;
-- the conformance suite's cell use.
+`docs/handoffs/853/evidence.md`. Cycle 1's entries and T-green's still stand. This cycle adds a section with one entry:
+on the merged tree, ADR-0021's decisions 30 and 31 are #835's (`docs/adr/ADR-0021.md:1584` and `:1587`). The entry
+also says that the earlier "decision 31" in F's failure-envelope entry now means decision 33. As S asked, the run's
+handoffs keep their history as written.
 
 ## Tests that look wrong (for T)
 
-None. Every test T authored passes as written.
+No test is wrong in behaviour, and every test passes on the merged tree. But 7 test comments still cite #853's old
+decision numbers, and S's item (c) needs them changed. S assigns them to T-green, and F does not edit tests:
+
+- `crates/holler-cli/tests/profile_verbs/apply/order.rs:2`, `:28` and `:95`: "decision 30" becomes 32.
+- `crates/holler-cli/tests/profile_verbs/apply/refused.rs:2`, `:31` and `:222`: "decision 31" (or "Decision 31")
+  becomes 33.
+- `crates/holler-cli/tests/profile_apply_scenario/plan.rs:198`: "decision 31" becomes 33.
+
+The item is done when this finds nothing:
+
+```
+git grep -n -i -E "decision(s)? (30|31)\b|\(30 and 31\)" -- crates docs/adr docs/pane-control.md CHANGELOG.md
+```
+
+Today it finds exactly these 7 lines.
 
 ## Known issues
 
-- **Public-repository rule, in T's text.** T's decisions.md entry ("T, author tests (RED)", the "Incident, no harm"
-  bullet) names the operator's live Herdr sessions by their machine-derived names. The stack rules forbid machine or
-  account names anywhere in this public repo. I did not edit another phase's append-only entry. T (at T-green) or O
-  should replace the two names with a neutral placeholder before the PR; the PR is squash-merged, so the final file is
-  what reaches `main`.
-- **Parked for the operator** (the warn 4 follow-up): a relaunch refused before its act after a `--take-over` does not
-  say in the one line that the pane moved. The ADR and the guide now say so, and `pane list` and `profile show` show
-  the move. Carrying it would need a `Step` signal, which A ruled out.
+- **S's item 1 is done for production code and docs.** Its 7 test-comment cites are waiting for T-green (above).
+- **Advisory 1 (privacy in unpushed history) is still open for the operator.** T-red's `0064fac` and F's `07a576c`
+  carry the operator's machine-derived Herdr session names in decisions.md. They are not in the tree, and S judged that
+  they disclose nothing new. After the phase commit, a rewrite has to replay the merge.
+- **Two flakes from `main` showed up in the workspace runs** (Tier 1, above). Neither is in code this change or the
+  merge touches.
+  - `profile_rename_faults_test`'s inode assertion (#665) has no issue yet. The main session can file one.
+  - `remote_admin_test`'s `last_seen` assertion is #847.
+  - CI runs the same workspace suite, so either could fail the PR's CI once. A re-run is the remedy, not a code change.
 
 ## Files changed
 
 Production:
 
-- `crates/holler-pane/src/tx_apply.rs`
-- `crates/holler-cli/src/profile/apply.rs`
-- `crates/holler-pane-testkit/src/herdr.rs`
-- `crates/holler-adapter-herdr/Cargo.toml` (comment only)
+- `crates/holler-cli/src/profile/apply.rs` (two doc comments)
 
 Docs:
 
 - `docs/adr/ADR-0021.md`
-- `docs/pane-control.md`
 - `CHANGELOG.md`
+
+Staged by the merge and not edited by F: #835's files from `main` (`git diff --cached --name-only HEAD`). None of them is
+a #853 code or test file.
 
 Run artifacts:
 
-- `docs/handoffs/853/handoff-F.md`
-- `docs/handoffs/853/evidence.md`
-- `docs/handoffs/853/decisions.md` (appended)
+- `docs/handoffs/853/handoff-F.md` (this file, replacing cycle 1's)
+- `docs/handoffs/853/evidence.md` (one entry appended)
+- `docs/handoffs/853/decisions.md` (this cycle's entry appended)

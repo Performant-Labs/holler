@@ -9,7 +9,7 @@
 //!   with the message `apply stopped at <pane> (<action>): <step error>; <N> later step(s)
 //!   skipped`. No plan and no `skipped` list is printed, for a dry run too; the engine's result
 //!   holds them.
-//! - **3, a real run with a `refused` step** (#853, ADR-0021 decision 31): only the refusal,
+//! - **3, a real run with a `refused` step** (#853, ADR-0021 decision 33): only the refusal,
 //!   coded as the first refused step's error, with the message `apply refused <N> step(s):
 //!   <pane> (<code>), ...; <M> other step(s) ran`, then `; <pane>: <detail>` for each refused
 //!   step that had started its act. Refusals do not stop the run, so every step ran; the
@@ -147,7 +147,7 @@ fn stopped(applied: &Applied) -> Option<ErrorBody> {
 }
 
 /// The refusal a real run with a `refused` step and no `failed` one prints, and nothing else
-/// (#853, decision 31): `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s)
+/// (#853, decision 33): `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s)
 /// ran`, naming every refused step in step order, coded as the first one's error (a refusal, so
 /// exit 3). Then each refused step whose launch or relaunch had started its act adds
 /// `; <pane>: <detail>`, its detail as [`reconciled`] left it, ending with the reconcile step; a

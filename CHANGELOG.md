@@ -128,6 +128,22 @@ fills this file in at release time.
   refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
   again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
   named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, the import leaves Claude Code panes alone (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import` no longer records a pane whose tmux session runs Claude Code as an OpenCode pane
+  ([#835](https://github.com/Performant-Labs/holler/issues/835)). The launcher's files cannot tell the two apart, so the
+  import now reads the command name of the foreground process of each tmux pane in a pane's tmux session (a name only,
+  never a command line), through `HostPort::foreground_commands`. A pane whose tmux session has a foreground
+  process named exactly `claude` gets the new finding `harness-claude-code` (info) and no record, and blocks nothing.
+  Any other name, or no process, is imported as OpenCode, as before. A pane whose tmux session cannot be read gets the
+  new problem `harness-unreadable` and no record, so a real run is refused (`import-blocked`); a failed `ps`, a warning
+  until now, is that problem too. `--adopt-claude-code`, which will adopt those panes, is refused (`usage`, exit 2)
+  until the adoption step of [#831](https://github.com/Performant-Labs/holler/issues/831) lands. The rule has
+  limits: tmux names only the foreground process, so a Claude Code pane is taken for OpenCode when its `claude` has
+  exited (it shows its shell), is not in the foreground (a wrapper script runs it, or it is suspended) or was started
+  under another name. Read the dry run first.
+  As a follow-up to [#832](https://github.com/Performant-Labs/holler/issues/832), `HerdrPort::observe_pane` is now required
+  as well: a port wrapper that does not forward it no longer compiles, where it would have listed an unmanaged pane with no
+  working directory and no screen change.
 - Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
   idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,
@@ -596,7 +612,7 @@ fills this file in at release time.
   whose launch or relaunch had begun (it ends with the command that reconciles). Every step still runs and nothing is
   rolled back. A script that needs the steps as data runs `--dry-run` first, which still exits 0 and prints the plan.
   The test kit's split-only fake Herdr now follows the adapter's rule, and a test checks the two against each other.
-  [ADR 0021](docs/adr/ADR-0021.md) records both decisions (30 and 31).
+  [ADR 0021](docs/adr/ADR-0021.md) records both decisions (32 and 33).
 
 ## [0.4.0] - 2026-09-29
 
