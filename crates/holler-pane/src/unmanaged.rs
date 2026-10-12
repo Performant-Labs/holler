@@ -63,13 +63,14 @@ pub struct UnmanagedPane {
 /// The panes of `snapshot` that no record names: **the one rule of "a pane Holler does not
 /// drive"**, public so that no story writes its own copy. `pane list`/`get`, the
 /// `pane-unmanaged` refusal and the `unregistered-herdr-pane` finding of whole-fleet reconcile
-/// passes call it, and so do #831 (a second harness kind) and #835 (import decides whether
-/// Holler drives a pane). A record names a pane by Herdr session and pane id.
+/// passes call it. A record names a pane by Herdr session and pane id.
 ///
-/// Today "no record names it" is the only way a pane is undriveable, because
-/// `HarnessKind` has one variant. The other half of the story's wording, "or whose harness
-/// Holler cannot drive", has no case yet; #831 adds it here (a `HarnessKind` that is not
-/// drivable), so the rule stays in this one function.
+/// "No record names it" is the only way a pane is undriveable: Holler drives every
+/// `HarnessKind` a record can hold, OpenCode and, since #831, Claude Code. The other half of
+/// #832's wording, "or whose harness Holler cannot drive", has no case: a pane runs a harness
+/// Holler cannot drive only while no record names it (a Claude Code pane set up by hand, which
+/// `holler pane relaunch` puts under Holler once a record names it). The import tells such a
+/// pane by its foreground command (#835, `pane::is_claude_code_command`), not by this rule.
 pub fn unregistered<'a>(
     snapshot: &'a HerdrSnapshot,
     records: &'a [Pane],
@@ -81,7 +82,7 @@ pub fn unregistered<'a>(
 }
 
 /// Whether `herdr` is a pane Holler does not drive, given every record: [`unregistered`] for
-/// one pane. The question #831 and #835 ask; see [`unregistered`] for who else calls it.
+/// one pane; see [`unregistered`] for who calls it.
 pub fn is_unmanaged(herdr: &HerdrPane, records: &[Pane]) -> bool {
     !records
         .iter()

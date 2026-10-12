@@ -8,21 +8,29 @@
 //! healthy server's list is trusted; an unhealthy server's list only tells a wedged server
 //! (the list times out) from a down one.
 //!
-//! A chain makes at most three port calls, all reads: `host.ps`, `harness.health` and
-//! `harness.list_sessions`.
+//! A chain makes at most four port calls, all reads, in this order: `host.ps`; once it has
+//! answered, `host.foreground_commands` (#835); then `harness.health` and
+//! `harness.list_sessions`. A tmux session that runs Claude Code
+//! ([`is_claude_code_command`]) ends the chain after the second call: its pane is left
+//! alone, so its server is never asked.
 
 use std::thread::{self, ScopedJoinHandle};
 
 use crate::findings::embedded;
-use crate::pane::Health;
-use crate::{PaneError, PaneName, Ports};
+use crate::pane::{is_claude_code_command, Health};
+use crate::{HarnessEndpoint, PaneError, PaneName, Ports};
 
 use super::findings::{Finding, ImportFinding};
 
-/// The calls of a chain, named as `<port>.<method>` in an `observe-failed` message.
+/// The calls of a chain, named as `<port>.<method>` in a finding's message.
 const HOST_PS: &str = "host.ps";
+const HOST_FOREGROUND_COMMANDS: &str = "host.foreground_commands";
 const HARNESS_HEALTH: &str = "harness.health";
 const HARNESS_LIST_SESSIONS: &str = "harness.list_sessions";
+
+/// The start of every `harness-unreadable` message: the pane is never recorded on a guess.
+const UNREADABLE: &str = "what the pane's tmux session runs could not be read, so the pane is \
+                          not recorded";
 
 /// A pane to observe: its tmux session is named as the pane, and its server is on `port`
 /// (`None` when the launcher table gives it no port, so there is no server to ask).
@@ -33,14 +41,28 @@ pub(super) struct Target<'a> {
 
 /// What one pane's chain observed.
 pub(super) enum Observed {
-    Seen {
-        /// `host.ps`: `Ok` when the tmux session answered.
-        tmux: Result<(), PaneError>,
-        /// The harness server; `None` when there was no port to ask.
-        server: Option<Server>,
-    },
+    /// The pane's tmux session runs Claude Code: nothing more was asked about it.
+    ClaudeCode,
+    /// What was asked about any other pane.
+    Seen(Chain),
     /// The chain did not finish (its thread could not start, or panicked).
     Lost,
+}
+
+/// A pane whose tmux session does not run Claude Code, or could not be read.
+pub(super) struct Chain {
+    /// `host.ps`, then `host.foreground_commands`: `Ok` when both answered, or the read that
+    /// failed.
+    pub tmux: Result<(), Unread>,
+    /// The harness server; `None` when there was no port to ask.
+    pub server: Option<Server>,
+}
+
+/// A read of the pane's tmux session that failed: the call, as `<port>.<method>`, and its
+/// error.
+pub(super) struct Unread {
+    op: &'static str,
+    error: PaneError,
 }
 
 /// The pane's harness server, as the chain observed it.
@@ -76,22 +98,49 @@ fn joined<T>(thread: std::io::Result<ScopedJoinHandle<'_, T>>) -> Option<T> {
     thread.ok()?.join().ok()
 }
 
-/// One pane's chain: its tmux session, then its server.
+/// One pane's chain: its tmux session, then, unless the session runs Claude Code, its server.
+/// A session that could not be read is not known to run Claude Code, so its server is asked,
+/// as for any pane.
 fn observe(ports: Ports<'_>, target: &Target<'_>) -> Observed {
-    let tmux = ports.host.ps(target.name).map(drop);
+    let tmux = match read_tmux(ports, target.name) {
+        Ok(true) => return Observed::ClaudeCode,
+        Ok(false) => Ok(()),
+        Err(unread) => Err(unread),
+    };
     let server = target.port.map(|port| observe_server(ports, port));
-    Observed::Seen { tmux, server }
+    Observed::Seen(Chain { tmux, server })
+}
+
+/// Whether the tmux session `name` runs Claude Code: `host.ps`, then, once it has answered,
+/// the command name of the foreground process of each of its tmux panes. Every other name, and
+/// a session with no process, is not Claude Code.
+fn read_tmux(ports: Ports<'_>, name: &PaneName) -> Result<bool, Unread> {
+    ports
+        .host
+        .ps(name)
+        .map_err(|error| Unread { op: HOST_PS, error })?;
+    let commands = ports
+        .host
+        .foreground_commands(name)
+        .map_err(|error| Unread {
+            op: HOST_FOREGROUND_COMMANDS,
+            error,
+        })?;
+    Ok(commands
+        .iter()
+        .any(|command| is_claude_code_command(command)))
 }
 
 /// The server on `port`: its health check, then one list. A healthy server's list is read
 /// for the session of record; an unhealthy server's only tells wedged from down.
 fn observe_server(ports: Ports<'_>, port: u16) -> Server {
-    match ports.harness.health(port) {
+    let at = HarnessEndpoint::Port(port);
+    match ports.harness.health(&at) {
         Err(error) => Server::Unknown(error),
-        Ok(true) => Server::Healthy(ports.harness.list_sessions(port)),
+        Ok(true) => Server::Healthy(ports.harness.list_sessions(&at)),
         Ok(false) => {
             let wedged = matches!(
-                ports.harness.list_sessions(port),
+                ports.harness.list_sessions(&at),
                 Err(PaneError::Timeout { .. })
             );
             if wedged {
@@ -152,26 +201,41 @@ impl Server {
     }
 }
 
-/// What `host.ps` tells the report about `pane`: `tmux-session-missing` for `pane-not-found`
-/// (a session that does not exist), `observe-failed` for any other error.
-pub(super) fn tmux_finding(pane: &PaneName, tmux: &Result<(), PaneError>) -> Option<Finding> {
+/// What the reads of the pane's tmux session tell the report about `pane`:
+/// `tmux-session-missing` when either answered `pane-not-found` (a session that does not
+/// exist, or that ended between the two), `harness-unreadable` naming the call for any other
+/// error. Either is a problem, so the pane is never recorded on a guess (#835).
+pub(super) fn tmux_finding(pane: &PaneName, tmux: &Result<(), Unread>) -> Option<Finding> {
     match tmux {
         Ok(()) => None,
-        Err(PaneError::PaneNotFound { .. }) => Some(Finding::about(
+        Err(Unread {
+            error: PaneError::PaneNotFound { .. },
+            ..
+        }) => Some(Finding::about(
             pane,
             ImportFinding::TmuxSessionMissing,
             format!("the tmux session {pane} does not exist"),
         )),
-        Err(error) => Some(Finding::about(
+        Err(Unread { op, error }) => Some(Finding::about(
             pane,
-            ImportFinding::ObserveFailed,
-            failed_message(HOST_PS, error),
+            ImportFinding::HarnessUnreadable,
+            format!("{UNREADABLE}: {}", failed_message(op, error)),
         )),
     }
 }
 
-/// The message of an `observe-failed` finding: the call, as `<port>.<method>`, the error's
-/// code and its message (reconcile's form).
+/// What a chain that did not finish tells the report about `pane`: nothing was read, so
+/// `harness-unreadable` (#835).
+pub(super) fn lost_finding(pane: &PaneName) -> Finding {
+    Finding::about(
+        pane,
+        ImportFinding::HarnessUnreadable,
+        format!("{UNREADABLE}: its check did not finish"),
+    )
+}
+
+/// The message of a failed call: the call, as `<port>.<method>`, the error's code and its
+/// message (reconcile's form).
 fn failed_message(op: &str, error: &PaneError) -> String {
     format!(
         "{op} failed ({}): {}",

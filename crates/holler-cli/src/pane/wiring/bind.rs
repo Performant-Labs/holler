@@ -14,10 +14,13 @@
 //!
 //! **Every method is forwarded (D31 W-4, D33).** Each wrapper here overrides every method of its
 //! port, the ones the port gives a default included: `HarnessPort`'s `send_prompt` and
-//! `session_activity`, and `HerdrPort`'s `observe_pane` and `observe_panes` (#832). A default
-//! never answers in place of the inner port, and `observe_panes` goes to the inner port's own
-//! `observe_panes`, so a list of panes stays one read of Herdr (ADR-0021 section 14), never one
-//! `observe_pane` per pane.
+//! `session_activity`, its four process methods (#831: `process_command`, `new_session_id`,
+//! `locate_process` and `login_status`, whose defaults refuse `process-unsupported`), and
+//! `HerdrPort`'s `observe_panes` (#832). A default never answers in place of the inner port, and
+//! `observe_panes` goes to the inner port's own `observe_panes`, so a list of panes stays one read
+//! of Herdr (ADR-0021 section 14), never one `observe_pane` per pane. `HerdrPort::observe_pane`
+//! and `HostPort::foreground_commands` have no default (#835), so the compiler holds every wrapper
+//! to them.
 //!
 //! **Why the bindings (D8).** The launch engine attaches the TUI by the Herdr pane id before the
 //! pane's record exists (E34): `ensure_pane` (which knows the pane id), then `ensure_session` and
@@ -26,17 +29,20 @@
 //! pair. This couples the wiring to the engine's call order (`tx_launch::bring_up` calls
 //! `ensure_session` right after each `ensure_pane`), which a default-run test pins; carrying the
 //! name in `attach_tui` would be a change to the frozen port. The bindings are per run and in
-//! memory; a wiring runs one launch at a time (`profile apply` runs its creates in sequence), and
-//! only the TUI methods read them, from any thread.
+//! memory, and only the TUI methods read them, from any thread. A wiring runs one launch at a
+//! time (`profile apply` runs its creates in sequence), with one exception (#831): `pane doctor
+//! --fix` can relaunch several Claude Code panes at once, one per pane's thread, and their
+//! bindings may then pair one pane's id with another's name. Nothing reads those pairs: a Claude
+//! Code relaunch attaches no TUI, and the TUI lookup is asked only for an OpenCode pane's id.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use holler_adapter_opencode::Resolver;
-use holler_pane::ports::Activity;
+use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Argv, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane,
-    PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
+    Argv, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
+    Key, Pane, PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
 };
 
 /// The pairs a run's launches bound: the pane id the last `ensure_pane` answered, until an
@@ -180,6 +186,10 @@ impl HostPort for BindingHost {
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.inner.ps(name)
     }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.inner.foreground_commands(name)
+    }
 }
 
 /// How a [`LazyHerdr`] builds its port.
@@ -259,11 +269,12 @@ impl HerdrPort for LazyHerdr {
 
 /// A port the wiring built from its configuration, or the configuration error that kept it from
 /// being built, which every method then answers (W-4, W-E). Every method is forwarded explicitly,
-/// so a method with a default (`HarnessPort::send_prompt` and `session_activity`) reaches the
-/// inner port, never the default.
+/// so a method with a default (`HarnessPort::send_prompt`, `session_activity` and the four
+/// process methods of #831) reaches the inner port, never the default.
 pub struct Wired<P: ?Sized>(Result<Arc<P>, PaneError>);
 
-/// The wired `HarnessPort`: OpenCode (D7), or what keeps it from being configured.
+/// A wired `HarnessPort`: OpenCode (D7) or Claude Code (#831), or what keeps it from being
+/// configured.
 pub type WiredHarness = Wired<dyn HarnessPort>;
 
 /// The wired `HostPort`: tmux (D6), or what keeps it from being configured.
@@ -291,44 +302,79 @@ impl HarnessPort for Wired<dyn HarnessPort> {
         self.port()?.serve_command(name, port, spec)
     }
 
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.port()?.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.port()?.verify_serving(at, spec)
     }
 
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.port()?.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.port()?.health(at)
     }
 
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.port()?.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.port()?.create_session(at)
     }
 
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.port()?.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.port()?.list_sessions(at)
     }
 
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.port()?.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.port()?.abort(at, session)
     }
 
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.port()?.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.port()?.attach_tui(pane, at, session)
     }
 
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.port()?.select_session(pane, session)
     }
 
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.port()?.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.port()?.shown_session(pane, at)
     }
 
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-        self.port()?.send_prompt(port, session, text)
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        self.port()?.send_prompt(at, session, text)
     }
 
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        self.port()?.session_activity(port, session)
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.port()?.session_activity(at, session)
+    }
+
+    fn process_command(
+        &self,
+        name: &PaneName,
+        spec: &ServeSpec,
+        session: &SessionChoice,
+    ) -> Result<Argv, PaneError> {
+        self.port()?.process_command(name, spec, session)
+    }
+
+    fn new_session_id(&self) -> Result<String, PaneError> {
+        self.port()?.new_session_id()
+    }
+
+    fn locate_process(&self, name: &PaneName, session: &str) -> Result<Option<u32>, PaneError> {
+        self.port()?.locate_process(name, session)
+    }
+
+    fn login_status(&self) -> Result<LoginStatus, PaneError> {
+        self.port()?.login_status()
     }
 }
 
@@ -347,6 +393,10 @@ impl HostPort for Wired<dyn HostPort> {
 
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.port()?.ps(name)
+    }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.port()?.foreground_commands(name)
     }
 }
 

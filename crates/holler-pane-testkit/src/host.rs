@@ -17,6 +17,7 @@
 //! `FakeHarness::kill(port)`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use holler_pane::{Argv, HostPort, PaneError, PaneName};
@@ -33,6 +34,7 @@ pub enum HostOp {
     Run,
     StopOwned,
     Ps,
+    ForegroundCommands,
 }
 
 impl PortOp for HostOp {
@@ -42,6 +44,7 @@ impl PortOp for HostOp {
             HostOp::Run => "host.run",
             HostOp::StopOwned => "host.stop_owned",
             HostOp::Ps => "host.ps",
+            HostOp::ForegroundCommands => "host.foreground_commands",
         }
     }
 }
@@ -64,12 +67,16 @@ impl PortOp for HostOp {
 ///   missing session it is `Ok`: nothing is owned, so nothing is stopped.
 /// - `ps` of a missing session is `pane-not-found`; otherwise the session's pids, in
 ///   the order they started.
+/// - `foreground_commands` (#835) of a missing session is `pane-not-found`; otherwise the
+///   command name of each of the session's processes, in the order they started: the
+///   basename of the argv's first element, as tmux names a pane's process (`sleep` for
+///   `/usr/bin/sleep 30`). A name leaves with its process.
 ///
 /// Two behaviours are the fake's own, and the suite does not assert them because a real
-/// tmux session may differ: a fresh session has no process (the fake has no shell), and
-/// a session survives `stop_owned`. Pids come from one counter that starts at 10 000, so
-/// they are distinct across sessions and never reused, not after `stop_owned`,
-/// `exit_process` or `end_session`.
+/// tmux session may differ: a fresh session has no process (the fake has no shell), so
+/// it names no command, and a session survives `stop_owned`. Pids come from one counter
+/// that starts at 10 000, so they are distinct across sessions and never reused, not after
+/// `stop_owned`, `exit_process` or `end_session`.
 ///
 /// Every port method first passes [`FakeHost::faults`], and when that fails, it returns
 /// the error and changes nothing. The inspection and scenario methods bypass the faults
@@ -95,7 +102,14 @@ struct HostState {
 struct Session {
     cwd: String,
     /// Its processes, in the order they started.
-    pids: Vec<u32>,
+    processes: Vec<Process>,
+}
+
+/// One process `run` started.
+struct Process {
+    pid: u32,
+    /// Its command name, as `foreground_commands` reports it.
+    command: String,
 }
 
 impl FakeHost {
@@ -135,20 +149,20 @@ impl FakeHost {
     }
 
     /// The process `pid` of the session `name` exited by itself (it crashed), so it
-    /// leaves the session's `ps`. `pane-not-found` when the session does not exist or
-    /// does not hold `pid`.
+    /// leaves the session's `ps` and `foreground_commands`. `pane-not-found` when the
+    /// session does not exist or does not hold `pid`.
     pub fn exit_process(&self, name: &PaneName, pid: u32) -> Result<(), PaneError> {
         let mut state = self.lock();
-        let pids = &mut state
+        let processes = &mut state
             .sessions
             .get_mut(name)
             .ok_or_else(|| not_found(name))?
-            .pids;
-        let at = pids
+            .processes;
+        let at = processes
             .iter()
-            .position(|&held| held == pid)
+            .position(|held| held.pid == pid)
             .ok_or_else(|| not_found(name))?;
-        pids.remove(at);
+        processes.remove(at);
         Ok(())
     }
 
@@ -181,7 +195,7 @@ impl HostPort for FakeHost {
             .entry(name.clone())
             .or_insert_with(|| Session {
                 cwd: cwd.to_owned(),
-                pids: Vec::new(),
+                processes: Vec::new(),
             });
         Ok(())
     }
@@ -194,36 +208,66 @@ impl HostPort for FakeHost {
     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
         self.faults.enter(HostOp::StopOwned)?;
         if let Some(session) = self.lock().sessions.get_mut(name) {
-            session.pids.clear();
+            session.processes.clear();
         }
         Ok(())
     }
 
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.faults.enter(HostOp::Ps)?;
+        self.lock().each_process(name, |process| process.pid)
+    }
+
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.faults.enter(HostOp::ForegroundCommands)?;
         self.lock()
-            .sessions
-            .get(name)
-            .map(|session| session.pids.clone())
-            .ok_or_else(|| not_found(name))
+            .each_process(name, |process| process.command.clone())
     }
 }
 
 impl HostState {
     /// `run`'s work: refuse a missing session, then an empty argv; otherwise give the
-    /// session a new pid and log the argv as given, with its `cwd`.
+    /// session a new process, named as its program, and log the argv as given, with its
+    /// `cwd`.
     fn start(&mut self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
         let session = self.sessions.get_mut(name).ok_or_else(|| not_found(name))?;
-        if argv.as_slice().is_empty() {
+        let Some(program) = argv.as_slice().first() else {
             return Err(PaneError::Usage {
                 message: "an empty argv has no program to run".to_owned(),
             });
-        }
-        session.pids.push(FIRST_PID + self.pids_minted);
+        };
+        session.processes.push(Process {
+            pid: FIRST_PID + self.pids_minted,
+            command: command_name(program),
+        });
         self.pids_minted += 1;
         self.runs.push((name.clone(), cwd.to_owned(), argv.clone()));
         Ok(())
     }
+
+    /// `field` of each process of the session `name`, in the order they started, or
+    /// `pane-not-found` when there is no such session.
+    fn each_process<T>(
+        &self,
+        name: &PaneName,
+        field: impl Fn(&Process) -> T,
+    ) -> Result<Vec<T>, PaneError> {
+        self.sessions
+            .get(name)
+            .map(|session| session.processes.iter().map(field).collect())
+            .ok_or_else(|| not_found(name))
+    }
+}
+
+/// The command name of a process whose program is `program`: its basename, as tmux names a
+/// pane's foreground process (`claude` for `/opt/demo/bin/claude`). A program with no
+/// basename (`/`) is named as given.
+fn command_name(program: &str) -> String {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .to_owned()
 }
 
 /// The error for a session `name` that does not exist (or a pid it does not hold).

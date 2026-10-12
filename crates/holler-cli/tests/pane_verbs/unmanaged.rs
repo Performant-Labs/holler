@@ -464,9 +464,10 @@ fn a_recorded_pane_costs_no_read_of_herdr() {
     );
 }
 
-/// The rule "no record names this Herdr pane" is public, for the stories that decide whether
-/// Holler drives a pane (#831, #835): `unregistered` lists such panes and `is_unmanaged`
-/// answers for one.
+/// The rule "no record names this Herdr pane" is public, for the story that decides whether
+/// Holler drives a pane (#831): `unregistered` lists such panes and `is_unmanaged` answers for
+/// one. The import (#835) asks what a pane runs instead (`pane::is_claude_code_command`); a pane
+/// it leaves alone has no record, so this rule lists it.
 #[test]
 fn the_unmanaged_predicate_is_public_and_one_rule() {
     use holler_pane::unmanaged::{is_unmanaged, unregistered};

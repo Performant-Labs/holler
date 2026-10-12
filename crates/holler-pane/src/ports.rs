@@ -12,7 +12,7 @@
 //! **Frozen when #637 merges**, after which a change goes through the epic's
 //! amend-first rule. [`HerdrPort`], and the minimal data types it takes and returns,
 //! stay provisional until the spike #636 (Herdr) reports. [`HarnessPort`] is final:
-//! the spike #635 (OpenCode) confirmed it, and #642 built it. Two amendments since:
+//! the spike #635 (OpenCode) confirmed it, and #642 built it. Amended since:
 //!
 //! - #645's two default-armed seam methods, [`HarnessPort::send_prompt`] and
 //!   [`HarnessPort::session_activity`], whose defaults keep every impl that does not
@@ -21,7 +21,27 @@
 //!   [`ServeSpec`] and returns the server's argv, beside the required
 //!   [`HarnessPort::verify_serving`]; and [`HostPort::run`] takes the directory it starts
 //!   its program in. The host starts and stops a pane's processes, its harness server
-//!   among them.
+//!   among them;
+//! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
+//!   what Herdr says about a pane that no record names;
+//! - #835's: the required [`HostPort::foreground_commands`], the command name of the
+//!   foreground process of each pane of a tmux session (how the import tells a pane that
+//!   runs Claude Code), and [`HerdrPort::observe_pane`] lost its default. Both are required
+//!   so that the compiler finds every implementation, a wrapper port included: a default
+//!   answers silently in place of a port a wrapper forgot to forward;
+//! - #831's, a second harness (ADR-0021 section 15): every [`HarnessPort`] method keyed by a
+//!   server's `port: u16` is keyed by a [`HarnessEndpoint`] instead (a port, or a single
+//!   process), the change of the port that #802 decision 2 set as the pattern, so a call
+//!   site that forgets the endpoint does not compile; `shown_session` and `attach_tui` take
+//!   one too. Four default-armed methods for a single-process harness, each defaulting to
+//!   the refusal [`PROCESS_UNSUPPORTED`] ([`HarnessPort::process_command`],
+//!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
+//!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
+//!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
+//!   shapes, so [`Ports`] keeps one harness.
+
+mod process;
+mod router;
 
 use std::time::Duration;
 
@@ -30,9 +50,16 @@ use serde::{Deserialize, Serialize};
 use crate::argv::{AgentKey, Argv};
 use crate::error::{PaneError, RefusalCode};
 use crate::grid::GridPos;
-use crate::pane::{HerdrPane, Pane, PaneEvent, PaneId, PaneName};
+use crate::pane::{HerdrPane, ModelSpec, Pane, PaneEvent, PaneId, PaneName};
 use crate::probe::{run_probe, ProbeResult};
 use crate::profile::{ProfileScope, ProfileStore};
+
+use self::process::process_unsupported;
+pub use self::process::{
+    HarnessEndpoint, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, INBOUND_HELD,
+    PROCESS_UNSUPPORTED, SERVER_UNSUPPORTED, SESSION_MISMATCH,
+};
+pub use self::router::HarnessRouter;
 
 /// A position in a store's change sequence: a store-wide, strictly increasing
 /// sequence number, one per change. `Cursor(0)` is "from the beginning".
@@ -99,16 +126,22 @@ pub struct HerdrSpec {
     pub grid: GridPos,
 }
 
-/// What a pane's harness server must run with: the part of the pane's spec that
-/// [`HarnessPort::serve_command`] applies to the server's argv and
-/// [`HarnessPort::verify_serving`] checks on the running server (#802).
+/// What a pane's harness must run with: the part of the pane's spec that
+/// [`HarnessPort::serve_command`] applies to a server's argv and
+/// [`HarnessPort::verify_serving`] checks on the running server (#802), and that
+/// [`HarnessPort::process_command`] applies to a single process's argv (#831).
 ///
-/// `#[non_exhaustive]`: the model, the effort, the environment names and the context
-/// ceilings join it later with no change to a signature. A new field of the pane's spec
-/// for its server goes here, never into a new parameter. Outside this crate a spec is
-/// built only from [`ServeSpec::default`] and its builders, so a struct literal does not
-/// compile there, with or without `..Default::default()`; the launch engine, inside this
-/// crate, builds it with every field named.
+/// `#[non_exhaustive]`: the environment names and the context ceilings join it later with
+/// no change to a signature. A new field of the pane's spec for its harness goes here, never
+/// into a new parameter. Outside this crate a spec is built only from [`ServeSpec::default`]
+/// and its builders, so a struct literal does not compile there, with or without
+/// `..Default::default()`; the launch engine, inside this crate, builds it with every field
+/// named.
+///
+/// The model and the directory (#831) are set by the launch engine only for a
+/// single-process harness: an OpenCode server gets `None` for both until #829 applies the
+/// model to it, so `serve_command`'s rule (never an argv without what the spec asks for)
+/// holds for OpenCode unchanged.
 ///
 /// ```compile_fail,E0639
 /// let spec = holler_pane::ServeSpec { agent: None };
@@ -120,8 +153,16 @@ pub struct HerdrSpec {
 #[non_exhaustive]
 pub struct ServeSpec {
     /// The OpenCode agent the server runs as its default (`Pane.opencode_agent`); `None`
-    /// leaves the server's own default.
+    /// leaves the server's own default. A single-process harness that cannot apply an agent
+    /// refuses one ([`AGENT_UNSUPPORTED`]).
     pub agent: Option<AgentKey>,
+    /// The model a single process runs (`Pane.model`; #831): its model id and effort reach
+    /// the argv, the provider is recorded and not passed. `None` for a server harness.
+    pub model: Option<ModelSpec>,
+    /// The directory a single process works in (`Pane.host.cwd`; #831), which also names
+    /// where its conversations are kept. `None` for a server harness, which takes its
+    /// directory from `HostPort::run`.
+    pub cwd: Option<String>,
 }
 
 impl ServeSpec {
@@ -129,6 +170,20 @@ impl ServeSpec {
     #[must_use]
     pub fn with_agent(mut self, agent: AgentKey) -> Self {
         self.agent = Some(agent);
+        self
+    }
+
+    /// This spec, with `model` as the model a single process runs.
+    #[must_use]
+    pub fn with_model(mut self, model: ModelSpec) -> Self {
+        self.model = Some(model);
+        self
+    }
+
+    /// This spec, with `cwd` as the directory a single process works in.
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
         self
     }
 }
@@ -166,6 +221,39 @@ impl Key {
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
 /// Only the adapter converts a [`GridPos`] to Herdr's own order and base.
+///
+/// [`HerdrPort::observe_pane`] has no default (#835), so an implementation that leaves it
+/// out, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId};
+///
+/// struct NoObservation;
+///
+/// impl HerdrPort for NoObservation {
+///     fn ensure_pane(&self, _: &HerdrSpec) -> Result<HerdrPane, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn send_text(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn send_keys(&self, _: &PaneId, _: &[Key]) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn read(&self, _: &PaneId, _: usize) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+///     fn close(&self, _: &PaneId) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
+///         Ok(HerdrSnapshot { panes: Vec::new() })
+///     }
+///     fn version(&self) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+/// }
+/// ```
 pub trait HerdrPort: Send + Sync {
     /// Make a pane exist at `spec.grid` by issuing right/down splits, or fail
     /// loudly; never relocates a healthy pane. An occupied cell answers its pane and
@@ -198,20 +286,20 @@ pub trait HerdrPort: Send + Sync {
     /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
     /// names.
     ///
-    /// The default answers an empty [`PaneObservation`]: an implementation that cannot
-    /// tell says so with `None` fields and never guesses, so one that does not override
-    /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
-    /// pane.
-    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
-        let _ = pane;
-        Ok(PaneObservation::default())
-    }
+    /// An implementation that cannot tell says so with `None` fields (an empty
+    /// [`PaneObservation`]) and never guesses. `pane-not-found` when Herdr has no such pane.
+    ///
+    /// Required since #835, with no default. The default answered an empty observation, so a
+    /// wrapper port that did not forward it reported nothing, silently, over the real wiring;
+    /// now the compiler finds every implementation.
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError>;
 
     /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
     /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
     /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
     /// call to Herdr when the implementation can read them together; the default asks about
-    /// each pane in turn.
+    /// each pane in turn. A wrapper port overrides it to forward the batch, so that a list
+    /// stays one call to the port it wraps.
     fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
         panes
             .iter()
@@ -256,6 +344,30 @@ impl PaneObservation {
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// No method has a default (#835), so an implementation that answers only the four methods
+/// that came before `foreground_commands`, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct PidsOnly;
+///
+/// impl HostPort for PidsOnly {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+/// }
+/// ```
 pub trait HostPort: Send + Sync {
     /// Make the tmux session `name` exist, working in `cwd`.
     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;
@@ -272,13 +384,33 @@ pub trait HostPort: Send + Sync {
 
     /// The process ids running in the session `name`.
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
+
+    /// The command name of the foreground process of every live pane in the session `name`,
+    /// one per pane, in the order tmux lists them (#835): what tmux reports as
+    /// `#{pane_current_command}`, the basename of that process's `argv[0]`. Names only, never
+    /// an argv, a command line or a program's configuration (I7). A session with no pane
+    /// process answers an empty list; a missing session is `pane-not-found`, as `ps` answers.
+    ///
+    /// The import reads it to leave alone a pane that runs Claude Code
+    /// ([`crate::pane::is_claude_code_command`]), and a Claude Code launch to refuse a session
+    /// that already runs one (`process-in-use`, #831).
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
 }
 
-/// The harness server of a pane and its sessions (the adapter is
-/// `holler-adapter-opencode`, #642). **Final:** the spike #635 confirmed it unchanged;
-/// ADR-0021 section 2, "`HarnessPort` as built (#642)", records what the adapter decided,
-/// and #802 amended how a server starts: the port builds its argv, and [`HostPort::run`]
-/// starts it in the pane's tmux session, so [`HostPort::stop_owned`] stops it.
+/// The harness of a pane and its sessions: an OpenCode server and its TUI (the adapter is
+/// `holler-adapter-opencode`, #642), or one Claude Code process (`holler-adapter-claude`,
+/// #831). **Final:** the spike #635 confirmed it unchanged; ADR-0021 section 2, "`HarnessPort`
+/// as built (#642)", records what the OpenCode adapter decided, #802 amended how a server
+/// starts (the port builds its argv, and [`HostPort::run`] starts it in the pane's tmux
+/// session, so [`HostPort::stop_owned`] stops it), and #831 keyed every call by a
+/// [`HarnessEndpoint`] and added the four methods of a single-process harness (section 15).
+///
+/// A harness of one shape answers the other shape's calls with a stable refusal: a server
+/// harness answers the four process methods [`PROCESS_UNSUPPORTED`] (their default), and a
+/// single-process harness answers a server's and a TUI's steps [`SERVER_UNSUPPORTED`]. The
+/// engines choose their steps by the kind's shape (`HarnessKind::shape`), and
+/// [`HarnessRouter`] sends each call to the harness of its endpoint, so neither refusal is
+/// met on a well-formed path.
 ///
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
@@ -299,13 +431,13 @@ pub trait HarnessPort: Send + Sync {
         spec: &ServeSpec,
     ) -> Result<Argv, PaneError>;
 
-    /// Whether the server running on `port` honours `spec`. The launch engine asks once
-    /// the server is healthy, before any session is created on it (#802). `Ok` only when
-    /// the server honours every field of `spec`; a server that does not is a refusal with
-    /// an open code the implementation owns. The engine answers every error by rolling
-    /// back (the host then stops the server). An implementation that cannot check a field
-    /// it cannot apply refuses it, as [`HarnessPort::serve_command`] does
-    /// ([`AGENT_UNSUPPORTED`] for an agent).
+    /// Whether the server at `at` honours `spec`. The launch engine asks once the server is
+    /// healthy, before any session is created on it (#802). `Ok` only when the server
+    /// honours every field of `spec`; a server that does not is a refusal with an open code
+    /// the implementation owns. The engine answers every error by rolling back (the host
+    /// then stops the server). An implementation that cannot check a field it cannot apply
+    /// refuses it, as [`HarnessPort::serve_command`] does ([`AGENT_UNSUPPORTED`] for an
+    /// agent).
     ///
     /// It answers for the spec, not for whether the server is up: the engine's health wait
     /// has just seen the server answer, and a server gone since then fails the engine's
@@ -318,50 +450,112 @@ pub trait HarnessPort: Send + Sync {
     ///
     /// Required, with no default: a harness that starts servers must say whether the
     /// running one honours the spec.
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError>;
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError>;
 
-    /// Whether the server on `port` answers.
-    fn health(&self, port: u16) -> Result<bool, PaneError>;
+    /// Whether the harness at `at` answers: the server on a port, or a single process that
+    /// still runs (its entry is listed for its pid).
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError>;
 
-    /// Create a session on the server at `port`; returns its id.
-    fn create_session(&self, port: u16) -> Result<String, PaneError>;
+    /// Create a session on the server at `at`; returns its id.
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError>;
 
-    /// The session ids on the server at `port`.
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError>;
+    /// The session ids on the server at `at`.
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError>;
 
-    /// Abort the running turn of `session`.
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError>;
+    /// Abort the running turn of `session` at `at`. A harness whose kind's abort style is a
+    /// relaunch (`AbortStyle::Relaunch`) refuses it with its own code (Claude Code's
+    /// `abort-unsupported`): it has no in-place abort, and a signal is not one.
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError>;
 
-    /// Attach the TUI of `pane` to `session` on the server at `port`.
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError>;
+    /// Attach the TUI of `pane` to `session` on the server at `at`.
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError>;
 
     /// Switch the TUI of `pane` to `session`.
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError>;
 
-    /// The session the TUI of `pane` shows, if it can tell.
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError>;
+    /// The session the pane `pane`, whose harness is at `at`, shows, if it can tell: the
+    /// session its TUI shows, or the one a single process holds now (which follows a person's
+    /// `/clear` or `/resume`). `None` when it cannot tell, or nothing is shown.
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError>;
 
-    /// Queue `text` as a prompt to `session` on the server at `port`, through the
-    /// harness API, never by typing into a TUI (I4). `pane reset --first` calls it (#645).
+    /// Queue `text` as a prompt to `session` at `at`, through the harness API, never by
+    /// typing into a TUI (I4). `pane reset --first` calls it (#645).
     ///
     /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
     /// prompts says so as a stable refusal, which the real adapter replaces (#642).
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-        let _ = (port, session, text);
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        let _ = (at, session, text);
         Err(PaneError::Refused {
             code: PROMPT_UNSUPPORTED,
             message: "this harness does not queue a prompt".to_owned(),
         })
     }
 
-    /// What `session` on the server at `port` is doing now (#645: `pane reset` refuses a
-    /// conversation that is not [`Activity::Idle`]).
+    /// What `session` at `at` is doing now (#645: `pane reset` refuses a conversation that
+    /// is not [`Activity::Idle`]). A single process holds one session at a time, so its
+    /// activity is the process's.
     ///
     /// The default answers [`Activity::Idle`], so an impl that does not report activity
     /// refuses nothing.
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        let _ = (port, session);
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        let _ = (at, session);
         Ok(Activity::Idle)
+    }
+
+    /// The argv that starts the single process of `name`, holding the session `session`
+    /// names, with `spec` applied (#831), for [`HostPort::run`] to start. Pure, like
+    /// [`HarnessPort::serve_command`]: it starts no process and sends nothing, so its
+    /// refusals belong to a plan. It never returns an argv that would start the process
+    /// without what `spec` asks for, and a choice it cannot honour is refused
+    /// (`session-not-found` for a [`SessionChoice::Resume`] of a session with no
+    /// conversation).
+    ///
+    /// Default-armed, refusing [`PROCESS_UNSUPPORTED`]: only a single-process harness
+    /// answers it, and the engines ask it only for a kind of that shape.
+    fn process_command(
+        &self,
+        name: &PaneName,
+        spec: &ServeSpec,
+        session: &SessionChoice,
+    ) -> Result<Argv, PaneError> {
+        let _ = (name, spec, session);
+        Err(process_unsupported("process_command"))
+    }
+
+    /// A fresh session id for a single process's launch or reset (#831): the randomness is
+    /// the harness's, the engine takes none. Default-armed, refusing [`PROCESS_UNSUPPORTED`].
+    fn new_session_id(&self) -> Result<String, PaneError> {
+        Err(process_unsupported("new_session_id"))
+    }
+
+    /// The pid of the running single process of `name` that holds `session`, or `None`
+    /// (#831): how a launch learns the pid it records, after which the pid is the process's
+    /// identity. Default-armed, refusing [`PROCESS_UNSUPPORTED`].
+    fn locate_process(&self, name: &PaneName, session: &str) -> Result<Option<u32>, PaneError> {
+        let _ = (name, session);
+        Err(process_unsupported("locate_process"))
+    }
+
+    /// Whether this harness's processes use the subscription login (#831, I7): only that
+    /// fact is read, never the login. Default-armed, refusing [`PROCESS_UNSUPPORTED`] like
+    /// the other three, never a silent answer (plan review W9): a wrapper that forgot to
+    /// forward it fails loudly.
+    fn login_status(&self) -> Result<LoginStatus, PaneError> {
+        Err(process_unsupported("login_status"))
     }
 }
 
@@ -385,6 +579,10 @@ pub enum Activity {
     Busy,
     /// Waiting for an answer to a question it asked.
     HoldingQuestion,
+    /// Waiting for a person to answer a permission prompt (#831; Claude Code's `waiting`
+    /// with `permission prompt`, `sandbox request` or `worker request`). Holler does not
+    /// answer one in this story.
+    WaitingPermission,
 }
 
 /// Runs a health probe. [`SystemProber`] is the real one; a test swaps in a fake.

@@ -94,8 +94,9 @@ control-socket transport is Unix domain sockets end to end); tracked separately 
     Poll it to completion (`gh run watch` or `gh run list --workflow release-arm64.yml`), then
     download the artifact: `gh run download <run-id> -n holler-ubuntu-arm64`
 - [ ] 17. **Verify each build's version, then rename** before attaching anything
-  - macOS/Linux x86_64: `./target/release/holler --version` actually reports `X.Y.Z`, then
-    rename to `holler-<os>` (`holler-ubuntu-latest`, `holler-macos-latest`)
+  - macOS/Linux x86_64: `./target/release/holler --version` actually reports `X.Y.Z` and the
+    tag's commit, without `-dirty`, then rename to `holler-<os>` (`holler-ubuntu-latest`,
+    `holler-macos-latest`)
   - Linux arm64: the `release-arm64.yml` run already verified `--version` and `file` (real
     ELF aarch64 binary) on-runner as part of the workflow; the downloaded artifact is already
     named `holler-ubuntu-arm64`, no rename needed

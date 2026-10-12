@@ -62,7 +62,13 @@ impl PortOp for ProfileStoreOp {
 ///   generation after the write, who, and what changed. A refused write appends
 ///   nothing and publishes no event.
 /// - `delete` of a missing profile is `profile-not-found`, whatever the generation.
-/// - `rename` is PROPOSED (#665) and answers `not-implemented`, changing nothing.
+/// - `rename` (#665) is the record half, as a registry with no pane registry keeps it
+///   (ADR-0021 section 8): the record moves to the new name's slug at the generation + 1,
+///   keeping its `created` and specs; the old name's log is closed with a `deleted` entry
+///   and the new name's gains one `renamed` entry; the feed gets the old name's deletion,
+///   then the new name's put (one put when the slug does not change). It checks, in order,
+///   `profile-not-found`, `usage` (the stored name itself), `profile-exists` (another live
+///   profile's slug) and the generation. No pane is moved: the fake holds none.
 /// - `watch` follows the feed's rules: a cursor ahead of the head is `usage`, and a
 ///   watch from `Cursor(0)` yields the current state and then resumes from the head as
 ///   of that snapshot, as the hub's registry does.
@@ -227,6 +233,63 @@ impl FakeProfileStore {
         })
     }
 
+    /// The one write path of a rename (`rename`): the checks, then, in one `feed.write`, the
+    /// old name's deletion (when the slug changes) and the new name's put, each logged under
+    /// its own slug at the new generation.
+    fn move_record(
+        &self,
+        from: &ProfileName,
+        to: &ProfileName,
+        expected: u64,
+        actor: &Actor,
+    ) -> Result<Profile, PaneError> {
+        let (old_slug, new_slug) = (from.slug(), to.slug());
+        self.feed.write(|log| {
+            let now = self.now();
+            let stored = log
+                .get(&old_slug)
+                .cloned()
+                .ok_or_else(|| PaneError::ProfileNotFound {
+                    what: from.to_string(),
+                })?;
+            if *to == stored.name {
+                return Err(PaneError::Usage {
+                    message: format!("{:?} is the profile's name already", to.as_str()),
+                });
+            }
+            if let Some(other) = log.get(&new_slug).filter(|_| new_slug != old_slug) {
+                return Err(taken(to, &new_slug, other));
+            }
+            let generation = next_generation(stored.generation, expected)?;
+            let next = Profile {
+                name: to.clone(),
+                slug: new_slug.clone(),
+                generation,
+                updated: now,
+                ..stored.clone()
+            };
+            if new_slug != old_slug {
+                log.append(|cursor| ProfileEvent {
+                    cursor,
+                    name: stored.name.clone(),
+                    profile: None,
+                })?;
+                self.record(
+                    old_slug,
+                    entry(now, generation, actor, ProfileChange::Deleted),
+                );
+            }
+            log.append(|cursor| ProfileEvent {
+                cursor,
+                name: next.name.clone(),
+                profile: Some(Box::new(next.clone())),
+            })?;
+            let renamed = ProfileChange::Renamed { from: stored.name };
+            self.record(new_slug, entry(now, generation, actor, renamed));
+            Ok(next)
+        })
+    }
+
     /// Append the log entry of an applied write to the log of `slug`. A write calls it
     /// inside its `feed.write` and after its event is published, so a write whose event
     /// cannot be published logs nothing.
@@ -292,16 +355,16 @@ impl ProfileStore for FakeProfileStore {
             })
     }
 
-    /// PROPOSED (#665): after the fault switch, `not-implemented`, changing nothing.
+    /// The record half of a rename (#665; see the type docs), after the fault switch.
     fn rename(
         &self,
-        _from: &ProfileName,
-        _to: &ProfileName,
-        _expected_generation: u64,
-        _actor: &Actor,
+        from: &ProfileName,
+        to: &ProfileName,
+        expected_generation: u64,
+        actor: &Actor,
     ) -> Result<Profile, PaneError> {
         self.faults.enter(ProfileStoreOp::Rename)?;
-        Err(PaneError::NotImplemented)
+        self.move_record(from, to, expected_generation, actor)
     }
 }
 
@@ -329,14 +392,19 @@ impl Change for ProfileEvent {
 /// logs it as a rename.
 fn check_name(stored: Option<&Profile>, submitted: &Profile, slug: &str) -> Result<(), PaneError> {
     match stored {
-        Some(stored) if stored.name != submitted.name => Err(PaneError::ProfileExists {
-            what: format!(
-                "{:?} has the slug {slug:?} of the stored profile {:?}",
-                submitted.name.as_str(),
-                stored.name.as_str()
-            ),
-        }),
+        Some(stored) if stored.name != submitted.name => Err(taken(&submitted.name, slug, stored)),
         _ => Ok(()),
+    }
+}
+
+/// `profile-exists`: `name`, of slug `slug`, cannot be written while `stored` holds the slug.
+fn taken(name: &ProfileName, slug: &str, stored: &Profile) -> PaneError {
+    PaneError::ProfileExists {
+        what: format!(
+            "{:?} has the slug {slug:?} of the stored profile {:?}",
+            name.as_str(),
+            stored.name.as_str()
+        ),
     }
 }
 

@@ -8,13 +8,77 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
+  Code process, recorded by its pid and with no port, and the pane verbs drive it
+  ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
+  last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
+  a fresh session id with the seven environment variables that would override its login removed, so the process uses
+  the login Claude Code holds (a spec that names one of them is refused `claude-login-env-refused`, and `holler pane
+  doctor` reports `claude-login-missing` when that login is not the subscription's), accepts cross-session messages and
+  leaves out the question tool, and writes the record only once `claude agents --json` lists the process idle on its
+  session; otherwise it rolls back. Its `--model` and `--effort` are applied. A Claude Code process chooses its session
+  when it starts, so `relaunch`, `switch` (to a conversation of the pane's directory), `reset` (a fresh session),
+  doctor's `--fix` (only while it is idle) and `holler interrupt --pane NAME` (on its session of record: the operator's
+  decision, no keypress) restart it. `switch` and `reset` also refuse a pane waiting on a permission prompt
+  (`session-holds-permission`), an interrupt with text is `interrupt-text-unsupported` and `answer --pane` is
+  `answer-unsupported`. `holler pane doctor` reports two new findings, `pane-waiting` and `claude-login-missing`.
+  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet, and `holler roster`, whose rows are the sessions
+  that bodies serve, has no row for one: both need a body for its session
+  ([#850](https://github.com/Performant-Labs/holler/issues/850), after
+  [#839](https://github.com/Performant-Labs/holler/issues/839)). The new crate `holler-adapter-claude` implements the
+  harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`); every harness call is now keyed by an
+  endpoint, a port or a process; and `HostPort::foreground_commands` with the one Claude Code command rule is built to
+  #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
+  [`docs/pane-control.md`](docs/pane-control.md) documents the Claude Code pane.
+- Profiles can be renamed, exported and imported, and `holler pane doctor` reports a pane that drifted from its
+  profile (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#665](https://github.com/Performant-Labs/holler/issues/665)). `holler profile rename OLD NEW` renames a profile and
+  every member pane's `profile` in one transaction on the hub, under both registries' locks: the panes stay attached
+  and nothing live is touched, a failed save changes nothing (if the pane file then cannot be saved back, the hub logs
+  the `error` event `profile_rename_restore_failed`), and running the same rename again completes one that a crash
+  interrupted. `holler profile export NAME [--out FILE]` writes a profile's specs as one JSON document (names and
+  non-secret values only, positions written `rRcC`, the file at mode 0600), and `holler profile import FILE
+  [--name NAME]` creates a detached profile from one, accepting any position form `GridPos` reads and refusing an
+  environment value (`profile-secret-refused`), a shell-string command (`command-not-argv`) and a taken name
+  (`profile-exists`); no refusal quotes what a spec holds, and a bad position or member is named by the spec's number.
+  `profile-drift` is a doctor finding for a pane whose record differs from its profile's spec, by the comparison
+  `holler profile show NAME` makes: one finding per drifted pane per pass, naming the fields and no value, with no
+  remedy. A pass reads the profiles once, and only when a pane in scope names a profile.
+  [ADR 0021](docs/adr/ADR-0021.md) records the rename transaction, the file format and the finding.
+- Pane control, the apply rehearsal (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): an opt-in
+  scenario runs `holler profile apply` and the pane verbs around it on a scratch Herdr, tmux and OpenCode that it starts
+  itself ([#667](https://github.com/Performant-Labs/holler/issues/667);
+  `HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test profile_apply_scenario -- --ignored --test-threads=1`).
+  It shares the scratch set of #649, whose helpers moved into one place. Tests only: no behaviour change.
+- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
+  `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit
+  is the 7-character hash of the checkout's `HEAD`, followed by `-dirty` when a tracked file had changed; a build with no
+  git checkout (a source archive) uses the build-time variable `HOLLER_GIT_SHA`, and otherwise prints `unknown`. The
+  `version` field that `hub status`, `hub query status`, `body query status` and `caps` print carries the same string, so
+  `hub status` begins `hub 0.4.0 (bda1069) (protocol 3)`; no field is added. A release binary is built from a checkout of
+  its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
+  `docs/releasing.md` says when the build works the commit out again.
 - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
-  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
-  the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane set up by hand
+  stays outside the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
   envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
   that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
-  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane set up by hand. A docs test pins the guide to the code's own tables. No behaviour changes.
+- The roster shows the pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#648](https://github.com/Performant-Labs/holler/issues/648)): `holler roster` appends the columns PANE, POS, PROFILE,
+  HEALTH, SHOWN and DRIVEN after HOLD, read from the pane registry as `holler pane list` prints them (`-` for a session
+  with no pane), and prints `N pane(s) show a different session than the hub drives: <names>` as its first line when
+  a pane's SHOWN and DRIVEN are both known and differ. `roster --profile NAME` lists only that profile's panes (it was
+  refused with `not implemented (story #648)`; an unknown profile is refused `profile-not-found`, exit 3),
+  `roster --format=json` prints the JSON envelope with `data.rows` and `data.mismatches`, and `roster --json` keeps its
+  shape and gains the keys `pane`, `pos`, `profile`, `health`, `shown` and `driven` (additive, so MINOR under ADR 0003).
+  The roster makes no call to Herdr, tmux or OpenCode and shows no unmanaged pane. With `--server` the new columns are
+  `-`, since the registry is the local hub's, and `--profile` with `--server` is a usage error (exit 2). A registry that
+  cannot answer leaves the columns `-` and prints one `note:` line on stderr. DRIVEN is `-` until the hub's DRIVEN
+  session is recorded (#839).
 - Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
   `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
   registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
@@ -64,6 +128,22 @@ fills this file in at release time.
   refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
   again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
   named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, the import leaves Claude Code panes alone (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import` no longer records a pane whose tmux session runs Claude Code as an OpenCode pane
+  ([#835](https://github.com/Performant-Labs/holler/issues/835)). The launcher's files cannot tell the two apart, so the
+  import now reads the command name of the foreground process of each tmux pane in a pane's tmux session (a name only,
+  never a command line), through `HostPort::foreground_commands`. A pane whose tmux session has a foreground
+  process named exactly `claude` gets the new finding `harness-claude-code` (info) and no record, and blocks nothing.
+  Any other name, or no process, is imported as OpenCode, as before. A pane whose tmux session cannot be read gets the
+  new problem `harness-unreadable` and no record, so a real run is refused (`import-blocked`); a failed `ps`, a warning
+  until now, is that problem too. `--adopt-claude-code`, which will adopt those panes, is refused (`usage`, exit 2)
+  until the adoption step of [#831](https://github.com/Performant-Labs/holler/issues/831) lands. The rule has
+  limits: tmux names only the foreground process, so a Claude Code pane is taken for OpenCode when its `claude` has
+  exited (it shows its shell), is not in the foreground (a wrapper script runs it, or it is suspended) or was started
+  under another name. Read the dry run first.
+  As a follow-up to [#832](https://github.com/Performant-Labs/holler/issues/832), `HerdrPort::observe_pane` is now required
+  as well: a port wrapper that does not forward it no longer compiles, where it would have listed an unmanaged pane with no
+  working directory and no screen change.
 - Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
   idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,
@@ -516,6 +596,23 @@ fills this file in at release time.
   the decisions. Until the hub's stores and the adapters are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+
+### Bug Fixes
+- `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#853](https://github.com/Performant-Labs/holler/issues/853)). Apply created the missing panes in workspace, row and
+  column order, but Herdr adds a row only below a row of one pane, so for a profile of a 2-by-2 grid it created `r1c1`
+  and `r1c2`, then refused `r2c1` and `r2c2` as `grid-unreachable`. Its steps now run in creation order, the Herdr
+  adapter's own: by workspace, then the workspace's column 1 by row, then every other cell by row and column (`r1c1`,
+  `r2c1`, `r1c2`, `r2c2`), which is also the order of `steps` in the output and in a dry run's plan. One limit stays:
+  apply cannot add a row below a row that already holds two or more live panes, and it moves nothing live to make room
+  (that create is still refused, `grid-unreachable`). **Behaviour change:** a real run with a `refused` step and no
+  failed one now exits 3, not 0, and, as a failed run does, prints only one line, `apply refused <N> step(s): <pane>
+  (<code>), ...; <M> other step(s) ran`, coded as the first refused step and followed by the detail of each refused step
+  whose launch or relaunch had begun (it ends with the command that reconciles). Every step still runs and nothing is
+  rolled back. A script that needs the steps as data runs `--dry-run` first, which still exits 0 and prints the plan.
+  The test kit's split-only fake Herdr now follows the adapter's rule, and a test checks the two against each other.
+  [ADR 0021](docs/adr/ADR-0021.md) records both decisions (32 and 33).
 
 ## [0.4.0] - 2026-09-29
 

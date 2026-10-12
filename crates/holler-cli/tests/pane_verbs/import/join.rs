@@ -7,7 +7,6 @@ use holler_pane::findings::FindingKind as K;
 use holler_pane::pane::{Health, PaneRole};
 use holler_pane::{GridPos, HerdrPane, PaneError, PaneId, PaneName};
 use holler_pane_testkit::harness::HarnessOp;
-use holler_pane_testkit::host::HostOp;
 use serde_json::Value;
 
 use super::rig::{
@@ -389,19 +388,9 @@ fn a_missing_tmux_session_is_reconciles_problem_and_blocks() {
     assert_real_run_blocked(&rig, 1);
 }
 
-#[test]
-fn a_failed_ps_is_observe_failed_and_the_pane_imports() {
-    let rig = one_pane();
-    let unavailable = PaneError::Unavailable {
-        what: "made-up".to_owned(),
-    };
-    rig.world.host.faults().fail_next(HostOp::Ps, unavailable);
-    let run = rig.run(&[], Format::Json);
-    let data = data_of(&run);
-    let finding = one_finding(&data, K::ObserveFailed.code(), A, "warning");
-    assert!(message(finding).contains("host.ps"), "{finding}");
-    assert!(rig.record(A).is_some(), "a warning does not block");
-}
+// A failed `ps` was `observe-failed` here, and the pane imported (#650). #835 (brief R2-6)
+// reversed that: it is `harness-unreadable` and blocks, pinned in `harness.rs` as
+// `a_failed_ps_is_harness_unreadable_and_blocks`.
 
 // --- Acceptance 8: not OpenCode, command shapes, other directories ------------------------
 

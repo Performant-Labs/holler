@@ -30,6 +30,7 @@ mod parse;
 mod docs_rows;
 mod flags;
 mod legacy_verbs;
+mod profile_io;
 mod stub;
 mod usage;
 

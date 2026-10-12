@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::argv::{AgentKey, Argv, EnvVarName};
 use crate::error::{deserialize_parsed, excerpt, PaneError};
 use crate::grid::GridPos;
-use crate::ports::Cursor;
+use crate::ports::{Cursor, HarnessEndpoint};
 use crate::probe::ProbeResult;
 use crate::profile::ProfileName;
 
@@ -123,18 +123,126 @@ pub struct HostInfo {
     pub herdr_api_version: Option<String>,
 }
 
-/// The harness a pane runs. Only OpenCode exists; the `HarnessPort` is the seam for
-/// another.
+/// The harness a pane runs: OpenCode, or Claude Code (#831, ADR-0021 section 15). The
+/// `HarnessPort` is the seam both are reached through.
 ///
-/// This is a closed enum on purpose (epic #633: no new harness; a stored record with
-/// an unknown harness fails to load rather than being driven blindly). It is a second
-/// list beside `holler_proto::vocab::HARNESS_IDS`; every serde name of this enum must
-/// be in that list, which a test pins. Adding a harness to panes adds a variant here
-/// and goes through the epic's amend-first rule.
+/// This is a closed enum on purpose (epic #633: a stored record with an unknown harness
+/// fails to load rather than being driven blindly). It is a second list beside
+/// `holler_proto::vocab::HARNESS_IDS`; every serde name of this enum must be in that list,
+/// which a test pins. Adding a harness to panes adds a variant here and goes through the
+/// epic's amend-first rule.
+///
+/// The facts about a kind are its methods, the one place they live (decision 25):
+/// [`HarnessKind::shape`], [`HarnessKind::abort_style`] and
+/// [`HarnessKind::login_variables`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessKind {
+    /// OpenCode: a harness server on a port, and a TUI attached to one of its sessions.
     Opencode,
+    /// Claude Code's interactive CLI (#831): one process that is the harness, the TUI and
+    /// the session holder at once. Not the ACP body harness of the same id (ADR 0012),
+    /// which only `holler-body` reads.
+    Claude,
+}
+
+/// How a harness of a kind is built ([`HarnessKind::shape`], #831).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// A server on a port, and a TUI that attaches to and switches between its sessions
+    /// (OpenCode).
+    ServerAndTui,
+    /// One process that holds one session; a switch, a reset or an interrupt is a
+    /// relaunch of it (Claude Code).
+    SingleProcess,
+}
+
+/// How the running turn of a harness of a kind is stopped ([`HarnessKind::abort_style`],
+/// #831).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbortStyle {
+    /// Through the harness API, in place, the session and its process kept (OpenCode).
+    InPlace,
+    /// By stopping the process and relaunching it on the session of record: the turn in
+    /// flight is lost and the session kept (Claude Code; the operator's decision of
+    /// 2026-10-11: no keypress, no in-place interrupt).
+    Relaunch,
+}
+
+/// The environment variables that silently change a Claude Code login (ADR-0021 section 15
+/// item 10): each is unset on every Claude launch argv, and a spec that names one is
+/// refused (`claude-login-env-refused`). Names only, never a value (I7).
+pub const CLAUDE_LOGIN_VARIABLES: [&str; 7] = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+impl HarnessKind {
+    /// The kind's name: its serde name (`opencode`, `claude`), as a message or a line of text
+    /// output names it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            HarnessKind::Opencode => "opencode",
+            HarnessKind::Claude => "claude",
+        }
+    }
+
+    /// How a harness of this kind is built: [`Shape::ServerAndTui`] for `opencode`,
+    /// [`Shape::SingleProcess`] for `claude`. The engines choose their steps by it.
+    pub const fn shape(self) -> Shape {
+        match self {
+            HarnessKind::Opencode => Shape::ServerAndTui,
+            HarnessKind::Claude => Shape::SingleProcess,
+        }
+    }
+
+    /// How the running turn of a harness of this kind is stopped:
+    /// [`AbortStyle::InPlace`] for `opencode`, [`AbortStyle::Relaunch`] for `claude`.
+    pub const fn abort_style(self) -> AbortStyle {
+        match self {
+            HarnessKind::Opencode => AbortStyle::InPlace,
+            HarnessKind::Claude => AbortStyle::Relaunch,
+        }
+    }
+
+    /// The environment variable names that change the login of a harness of this kind,
+    /// which its pane's spec may not name: [`CLAUDE_LOGIN_VARIABLES`] for `claude`, none for
+    /// `opencode` (its provider credential reaches the server through the tmux server's
+    /// environment, ADR-0021 section 2).
+    pub const fn login_variables(self) -> &'static [&'static str] {
+        match self {
+            HarnessKind::Opencode => &[],
+            HarnessKind::Claude => &CLAUDE_LOGIN_VARIABLES,
+        }
+    }
+}
+
+/// The command name of a Claude Code CLI process, as tmux reports a pane's foreground
+/// process (`HostPort::foreground_commands`, #835). It is a process name, not the protocol's
+/// harness id: it is not taken from `holler_proto::vocab::HARNESS_IDS`, though the two are
+/// spelled alike.
+///
+/// The one place the name is written: [`is_claude_code_command`] is the one rule that uses it,
+/// for the import (#835) and the stories that adopt or show such a pane (#831, #832).
+pub const CLAUDE_CODE_COMMAND: &str = "claude";
+
+/// Whether `name`, a command name as `HostPort::foreground_commands` reports it, is Claude
+/// Code's: exactly [`CLAUDE_CODE_COMMAND`], with no case folding, trimming or path. No other
+/// name is classified.
+///
+/// The rule's limits (#835, ADR-0021 section 13): tmux names a pane's foreground process by
+/// its `argv[0]`, so a Claude Code pane is not recognised when its `claude` has exited (the
+/// pane shows its shell), is not in the foreground (a wrapper script that stays in the
+/// foreground runs it, or it is suspended) or was started under another `argv[0]` (a wrapper
+/// that `exec`s it under another name, or `node` running its script). It is a default for an
+/// import, not a proof of what a pane runs.
+pub fn is_claude_code_command(name: &str) -> bool {
+    name == CLAUDE_CODE_COMMAND
 }
 
 /// What the harness server last reported about its health.
@@ -147,15 +255,91 @@ pub enum Health {
     Unknown,
 }
 
-/// The harness server of a pane.
+/// The harness of a pane: its kind, where it is reached, and its last observed health.
+///
+/// An `opencode` harness is reached on its server's `port`; a `claude` harness is one process,
+/// identified by its `pid`, and has no port (#831, ADR-0021 section 15 item 3). A record is
+/// valid only as one of the two, so a stored record that is neither does not load
+/// (`deny_unknown_fields` and the fail-closed registry, section 7). An `opencode` record may
+/// still carry the `pid` the launcher wrote before #802, and reads and writes the same bytes
+/// as before the port became optional. [`HarnessInfo::endpoint`] is the one place a record
+/// becomes a [`HarnessEndpoint`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawHarnessInfo")]
 pub struct HarnessInfo {
     pub kind: HarnessKind,
-    pub port: u16,
+    /// The harness server's port: present exactly for an `opencode` harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// The harness process's pid: required for a `claude` harness, whose identity it is (it
+    /// survives a person's `/clear`); an `opencode` harness records none since #802.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     pub health: Health,
+}
+
+/// The serde form of a [`HarnessInfo`] before its fields are checked against its kind.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHarnessInfo {
+    kind: HarnessKind,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    pid: Option<u32>,
+    health: Health,
+}
+
+impl TryFrom<RawHarnessInfo> for HarnessInfo {
+    type Error = String;
+
+    fn try_from(raw: RawHarnessInfo) -> Result<Self, String> {
+        let info = HarnessInfo {
+            kind: raw.kind,
+            port: raw.port,
+            pid: raw.pid,
+            health: raw.health,
+        };
+        match info.misfit() {
+            Some(why) => Err(why.to_owned()),
+            None => Ok(info),
+        }
+    }
+}
+
+impl HarnessInfo {
+    /// Where the harness of the pane `pane` is reached: the server's port for an `opencode`
+    /// harness, the pane and the process's pid for a `claude` one. A value that does not fit
+    /// its kind (built in code; a stored one does not load) is `store-corrupt`, and no
+    /// endpoint is guessed.
+    pub fn endpoint(&self, pane: &PaneName) -> Result<HarnessEndpoint, PaneError> {
+        match (self.kind.shape(), self.port, self.pid) {
+            (Shape::ServerAndTui, Some(port), _) => Ok(HarnessEndpoint::Port(port)),
+            (Shape::SingleProcess, None, Some(pid)) => Ok(HarnessEndpoint::Process {
+                pane: pane.clone(),
+                pid,
+            }),
+            _ => {
+                let why = self.misfit().unwrap_or("it does not fit its kind");
+                Err(PaneError::StoreCorrupt {
+                    what: format!("the harness of {pane}: {why}"),
+                })
+            }
+        }
+    }
+
+    /// Why this harness does not fit its kind, or `None` when it does: an `opencode` harness
+    /// has a port; a `claude` harness has a pid and no port.
+    fn misfit(&self) -> Option<&'static str> {
+        match (self.kind.shape(), self.port, self.pid) {
+            (Shape::ServerAndTui, Some(_), _) | (Shape::SingleProcess, None, Some(_)) => None,
+            (Shape::ServerAndTui, None, _) => Some("an opencode harness needs its server's port"),
+            (Shape::SingleProcess, Some(_), _) => {
+                Some("a claude harness is one process and has no port")
+            }
+            (Shape::SingleProcess, None, None) => Some("a claude harness needs its process's pid"),
+        }
+    }
 }
 
 /// The role of a pane (and of a profile spec): an agent or the orchestrator.

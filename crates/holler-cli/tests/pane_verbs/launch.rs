@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use holler_cli::output::Format;
 use holler_pane::pane::{HarnessInfo, Health, HostInfo, LastObserved, PaneRole};
 use holler_pane::tx_launch::{self, LaunchRequest, TxFailure, TxOptions};
-use holler_pane::{GridPos, HarnessPort, Pane, PaneError, PaneId, ProbeResult};
+use holler_pane::{GridPos, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, ProbeResult};
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::sample_pane;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
@@ -74,7 +74,11 @@ fn launch_records_what_the_fakes_show() {
     let run = rig.run(LAUNCH, Format::Text);
     assert_eq!((run.code, run.err.as_str()), (0, ""), "{run:?}");
     let record = rig.record(PANE).expect("a record");
-    let sessions = rig.fakes.harness.list_sessions(PORT).unwrap();
+    let sessions = rig
+        .fakes
+        .harness
+        .list_sessions(&HarnessEndpoint::Port(PORT))
+        .unwrap();
     let [sid] = sessions.as_slice() else {
         panic!("exactly one session, no ping session: {sessions:?}");
     };
@@ -95,7 +99,7 @@ fn launch_records_what_the_fakes_show() {
             herdr_api_version: Some(PROTOCOL_22_VERSION.to_owned()),
         },
         harness: HarnessInfo {
-            port: PORT,
+            port: Some(PORT),
             // #802: the server is a process of the pane's tmux session; no pid is recorded.
             pid: None,
             health: Health::Healthy,

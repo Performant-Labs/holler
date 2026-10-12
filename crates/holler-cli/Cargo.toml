@@ -64,6 +64,11 @@ path = "tests/bound_token_lifetime_test.rs"
 name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 
+# Issue #851: the commit resolver shared with build.rs through #[path].
+[[test]]
+name = "build_version_test"
+path = "tests/build_version_test.rs"
+
 [[test]]
 name = "logging_test"
 path = "tests/logging_test.rs"
@@ -203,6 +208,14 @@ path = "tests/talk_test.rs"
 [[test]]
 name = "roster_cli_test"
 path = "tests/roster_cli_test.rs"
+
+# Story #648: the roster's pane columns, summary line, `--profile` and envelope,
+# in-process over the test kit's fakes (`roster_cmd::render`), with the golden
+# tables under tests/fixtures/roster_panes/. The process cases are in
+# `roster_cli_test`.
+[[test]]
+name = "roster_panes_test"
+path = "tests/roster_panes_test.rs"
 
 # Issue #255: proves `Roster::sweep()` actually runs inside the production
 # hub process (a dedicated background task, not just the unit tests'
@@ -400,14 +413,19 @@ clap = { workspace = true }
 serde = { workspace = true }
 # stub-acp bin (serializes its ACP frames) and the body-join e2e test's
 # `#[cfg(test)]` unit test (decodes the credential/status documents it inspects).
-serde_json = { workspace = true }
+# preserve_order: `holler profile export` (#665) writes each spec's members in the spec's
+# own order, through a `serde_json::Value`; declared here rather than relied on through
+# feature unification (agent-client-protocol, under holler-body, also turns it on).
+serde_json = { workspace = true, features = ["preserve_order"] } # for holler-cli: profile export's key order (#665)
 holler-proto = { path = "../holler-proto" }
 # #670: the pane/profile verbs take every error code, guard and port type from
 # the holler-pane crate (`Ports`, `PaneError`, `GridPos`, `Argv`, `EnvVarName`).
 holler-pane = { path = "../holler-pane" }
-# #649: `pane/wiring.rs` builds the real ports from the three adapter crates
+# #649: `pane/wiring.rs` builds the real ports from the adapter crates
 # (ADR-0021 section 5: the verbs run CLI-side, so holler-cli depends on the
-# adapters and holler-hub does not).
+# adapters and holler-hub does not). #831 adds the Claude Code adapter, which
+# the wiring routes beside OpenCode's (`HarnessRouter`).
+holler-adapter-claude = { path = "../holler-adapter-claude" }
 holler-adapter-herdr = { path = "../holler-adapter-herdr" }
 holler-adapter-host = { path = "../holler-adapter-host" }
 holler-adapter-opencode = { path = "../holler-adapter-opencode" }
@@ -496,6 +514,14 @@ path = "tests/pane_verbs/main.rs"
 [[test]]
 name = "profile_verbs"
 path = "tests/profile_verbs/main.rs"
+
+# #831: a Claude Code pane under the pane and profile verbs, over the test kit's
+# fakes with `FakeHarnesses` as the harness port. Its own target, so pane_verbs
+# and profile_verbs build without the Claude harness while the endpoint change
+# lands first.
+[[test]]
+name = "pane_claude"
+path = "tests/pane_claude/main.rs"
 
 # Process-level tests of the whole pane/profile surface: the real `holler`
 # binary, every stub verb, `--format`/`--json`, usage errors, which flag parses

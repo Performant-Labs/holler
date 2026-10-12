@@ -20,7 +20,9 @@
 //! `profile/`, through the crate-private `RegistryEntry` trait, with [`PaneStoreOptions`],
 //! [`WATCH_WAIT`] and `log_fault`. #661 also adds one comparison here: the
 //! `pane-in-other-profile` check runs inside the pane registry's compare-and-swap
-//! (`store.rs`), under the pane lock (ADR-0021 §8 and "Decisions taken", item 2).
+//! (`store.rs`), under the pane lock (ADR-0021 §8 and "Decisions taken", item 2). #665's
+//! `profile/rename` moves a profile's member panes through [`PaneState::locked`], the one
+//! way the profile registry reaches this one (`store.rs`, "The pane half of a rename").
 //!
 //! # Operating limits
 //!
@@ -30,6 +32,9 @@
 //!   `holler_pane::ports`) therefore holds only while saves are fast: a wedged save blocks
 //!   every caller, with no `timeout`. That is acceptable for a local state dir, where the
 //!   client's own timeout bounds the verb.
+//! - A `profile/rename` (#665) holds the lock across two saves, this file's and
+//!   `profiles.json`, so every pane call waits for a rename, the prompt gate's `list` in
+//!   `circuit/dispatch.rs` included. A rename is paced by an operator's verb.
 //! - Each pending `pane/watch` holds one blocking-pool thread for up to [`WATCH_WAIT`], and
 //!   the runtime's shutdown waits for it. Do not raise the window without revisiting this.
 //!
@@ -60,9 +65,10 @@ use crate::profile::ProfileState;
 use crate::state::HubState;
 use store::Store;
 
-/// The fault log the profile registry shares (#661). Only this item of the store module is
-/// opened to the crate: the pane `Store` and its writes stay behind `PaneState`.
-pub(crate) use store::log_fault;
+/// The fault log the profile registry shares (#661), and the pane half of `profile/rename`
+/// (#665). Only these items of the store module are opened to the crate: the pane `Store` and
+/// its writes stay behind `PaneState`.
+pub(crate) use store::{log_fault, Locked};
 
 /// The registry file, in the hub's state dir (`<state dir>/hub/`).
 const FILE_NAME: &str = "panes.json";
@@ -126,6 +132,13 @@ impl PaneState {
         Self {
             store: Arc::new(Store::open(state.hub_dir.join(FILE_NAME), options)),
         }
+    }
+
+    /// The registry under its lock, for the pane half of `profile/rename` (#665), which
+    /// takes it after the profile lock (ADR-0021 section 7); `store-corrupt` when the
+    /// registry failed to load.
+    pub(crate) fn locked(&self) -> Result<Locked<'_>, PaneError> {
+        self.store.locked()
     }
 }
 

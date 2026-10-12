@@ -19,7 +19,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use holler_cli::pane::wiring::Wiring;
-use holler_pane::{PaneError, PaneId, PaneName};
+use holler_pane::{HarnessEndpoint, PaneError, PaneId, PaneName};
 
 use crate::support::{Hub, StateDir};
 use crate::with_env;
@@ -108,8 +108,9 @@ fn assert_the_socket_is_usage_never_the_default_server(socket: &OsStr) {
         [
             usage_naming_the_socket("host.ensure_session", ports.host.ensure_session(&name, "/tmp")),
             usage_naming_the_socket("host.ps", ports.host.ps(&name)),
-            usage_naming_the_socket("harness.health", ports.harness.health(48199)),
-            usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane)),
+            usage_naming_the_socket("host.foreground_commands", ports.host.foreground_commands(&name)),
+            usage_naming_the_socket("harness.health", ports.harness.health(&HarnessEndpoint::Port(48199))),
+            usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane, &HarnessEndpoint::Port(48199))),
         ]
         .into_iter()
         .flatten()

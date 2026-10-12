@@ -12,8 +12,9 @@
 //! - the two registries' clients ([`store`]), over the hub's control socket;
 //! - the Herdr adapter, built on its first use ([`bind::LazyHerdr`]): it pings Herdr when it is
 //!   built;
-//! - the tmux host (`TmuxHost`) and the OpenCode harness (`OpenCodeHarness`), on one tmux server;
-//!   building either does no I/O;
+//! - the tmux host (`TmuxHost`) and the harness, on one tmux server: `HarnessRouter` over the
+//!   OpenCode harness (`OpenCodeHarness`) and the Claude Code harness (`ClaudeHarness`, #831), so a
+//!   grid that mixes the two needs one `harness` in `Ports`; building any of them does no I/O;
 //! - `SystemProber`, and `StoreScope` over the two clients as the `ProfileScope`. The scope logs
 //!   every profile write as `holler pane`: what a `--profile` edit of a pane verb writes, and
 //!   through it what `profile apply`'s creates and relaunches write (one actor; per-verb actors are
@@ -36,6 +37,12 @@
 //! | `HOLLER_TMUX_SOCKET` | the tmux server of the host and the harness, an absolute path (`tmux` and `kill` come from `PATH`) | tmux's default socket |
 //! | `HOLLER_OPENCODE_BIN` | the `opencode` binary, an absolute path | `opencode` found on `PATH` (none: each harness call answers `unavailable` naming the variable) |
 //! | `HOLLER_OPENCODE_SERVE_ARGS` | a JSON array of strings, appended to `opencode serve --port P --hostname 127.0.0.1` | none |
+//! | `HOLLER_CLAUDE_BIN` | the `claude` binary, an absolute path (#831) | `claude` found on `PATH`, never a shell alias (none: each Claude harness call answers `unavailable` naming the variable) |
+//!
+//! The Claude Code harness also reads `HOME`, for Claude Code's configuration directory
+//! (`$HOME/.claude`, where it checks only whether a session's transcript exists), and keeps the
+//! socket files its launch hook writes under the Holler state directory, in `claude-inbox/`
+//! (`HOLLER_STATE_DIR`, else `$HOME/.holler`; the hook makes it `0700`, each file `0600`).
 //!
 //! A malformed value (a relative or empty path, a workspace list that does not parse, serve
 //! arguments that are not a JSON array of strings) is `usage` naming its variable, at the first
@@ -65,17 +72,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use holler_adapter_claude::{ClaudeConfig, ClaudeHarness};
 use holler_adapter_herdr::adapter::{HerdrAdapter, HerdrConfig};
 use holler_adapter_host::{TmuxHost, TmuxSocket as HostSocket};
 use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Resolver, Timeouts, TmuxConfig,
     TmuxSocket as TuiSocket,
 };
+use holler_pane::ports::{LoginStatus, SessionChoice};
 use holler_pane::{
-    Actor, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort,
-    Key, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneObservation, PaneStore, Ports, ProbeResult, Prober,
-    Profile, ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileStore, ResolvedScope,
-    ServeSpec, SpecEdit, SystemProber, Watch,
+    Actor, Argv, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPane, HerdrPort,
+    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneEvent, PaneId, PaneName,
+    PaneObservation, PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry,
+    ProfileName, ProfileScope, ProfileStore, ResolvedScope, ServeSpec, SpecEdit, SystemProber,
+    Watch,
 };
 
 use self::bind::{
@@ -87,13 +97,21 @@ use crate::pane::profile_scope::StoreScope;
 /// Who the profile scope logs every profile write of a wired run as (D1).
 const ACTOR: &str = "holler pane";
 
+/// The directory, under the Holler state directory, of the socket files the Claude Code
+/// harness's launch hook writes (#831).
+const CLAUDE_INBOX_DIR: &str = "claude-inbox";
+
+/// The wired harness: the router of the OpenCode harness and the Claude Code harness (#831),
+/// each wired, so a misconfigured one fails closed at its first use and the other still works.
+type RoutedHarness = HarnessRouter<WiredHarness, WiredHarness>;
+
 /// The ports a verb runs against, owned (D1).
 pub struct Wiring {
     panes: Arc<dyn PaneStore>,
     profiles: Arc<dyn ProfileStore>,
     herdr: BindingHerdr,
     host: BindingHost,
-    harness: WiredHarness,
+    harness: RoutedHarness,
     scope: StoreScope,
     prober: SystemProber,
 }
@@ -151,7 +169,10 @@ impl Wiring {
         Self {
             herdr: BindingHerdr::new(lazy, bindings.clone()),
             host: BindingHost::new(Arc::new(tmux_host(&tmux)), bindings),
-            harness: WiredHarness::new(opencode_harness(env, &tmux, lookup)),
+            harness: HarnessRouter::new(
+                WiredHarness::new(opencode_harness(env, &tmux, lookup)),
+                WiredHarness::new(claude_harness(env)),
+            ),
             scope: StoreScope::new(Arc::clone(&profiles), Arc::clone(&panes), actor),
             panes,
             profiles,
@@ -200,6 +221,21 @@ fn opencode_harness(
         timeouts: Timeouts::default(),
     };
     Ok(Arc::new(OpenCodeHarness::new(config)))
+}
+
+/// The Claude Code harness (#831): the `claude` binary, Claude Code's configuration directory
+/// and the socket directory under the Holler state directory, or the first configuration error
+/// of the three, in that order.
+fn claude_harness(env: Lookup<'_>) -> Result<Arc<dyn HarnessPort>, PaneError> {
+    let bin = env::claude_bin(env)?;
+    let config_dir = env::claude_config_dir(env)?;
+    let state = holler_hub::state::resolve_state_dir().ok_or_else(|| PaneError::Unavailable {
+        what: "no Holler state directory (HOLLER_STATE_DIR is unset and so is HOME) for the \
+               Claude Code harness's socket files"
+            .to_owned(),
+    })?;
+    let config = ClaudeConfig::new(bin, config_dir, state.join(CLAUDE_INBOX_DIR));
+    Ok(Arc::new(ClaudeHarness::new(config)))
 }
 
 /// A port set whose every method answers [`PaneError::NotImplemented`]. Its probe never passes.
@@ -324,6 +360,10 @@ impl HostPort for Unwired {
     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
         Err(PaneError::NotImplemented)
     }
+
+    fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
 }
 
 impl HarnessPort for Unwired {
@@ -336,27 +376,32 @@ impl HarnessPort for Unwired {
         Err(PaneError::NotImplemented)
     }
 
-    fn verify_serving(&self, _port: u16, _spec: &ServeSpec) -> Result<(), PaneError> {
+    fn verify_serving(&self, _at: &HarnessEndpoint, _spec: &ServeSpec) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 
-    fn health(&self, _port: u16) -> Result<bool, PaneError> {
+    fn health(&self, _at: &HarnessEndpoint) -> Result<bool, PaneError> {
         Err(PaneError::NotImplemented)
     }
 
-    fn create_session(&self, _port: u16) -> Result<String, PaneError> {
+    fn create_session(&self, _at: &HarnessEndpoint) -> Result<String, PaneError> {
         Err(PaneError::NotImplemented)
     }
 
-    fn list_sessions(&self, _port: u16) -> Result<Vec<String>, PaneError> {
+    fn list_sessions(&self, _at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
         Err(PaneError::NotImplemented)
     }
 
-    fn abort(&self, _port: u16, _session: &str) -> Result<(), PaneError> {
+    fn abort(&self, _at: &HarnessEndpoint, _session: &str) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 
-    fn attach_tui(&self, _pane: &PaneId, _port: u16, _session: &str) -> Result<(), PaneError> {
+    fn attach_tui(
+        &self,
+        _pane: &PaneId,
+        _at: &HarnessEndpoint,
+        _session: &str,
+    ) -> Result<(), PaneError> {
         Err(PaneError::NotImplemented)
     }
 
@@ -364,7 +409,34 @@ impl HarnessPort for Unwired {
         Err(PaneError::NotImplemented)
     }
 
-    fn shown_session(&self, _pane: &PaneId) -> Result<Option<String>, PaneError> {
+    fn shown_session(
+        &self,
+        _pane: &PaneId,
+        _at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    // The four process methods answer `not-implemented` too, never their `process-unsupported`
+    // defaults (#831): an unwired port is not a server harness.
+    fn process_command(
+        &self,
+        _name: &PaneName,
+        _spec: &ServeSpec,
+        _session: &SessionChoice,
+    ) -> Result<Argv, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn new_session_id(&self) -> Result<String, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn locate_process(&self, _name: &PaneName, _session: &str) -> Result<Option<u32>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn login_status(&self) -> Result<LoginStatus, PaneError> {
         Err(PaneError::NotImplemented)
     }
 }

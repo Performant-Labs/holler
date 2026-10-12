@@ -50,7 +50,7 @@ pub async fn local_status(registry: &Registry, listening: Vec<String>) -> Status
         protocol: PROTOCOL_VERSION,
         protocol_min: PROTOCOL_MIN,
         protocol_max: PROTOCOL_MAX,
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: holler_proto::build_info::version().to_string(),
         hostname: hub_hostname(),
         connected: None,
         token_id: None,

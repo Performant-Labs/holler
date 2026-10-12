@@ -45,9 +45,11 @@ dead_code = "deny"
 clap = { version = "4", features = ["derive"] } # for holler-cli
 # serde derive macros for the proto types (holler-proto) and config types (holler-body).
 serde = { version = "1", features = ["derive"] } # for holler-proto, holler-body
-# serde_json without `preserve_order`: holler-proto's canonical round-trips
+# serde_json without `preserve_order` here: holler-proto's canonical round-trips
 # sort keys explicitly (tests/common) and the hub's `--json` status printer is
-# hand-built (insertion order), so nothing relies on serde_json::Map's ordering.
+# hand-built (insertion order), so nothing else relies on serde_json::Map's
+# ordering. holler-cli turns the feature on for itself: `holler profile export`
+# writes a spec's members in their order (#665).
 serde_json = { version = "1" } # for holler-proto, holler-cli
 # A2A encodes `raw` (file) parts as base64 strings; holler-proto encodes/decodes them.
 base64 = "0.22"

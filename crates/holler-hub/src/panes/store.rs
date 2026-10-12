@@ -28,14 +28,26 @@
 //! the process. Every method, `watch` included, answers the same `store-corrupt`, and
 //! nothing is ever written, so the operator finds the file exactly as it was. The hub logs
 //! one `error` event, `pane_registry_corrupt`, when it loads the file.
+//!
+//! # The pane half of a rename (#665)
+//!
+//! `profile/rename` moves every member pane of a profile to its new name in the same
+//! transaction as the profile record (ADR-0021 section 8, "Rename as built"). The profile
+//! registry runs it: it takes its own lock, then this one through [`Locked`], and holds both
+//! until both documents are saved. This registry never calls into the profile registry, so
+//! the lock order of ADR-0021 section 7 holds. A member's move is `Pane.profile` and the
+//! next generation, nothing else. The saves and the commit to memory are this store's own
+//! (`save`, `apply`), split so that memory changes only after the profile document is saved
+//! too; when it is not, [`Locked::restore`] saves the committed table back.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
+use holler_pane::profile_diff::is_member;
 use holler_pane::{
-    next_generation, Cursor, Pane, PaneError, PaneEvent, PaneName, Watch, WatchReply,
+    next_generation, Cursor, Pane, PaneError, PaneEvent, PaneName, ProfileName, Watch, WatchReply,
 };
 use holler_proto::log::{self, Component, Direction, Event, Severity};
 
@@ -52,6 +64,10 @@ const CORRUPT_EFFECT: &str = "every pane method answers store-corrupt until the 
 
 /// What a failed save means, as the log states it.
 const WRITE_EFFECT: &str = "the write was refused and the registry is unchanged";
+
+/// What a failed restore after a failed rename means, as the log states it (#665).
+const RESTORE_EFFECT: &str = "the rename was refused and the registry is unchanged, but the \
+    file still holds the members' moves until the next pane write saves the registry again";
 
 /// The registry's records and change feed.
 struct Table {
@@ -85,27 +101,29 @@ impl Table {
 
     /// The cursor the next change takes.
     fn next_cursor(&self) -> Result<Cursor, PaneError> {
-        self.head
-            .0
-            .checked_add(1)
-            .map(Cursor)
-            .ok_or_else(|| PaneError::StoreCorrupt {
-                what: format!("{LABEL}: the change cursor overflowed"),
-            })
+        after(self.head)
     }
 
-    /// The entries of the next document: every entry, with `change` filed under its name,
-    /// in name order.
-    fn entries_with<'a>(&'a self, change: &'a PaneEvent) -> Vec<&'a PaneEvent> {
-        let mut entries: Vec<&PaneEvent> = self
-            .entries
-            .values()
-            .filter(|entry| entry.name != change.name)
-            .collect();
-        let at = entries.partition_point(|entry| entry.name < change.name);
-        entries.insert(at, change);
-        entries
+    /// The entries of the next document: every entry, with each of `changes` filed under its
+    /// name, in name order.
+    fn entries_with<'a>(&'a self, changes: &'a [PaneEvent]) -> Vec<&'a PaneEvent> {
+        let mut entries: BTreeMap<&PaneName, &PaneEvent> = self.entries.iter().collect();
+        for change in changes {
+            entries.insert(&change.name, change);
+        }
+        entries.into_values().collect()
     }
+}
+
+/// The cursor after `cursor`: the next change's, or the one a write's later change takes.
+fn after(cursor: Cursor) -> Result<Cursor, PaneError> {
+    cursor
+        .0
+        .checked_add(1)
+        .map(Cursor)
+        .ok_or_else(|| PaneError::StoreCorrupt {
+            what: format!("{LABEL}: the change cursor overflowed"),
+        })
 }
 
 /// The pane registry's store. `PaneState` holds it behind an `Arc`, which the handlers and
@@ -182,7 +200,7 @@ impl Store {
             name: pane.name.clone(),
             pane: Some(Box::new(stored.clone())),
         };
-        self.commit(table, change)?;
+        self.commit(table, vec![change])?;
         Ok(stored)
     }
 
@@ -202,28 +220,41 @@ impl Store {
             name: name.clone(),
             pane: None,
         };
-        self.commit(table, change)
+        self.commit(table, vec![change])
     }
 
-    /// Save the table with `change` applied, then apply it to memory and wake the watchers.
-    fn commit(&self, table: &mut Table, change: PaneEvent) -> Result<(), PaneError> {
-        self.save(table, &change)?;
-        table.head = change.cursor;
-        table.ring.push(change.clone());
-        table.entries.insert(change.name.clone(), change);
-        self.changed.notify_all();
+    /// The pane registry under its lock for the pane half of `profile/rename` (#665), or its
+    /// `store-corrupt` when it failed to load (the lock is then released at once).
+    pub(crate) fn locked(&self) -> Result<Locked<'_>, PaneError> {
+        let guard = self.lock();
+        if let Err(err) = &*guard {
+            return Err(err.clone());
+        }
+        Ok(Locked { store: self, guard })
+    }
+
+    /// Save the table with `changes` applied, then apply them to memory and wake the
+    /// watchers.
+    fn commit(&self, table: &mut Table, changes: Vec<PaneEvent>) -> Result<(), PaneError> {
+        self.save(table, &changes)?;
+        self.apply(table, changes);
         Ok(())
     }
 
-    /// Write the document that `table` with `change` applied describes. A failure is
+    /// Apply `changes`, which are saved, to memory in order, and wake the watchers.
+    fn apply(&self, table: &mut Table, changes: Vec<PaneEvent>) {
+        for change in changes {
+            table.head = change.cursor;
+            table.ring.push(change.clone());
+            table.entries.insert(change.name.clone(), change);
+        }
+        self.changed.notify_all();
+    }
+
+    /// Write the document that `table` with `changes` applied describes. A failure is
     /// logged and answered `unavailable`; the file is as it was.
-    fn save(&self, table: &Table, change: &PaneEvent) -> Result<(), PaneError> {
-        let doc = Doc {
-            version: persist::VERSION,
-            cursor: change.cursor,
-            entries: table.entries_with(change),
-        };
-        persist::save_doc(&self.path, &doc).map_err(|problem| {
+    fn save(&self, table: &Table, changes: &[PaneEvent]) -> Result<(), PaneError> {
+        self.write(table, changes).map_err(|problem| {
             log_fault(
                 "pane_registry_write_failed",
                 &self.path,
@@ -234,6 +265,17 @@ impl Store {
                 what: problem.what(LABEL, &self.path),
             }
         })
+    }
+
+    /// [`Store::save`]'s write, unlogged: the document `table` with `changes` applied
+    /// describes (the committed table itself when there are none).
+    fn write(&self, table: &Table, changes: &[PaneEvent]) -> Result<(), Problem> {
+        let doc = Doc {
+            version: persist::VERSION,
+            cursor: changes.last().map_or(table.head, |change| change.cursor),
+            entries: table.entries_with(changes),
+        };
+        persist::save_doc(&self.path, &doc)
     }
 
     /// A watch from `since`, for the `PaneStore` port. It is refused at once when the store
@@ -323,6 +365,97 @@ impl Iterator for Feed {
     }
 }
 
+/// The pane registry held under its lock by `profile/rename` (#665), which takes it after the
+/// profile lock and keeps it until both documents are saved and committed (see the module
+/// docs). It exists only for a registry that loaded ([`Store::locked`]), and a failed load is
+/// for the life of the process, so its table is always there.
+///
+/// Every method that takes the members' moves does nothing when there are none: a rename
+/// with no member writes no pane file and wakes no pane watcher.
+pub(crate) struct Locked<'a> {
+    store: &'a Store,
+    guard: MutexGuard<'a, Result<Table, PaneError>>,
+}
+
+impl Locked<'_> {
+    /// The table, or the store's failure (never, see the type docs).
+    fn table(&self) -> Result<&Table, PaneError> {
+        self.guard.as_ref().map_err(Clone::clone)
+    }
+
+    /// The moves of every member of the profile `from` (by slug, `is_member`) that does not
+    /// already name `to`: the record with `Pane.profile` = `to` and the next generation, and
+    /// nothing else of it changed. In name order, at consecutive cursors after the head.
+    pub(crate) fn moves(
+        &self,
+        from: &ProfileName,
+        to: &ProfileName,
+    ) -> Result<Vec<PaneEvent>, PaneError> {
+        let table = self.table()?;
+        let mut cursor = table.head;
+        let mut moves = Vec::new();
+        for pane in table
+            .entries
+            .values()
+            .filter_map(|entry| entry.pane.as_deref())
+        {
+            if !is_member(pane, from) || pane.profile.as_ref() == Some(to) {
+                continue;
+            }
+            cursor = after(cursor)?;
+            let moved = Pane {
+                profile: Some(to.clone()),
+                generation: next_generation(pane.generation, pane.generation)?,
+                ..pane.clone()
+            };
+            moves.push(PaneEvent {
+                cursor,
+                name: pane.name.clone(),
+                pane: Some(Box::new(moved)),
+            });
+        }
+        Ok(moves)
+    }
+
+    /// Save the document with `moves` applied, as [`Store::save`] does: a failure is logged
+    /// and `unavailable`, and the file is as it was.
+    pub(crate) fn save(&self, moves: &[PaneEvent]) -> Result<(), PaneError> {
+        if moves.is_empty() {
+            return Ok(());
+        }
+        self.store.save(self.table()?, moves)
+    }
+
+    /// Save the committed table back over the document [`Locked::save`] wrote, when the
+    /// profile document could not be saved after it: a save of what memory holds, never a
+    /// copy of the old bytes. A restore that fails too is logged once, as
+    /// `profile_rename_restore_failed`; the next pane write saves the whole table again.
+    pub(crate) fn restore(&self, moves: &[PaneEvent]) {
+        if moves.is_empty() {
+            return;
+        }
+        let restored = self.table().map(|table| self.store.write(table, &[]));
+        if let Ok(Err(problem)) = restored {
+            log_fault(
+                "profile_rename_restore_failed",
+                &self.store.path,
+                &problem,
+                RESTORE_EFFECT,
+            );
+        }
+    }
+
+    /// Apply `moves`, which are saved, to memory and wake the pane watchers.
+    pub(crate) fn apply(&mut self, moves: Vec<PaneEvent>) {
+        if moves.is_empty() {
+            return;
+        }
+        if let Ok(table) = self.guard.as_mut() {
+            self.store.apply(table, moves);
+        }
+    }
+}
+
 /// The table in the file at `path`, or the failure that keeps the store closed. The failure
 /// is logged here, once.
 fn load_table(path: &Path, retained: usize) -> Result<Table, PaneError> {
@@ -358,10 +491,11 @@ fn refuse_profile_move(stored: Option<&Pane>, next: &Pane) -> Result<(), PaneErr
     }
 }
 
-/// Log one of a registry's two faults: `<registry>_corrupt` when its file cannot be loaded,
+/// Log one of a registry's faults: `<registry>_corrupt` when its file cannot be loaded,
 /// and `<registry>_write_failed` when a write cannot be saved. The pane registry logs
 /// `pane_registry_corrupt` and `pane_registry_write_failed`, and the profile registry (#661)
-/// `profile_registry_corrupt` and `profile_registry_write_failed`. Each is a fault on the
+/// `profile_registry_corrupt` and `profile_registry_write_failed`; a rename whose pane file
+/// could not be saved back logs `profile_rename_restore_failed` (#665). Each is a fault on the
 /// hub's own side, so each is an `error` event. The events share every field but the event
 /// name and the effect, so they share this one helper.
 pub(crate) fn log_fault(method: &'static str, path: &Path, problem: &Problem, effect: &str) {

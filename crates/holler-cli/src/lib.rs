@@ -32,3 +32,12 @@ pub use crate::cli::{
 // captured on `Cli` as `Option<String>` (not typed enums) so the logging
 // resolver in `holler_proto::log` can distinguish "the flag was given" (it
 // beats the environment) from "absent" (env, then the none/text defaults).
+
+/// What `holler --version` prints after `holler `: the workspace version and the commit the
+/// binary was built from, for example `0.4.0 (bda1069)` (issue #851). The commit is the token
+/// `build.rs` sets: the checkout's `HEAD`, with `-dirty` when tracked files had changed, else
+/// `HOLLER_GIT_SHA`, else `unknown`. `main` installs the same string as
+/// [`holler_proto::build_info::version`], which the `version` field of every status document
+/// the hub and the body print carries.
+pub const VERSION: &str =
+    concat!(env!("CARGO_PKG_VERSION"), " (", env!("HOLLER_BUILD_COMMIT"), ")");

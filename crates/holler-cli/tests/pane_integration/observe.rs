@@ -12,16 +12,32 @@
 //! - A `LazyHerdr` whose build failed answers one empty observation per pane from
 //!   `observe_panes`, the trait's contract for a failed call; its `observe_pane` answers the
 //!   stored error (pinned in `bind.rs`'s every-method test).
+//! - #835's acceptance item (brief R3-3): `pane list` over the wiring's Herdr chain shows an
+//!   unmanaged pane's working directory, and its last screen change only when the adapter
+//!   reports one. D33 made this hold before #835, so it is a regression pin: it guards the
+//!   chain once `observe_pane` loses its default (#835).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use holler_cli::output::Format;
 use holler_cli::pane::wiring::bind::{BindingHerdr, Bindings, LazyHerdr};
 use holler_pane::{
-    HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId, PaneObservation,
+    Actor, GridPos, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId,
+    PaneObservation, Ports,
 };
 use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
+use holler_pane_testkit::envelope::check_envelope;
+use holler_pane_testkit::fixture::seed_unmanaged_pane;
+use holler_pane_testkit::harness::FakeHarness;
 use holler_pane_testkit::herdr::FakeHerdr;
+use holler_pane_testkit::host::FakeHost;
+use holler_pane_testkit::pane_store::FakePaneStore;
+use holler_pane_testkit::prober::FakeProber;
+use holler_pane_testkit::profile_scope::FakeProfileScope;
+use holler_pane_testkit::profile_store::FakeProfileStore;
+
+use crate::verb_harness::{run_verb_with, Outcome};
 
 /// The fake the suite runs over: one session, one workspace two rows by one column.
 fn suite_fake() -> Arc<FakeHerdr> {
@@ -218,4 +234,88 @@ fn a_lazy_herdr_that_cannot_be_built_observes_nothing_for_each_pane() {
         1,
         "the failed build is kept, not retried"
     );
+}
+
+// --- #835 R3-3: `pane list` over the wiring's Herdr chain -------------------------------
+
+const LABEL: &str = "seeding-pane";
+const CWD: &str = "/work/seeding";
+
+/// `holler pane list` over an empty registry and the wiring's production Herdr chain
+/// (`BindingHerdr` over `LazyHerdr`, as `Wiring::connect` builds it) over `herdr`.
+fn list_over_the_chain(herdr: Arc<FakeHerdr>, format: Format) -> Outcome {
+    let inner: Arc<dyn HerdrPort> = herdr;
+    let lazy: Arc<dyn HerdrPort> = Arc::new(LazyHerdr::new(move || Ok(Arc::clone(&inner))));
+    let chain = BindingHerdr::new(lazy, Bindings::new());
+    let panes = Arc::new(FakePaneStore::new());
+    let profiles = Arc::new(FakeProfileStore::new());
+    let scope = FakeProfileScope::new(
+        profiles.clone(),
+        panes.clone(),
+        Actor::parse("holler pane").unwrap(),
+    );
+    let (host, harness, prober) = (FakeHost::new(), FakeHarness::new(), FakeProber::new());
+    let ports = Ports {
+        pane_store: panes.as_ref(),
+        profile_store: profiles.as_ref(),
+        herdr: &chain,
+        host: &host,
+        harness: &harness,
+        scope: &scope,
+        prober: &prober,
+    };
+    run_verb_with(&["pane", "list"], format, ports)
+}
+
+/// A fake Herdr holding one unmanaged pane at `r1c1` that works in [`CWD`], whose screen last
+/// changed at `changed` (`None`: Herdr reports no time, as the real adapter does today, #837).
+fn unmanaged(changed: Option<i64>) -> (Arc<FakeHerdr>, String) {
+    let herdr = Arc::new(FakeHerdr::new("scratch").with_workspace("scratch", 3, 3).unwrap());
+    let seeded = seed_unmanaged_pane(&herdr, GridPos { row: 1, col: 1 }, LABEL, CWD, changed).unwrap();
+    (herdr, seeded.pane_id.as_str().to_owned())
+}
+
+/// The unmanaged table's row of `id` in the text form, as its cells.
+fn text_row(out: &str, id: &str) -> Vec<String> {
+    let rows: Vec<Vec<String>> = out
+        .lines()
+        .map(|line| line.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
+        .filter(|cells| cells.first().map(String::as_str) == Some(id))
+        .collect();
+    assert_eq!(rows.len(), 1, "one row for {id}: {out}");
+    rows[0].clone()
+}
+
+#[test]
+fn pane_list_over_the_wirings_herdr_chain_shows_the_cwd_and_the_screen_change() {
+    let changed = 1_700_000_000_000;
+    let (herdr, id) = unmanaged(Some(changed));
+    let run = list_over_the_chain(Arc::clone(&herdr), Format::Json);
+    let data = check_envelope(&run.out, run.code).unwrap().data;
+    let row = &data["unmanaged"][0];
+    assert_eq!(row["pane_id"], id.as_str(), "{data}");
+    assert_eq!(row["cwd"], CWD, "the working directory reaches the list: {row}");
+    assert_eq!(row["last_screen_change"], changed, "the adapter's time reaches the list: {row}");
+
+    let text = list_over_the_chain(herdr, Format::Text);
+    assert_eq!(text.code, 0, "{text:?}");
+    let cells = text_row(&text.out, &id);
+    assert_eq!(cells[1..4], [LABEL, "r1c1", CWD], "{}", text.out);
+    assert_ne!(cells.last().map(String::as_str), Some("-"), "an idle time: {}", text.out);
+}
+
+#[test]
+fn pane_list_over_the_wirings_herdr_chain_invents_no_screen_change() {
+    let (herdr, id) = unmanaged(None);
+    let run = list_over_the_chain(Arc::clone(&herdr), Format::Json);
+    let data = check_envelope(&run.out, run.code).unwrap().data;
+    let row = &data["unmanaged"][0];
+    assert_eq!(row["cwd"], CWD, "{row}");
+    assert!(row["last_screen_change"].is_null(), "never guessed: {row}");
+
+    let text = list_over_the_chain(herdr, Format::Text);
+    assert_eq!(text.code, 0, "{text:?}");
+    let cells = text_row(&text.out, &id);
+    assert_eq!(cells[3], CWD, "{}", text.out);
+    assert_eq!(cells.last().map(String::as_str), Some("-"), "{}", text.out);
 }

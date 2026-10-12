@@ -40,9 +40,6 @@ use holler_cli::{
 };
 use holler_proto::log::{emit_banner, init, resolve};
 
-/// The story that renders `roster` (and so `roster --profile`).
-const ROSTER_STORY: u32 = 648;
-
 /// Install rustls's process-global crypto provider for `wss://` (TLS)
 /// transport, before any `ClientConfig`/`ServerConfig` is built.
 ///
@@ -64,13 +61,14 @@ fn install_tls_provider() {
 
 /// Print a leaf command's result (a refusal to stderr with the `error: `
 /// prefix, a success to stdout) and return its own exit code. Shared by
-/// `Roster`/`Say`/`Answer`/`Interrupt` (issue #151 added `Answer`, #191 added
+/// `Say`/`Answer`/`Interrupt`/`Wait` (issue #151 added `Answer`, #191 added
 /// `Interrupt` — inlining each one's own copy of this same four-line if/else
 /// pushed `main` past the workspace's cognitive-complexity/line-count
-/// guards) so each call site is one line. `newline_on_success`: `Roster`'s
-/// table already ends every line with its own `\n` (`print!`, no extra one);
-/// `Say`/`Answer`/`Interrupt`'s reply text does not (`println!` adds it) —
-/// the one difference between these call sites' prior inline copies.
+/// guards) so each call site is one line. `newline_on_success`: `Wait`'s
+/// matched rows already end every line with their own `\n` (`print!`, no
+/// extra one); `Say`/`Answer`/`Interrupt`'s reply text does not (`println!`
+/// adds it). `Roster` used it too until story #648 made `roster_cmd` print
+/// through a `Sink` itself (see [`run_roster`]).
 fn print_leaf_result(
     message: &str,
     to_stderr: bool,
@@ -99,6 +97,11 @@ fn print_hold_result(result: &holler_cli::hold_cmd::HoldResult) -> i32 {
 }
 
 fn main() {
+    // Issue #851: the hub and body crates build the `version` field of every status document,
+    // and only this binary knows the commit, so the string `--version` prints is installed for
+    // them before any command runs.
+    holler_proto::build_info::install(holler_cli::VERSION);
+
     // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
     // WebSocket needs a process-global provider set up ahead of the first
     // connection, and the body's `join` runs on a throwaway runtime later in
@@ -215,8 +218,9 @@ fn install_logging_or_exit(cli: &Cli) {
 /// there is no catch-all, so a new command that is not dispatched fails to
 /// compile. `--format=json` is `--json` for the verbs that predate the
 /// envelope: they keep their own `--json` shape, and this passes them the one
-/// resolved `json` (#648 takes the explicit-`--format=json` bit for `roster`
-/// from `choice.json_explicit`).
+/// resolved `json`. `roster` takes the whole `choice`, since it prints the
+/// envelope only for an explicit `--format=json` (`choice.json_explicit`,
+/// story #648) and keeps its own shape for a bare `--json`.
 fn dispatch(cli: &Cli, choice: FormatChoice) -> i32 {
     let json = choice.format == Format::Json;
     match &cli.command {
@@ -226,7 +230,7 @@ fn dispatch(cli: &Cli, choice: FormatChoice) -> i32 {
         Command::Profile(cmd) => {
             run_with_stdio(choice.format, |ctx| holler_cli::profile::run(cmd, ctx))
         }
-        Command::Roster(roster) => run_roster(roster, json),
+        Command::Roster(roster) => run_roster(roster, choice),
         Command::Say(say) => {
             let result = holler_cli::say_cmd::run(say, json);
             print_leaf_result(&result.message, result.to_stderr, result.exit_code, true)
@@ -269,19 +273,22 @@ fn run_with_stdio(format: Format, verb: impl FnOnce(&mut VerbCtx<'_>) -> i32) ->
     }
 }
 
-/// `roster`. `--profile` (epic #633) parses but is refused until story #648
-/// renders it, so `roster_cmd.rs` stays untouched for that story.
-fn run_roster(roster: &Roster, json: bool) -> i32 {
-    if roster.profile.profile.is_some() {
-        return print_leaf_result(
-            &output::not_implemented_message(ROSTER_STORY),
-            true,
-            1,
-            false,
-        );
-    }
-    let result = holler_cli::roster_cmd::run(roster, json);
-    print_leaf_result(&result.message, result.to_stderr, result.exit_code, false)
+/// `roster` (issue #186; the pane columns and `--profile`, story #648), printing
+/// to stdout and stderr. The pane registry is read over the real wiring, and
+/// `Wiring::connect` is deferred: `roster_cmd::run` calls `source` only after the
+/// hub call has answered, and never with `--server`, so a hub that is down costs
+/// no second wait and another hub's rows are never joined to this one's
+/// registry. This is the roster's one caller of `connect`; the `Wiring` lives in
+/// `wiring` for as long as the ports it lends.
+fn run_roster(roster: &Roster, choice: FormatChoice) -> i32 {
+    let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+    let mut sink = Sink {
+        out: &mut out,
+        err: &mut err,
+    };
+    let wiring = std::cell::OnceCell::new();
+    let source = || Wiring::connect().map(|built| wiring.get_or_init(|| built).ports());
+    holler_cli::roster_cmd::run(roster, choice, source, &mut sink)
 }
 
 /// Story #143: the hub leaves that are implemented — `hub serve` (the

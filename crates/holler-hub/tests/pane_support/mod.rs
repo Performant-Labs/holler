@@ -6,18 +6,20 @@
 //!
 //! Included with `mod pane_support;` by `pane_registry_test.rs`, `pane_feed_test.rs`,
 //! `pane_handlers_test.rs`, `pane_dispatch_test.rs`, `pane_membership_test.rs`,
-//! `profile_registry_test.rs`, `profile_persistence_test.rs`, `profile_feed_test.rs` and
-//! `profile_handlers_test.rs`.
+//! `profile_registry_test.rs`, `profile_persistence_test.rs`, `profile_feed_test.rs`,
+//! `profile_handlers_test.rs`, `profile_rename_test.rs` and `profile_rename_faults_test.rs`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use holler_hub::panes::{PaneState, PaneStoreOptions};
-use holler_hub::profile::ProfileState;
+use holler_hub::panes::{self, PaneState, PaneStoreOptions};
+use holler_hub::profile::{self, ProfileState};
 use holler_hub::state::HubState;
 use holler_pane::{
     Actor, Cursor, Pane, PaneError, PaneReply, PaneStore, Profile, ProfileStore, Watch,
 };
+use holler_proto::CorrelationId;
 use serde_json::{json, Value};
 
 /// A fully populated pane named `name`, at generation 7, in `profile` when given.
@@ -194,4 +196,41 @@ pub fn write_profiles_doc(state: &HubState, doc: &Value) -> Vec<u8> {
     let bytes = serde_json::to_vec_pretty(doc).unwrap();
     std::fs::write(profiles_file(state), &bytes).unwrap();
     bytes
+}
+
+// --- Requests to both registries (#665) -----------------------------------------------
+
+/// How long a test waits for one reply before it fails (a lock-order bug must fail, not
+/// hang).
+pub const REPLY_WITHIN: Duration = Duration::from_secs(10);
+
+/// Send one `pane/*` or `profile/*` request (`params: None` leaves the member out) straight
+/// to its registry's dispatcher, with both registries, and return the reply line, within
+/// [`REPLY_WITHIN`].
+pub async fn request(
+    panes: &Arc<PaneState>,
+    profiles: &Arc<ProfileState>,
+    method: &str,
+    params: Option<Value>,
+) -> String {
+    let cid = CorrelationId::parse("h-request-1").unwrap();
+    let mut frame = json!({"jsonrpc": "2.0", "id": "h-request-1", "method": method});
+    if let Some(params) = params {
+        frame["params"] = params;
+    }
+    let work = async {
+        if method.starts_with("profile/") {
+            profile::dispatch(method, &cid, &frame, profiles, panes).await
+        } else {
+            panes::dispatch(method, &cid, &frame, panes, profiles).await
+        }
+    };
+    tokio::time::timeout(REPLY_WITHIN, work)
+        .await
+        .unwrap_or_else(|_| panic!("no reply to {method} within {REPLY_WITHIN:?}"))
+}
+
+/// The params of `profile/rename`.
+pub fn rename_params(from: &str, to: &str, expected_generation: u64, actor: &str) -> Value {
+    json!({"from": from, "to": to, "expected_generation": expected_generation, "actor": actor})
 }
