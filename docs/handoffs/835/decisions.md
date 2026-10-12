@@ -676,3 +676,62 @@ Run handoff directory `docs/handoffs/835` · branch `issue-835-implementation` �
     command-name comparison); the callers of `is_claude_code_command` (one in production); tests pinning the limits
     wording (none); personal names in the added lines (none).
   - **Sizes:** `wc -l` of the five files: 1007, 353, 220, 244 and 821 (the guide).
+
+## S, spec audit (cycle 2, after S's REWORK 1 and the merge of #851): 2026-10-11T20:59-06:00 (MDT)
+
+- **Decided:** REWORK (production, docs only), two items (`docs/handoffs/835/handoff-S.md`, which replaces cycle 1's at
+  `ccc53a0`). `archChanged: false`.
+  - **Cycle 1's REWORK 1 is resolved.** These places all say that the import reads the foreground process of each tmux pane,
+    and each limits sentence names a `claude` outside the foreground:
+    - the help;
+    - the guide's sections 1, 3 and 10;
+    - the CHANGELOG;
+    - `read_tmux`'s doc;
+    - the `holler-pane` import module doc (F's DD5).
+  - **All 20 acceptance criteria have proving evidence.** The production code is the code I audited in cycle 1: the 32
+    files this cycle did not touch are byte-identical to `b488a33`, except ADR-0003's change from #851. I re-read the full
+    production diff anyway.
+  - **Item 1: two sentences say that no story owns the adoption after #831.** They are ADR-0021 "Deferred to named
+    stories" (`:1106`) and the guide's section 12 (`:816-817`).
+    - #831's issue body has recorded since 15:50 MDT, as an operator decision of 2026-10-11, that #831 owns the step.
+    - Brief §5's fact went stale when the operator did what §5 asked ("add a line to #831"). So no brief amendment is needed
+      and this is not an `ADVISORY-HOLD`.
+    - My cycle-1 advisory 6.2 repeated the stale fact.
+  - **Item 2, in the same pass: A-dup's warn 1.** The limits in ADR-0021 section 13 and `is_claude_code_command`'s doc gain
+    the case the user docs name: a `claude` that is not the foreground process (a wrapper script, a suspended job).
+- **Assumed:**
+  - T's and F's recorded runs stand. I re-ran no build or test, as the role says.
+  - My checks were read-only:
+    - `git diff`, `git show --remerge-diff`, `git merge-tree`, `git log -S`, `git blame`;
+    - `grep`, `wc -l`, `rustfmt --check`, `changelog-check.sh`;
+    - the built binary's `--help`;
+    - `gh issue view 835` and `831`, `gh api` (#831's body edits), `gh pr list`.
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - **Why REWORK and not PASS with an advisory.** No behaviour is wrong. But the PR would put two false statements into
+    the contract and the operator guide. This run's precedent corrects such cross-story claims inside the PR (A pass 4, W2
+    and W3). Item 2 rides along because F edits ADR-0021 in the same pass; on its own it would be an advisory.
+  - **The constant's name differs from #831's text.** #835 spells it `CLAUDE_CODE_COMMAND`; #831's branch spells it
+    `CLAUDE_COMMAND`. This needs no change here: #835's comment of 18:12 MDT says #831 adopts this story's name if told.
+    Telling it is an outward action, so it is Advisory 1, for the run agent or the operator.
+- **Evidence:**
+  - Live:
+    - `gh issue view 835`: the body equals the brief's issue section; the comments are at 15:51 and 18:12 MDT;
+    - `gh issue view 831`: the section "Adopting the fleet's existing Claude Code panes";
+    - `gh api graphql` `userContentEdits`: the ownership text is present from the 15:50 MDT revision;
+    - `git fetch`: `origin/main` is `d6ae539`, an ancestor of `HEAD`;
+    - `origin/issue-831-implementation` at `008a995`, read through git only: `CLAUDE_COMMAND` in ADR-0021 section 15,
+      items 2 and 17, and in its brief.
+  - Git:
+    - `git merge-tree --write-tree ccc53a0 d6ae539` gives `e77e7a0`, and `git diff e77e7a0 e6d5fa0` is F's 5 prose
+      files plus the handoffs;
+    - `e6d5fa0..HEAD` changes handoffs only;
+    - `git log -S` puts the two ownership sentences in `9bd101b` (18:42 MDT) and `4604693` (19:34 MDT).
+  - Read: the brief; every handoff (cycle-1 T-red from `36b0de8`); `decisions.md`; `evidence.md`; the full production and
+    docs diff; ADR-0021 `:950-986`, `:1013-1023`, `:1082-1107`; the guide's sections 1, 3, 10 and 12;
+    `docs_pane_control_test.rs` (what it pins); `.github/workflows/ci.yml` (the steps; PR size is advisory).
+  - Greps:
+    - `"claude"` in every `src`: one constant and one comparison;
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added lines;
+    - private names, IPs, paths and secrets in the 3,303 added lines;
+    - every place that states the read or its limits.
