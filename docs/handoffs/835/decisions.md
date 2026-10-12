@@ -384,3 +384,46 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - CI's workspace step on the merged tree: 154 groups, 2396 passed, 2 failed (the same two), 32 ignored.
   - Clippy `-D warnings` clean; `lint.sh` exit 0; `changelog-check` ok; `docs_cli_test` 3 passed;
     `git diff --check -- crates` clean.
+
+## F, implement against the RED (cycle 2, text only): 2026-10-11T19:31-06:00 (MDT)
+
+- **Decided:** the rework A's pass 4 and T-red's cycle 2 name, in place, with no code change
+  (`docs/handoffs/835/handoff-F.md`, which replaces cycle 1's at `9bd101b`). `archChanged: false`.
+  - **The merge** was already T-red's (`526bbd3`, two parents). `origin/main` is still `bda1069` at 19:30 MDT, so F
+    merged nothing.
+  - **The guide (W4):**
+    - section 1 names the second exclusion;
+    - section 3 gains `[--adopt-claude-code]` and what it does, the rows `harness-claude-code` (info) and
+      `harness-unreadable` (problem), the narrowed `observe-failed` row, and the four `usage` causes;
+    - section 10 restates the fact with the rule and its limits, links ADR-0021 section 13 as the contract, adds step 1's
+      dry-run check, and names `harness-claude-code` in the closing paragraph;
+    - section 12 replaces the #835 line with the adoption after #831.
+  - **The records:** `ObserveFailed`'s doc (W4); #840's sentences in `unmanaged.rs` and ADR-0021 section 14 (W2); the
+    #832 reuse claims in `pane.rs` and ADR-0021 section 13 (W3).
+  - **Step 1 also says the real run runs while the Claude Code sessions run,** since step 3 observes the panes again.
+    This is one sentence beyond W4's list, inside the step W4 names.
+- **Assumed:**
+  - The guide has no size gate. `scripts/lint.sh` checks `crates/**/*.rs` only. It is now 817 lines, past #652's soft
+    "about 800".
+  - #654's option (a) stays the operator's fallback for a Claude Code pane the rule misses, as the issue's Pipeline
+    section says.
+- **Hedged:**
+  - **The prose of sections 1, 10 and 12 is pinned by no test** (T-red: S reads it). Only the two codes in sections 3
+    or 10 and the flag in section 3's subsection are pinned.
+  - **The step-1 sentence about the real run** goes past W4's list. S may judge it scope; it is true of the code (the
+    real run observes again).
+- **Evidence:**
+  - Commands:
+    - `cargo test -p holler-cli --test docs_pane_control_test`: before, 15 passed and 2 failed (T-red's two); after,
+      17 passed;
+    - `docs_cli_test`: 3 passed;
+    - CI's workspace step: exit 0, 154 groups, 2398 passed, 0 failed, 32 ignored;
+    - clippy `-D warnings`: exit 0;
+    - `cargo doc --no-deps -p holler-pane`: no warning;
+    - `lint.sh`: exit 0; `changelog-check`: ok; `git diff --check`: clean;
+    - `git fetch` and `git log HEAD..origin/main`: empty.
+  - Read: the brief, handoff-A pass 4, handoff-T-red cycle 2, handoff-T-green, handoff-F cycle 1, this journal,
+    `evidence.md`, `docs/pane-control.md`, `docs_pane_control_test.rs`, `docs_cli_test.rs`,
+    `holler-pane/src/import/{observe,assess,findings}.rs`, `unmanaged.rs`, `pane.rs`, `reconcile.rs:362-372`,
+    `holler-cli/src/pane/import.rs`, ADR-0021 sections 13 and 14 and the closing lists, and `gh issue view 654`.
+  - `evidence.md`: three facts in unchanged code (section "F, cycle 2").

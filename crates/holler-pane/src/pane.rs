@@ -143,7 +143,7 @@ pub enum HarnessKind {
 /// spelled alike.
 ///
 /// The one place the name is written: [`is_claude_code_command`] is the one rule that uses it,
-/// for the import (#835) and the stories that adopt or show such a pane (#831, #832).
+/// for the import (#835), and one that #831, which adopts such a pane, can reuse.
 pub const CLAUDE_CODE_COMMAND: &str = "claude";
 
 /// Whether `name`, a command name as `HostPort::foreground_commands` reports it, is Claude

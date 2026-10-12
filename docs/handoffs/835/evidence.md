@@ -125,3 +125,83 @@ Facts in code the diff does not change, which the change or the tests rely on. L
   > pub struct ProfileSpec {
   >     pub pane: String,
   > ```
+
+## F, cycle 2 (the guide and the records after the merge with `main`), 2026-10-11
+
+Line numbers are at `526bbd3` (the branch with `origin/main` `bda1069` merged in), unchanged by this cycle's text edits.
+
+- **Fact:** In the import, `observe-failed` is raised only for a failed call to the pane's harness server: an error from
+  its health check, or from the session list of a server that passed it. The guide's `observe-failed` row and
+  `ImportFinding::ObserveFailed`'s doc are narrowed to this.
+  **Source:** `crates/holler-pane/src/import/observe.rs:177-187`
+  **Verbatim excerpt:**
+  > ```rust
+  >     pub(super) fn finding(&self, pane: &PaneName, port: u16) -> Option<Finding> {
+  >         let (kind, message) = match self {
+  >             Server::Healthy(Ok(_)) => return None,
+  >             Server::Healthy(Err(error)) => (
+  >                 ImportFinding::ObserveFailed,
+  >                 failed_message(HARNESS_LIST_SESSIONS, error),
+  >             ),
+  >             Server::Unknown(error) => (
+  >                 ImportFinding::ObserveFailed,
+  >                 failed_message(HARNESS_HEALTH, error),
+  >             ),
+  > ```
+
+- **Fact:** Every `usage` refusal of `pane import` comes from `Input::read`, before the launcher table and the pane files
+  are read, and `plan` (the first port call) runs only after it, so a dry run gets the same `usage`. The guide's
+  exit-code paragraph lists these four causes (the `--adopt-claude-code` check, first in `Input::read`, is in the diff).
+  **Source:** `crates/holler-cli/src/pane/import.rs:145-146` and `:182-207`
+  **Verbatim excerpt:**
+  > ```rust
+  >     let input = Input::read(args).map_err(body)?;
+  >     let planned = plan(ports, &input.request()).map_err(body)?;
+  > ```
+  > ```rust
+  >         let herdr_session = args
+  >             .herdr_session
+  >             .clone()
+  >             .filter(|session| !session.trim().is_empty())
+  >             .ok_or_else(|| {
+  >                 usage("--herdr-session is required: name the Herdr session the panes live in")
+  >             })?;
+  >         let root = Path::new(&args.from);
+  >         if !root.is_dir() {
+  >             return Err(usage(&format!(
+  >                 "--from {:?} is not a directory: name the directory that holds one directory \
+  >                  per pane",
+  >                 args.from
+  >             )));
+  >         }
+  >         let listing = sources::list(root)?;
+  >         let orchestrators = orchestrators(&args.orchestrator, &listing, &args.from)?;
+  >         let launcher_path = args
+  >             .launcher
+  >             .as_ref()
+  >             .map_or_else(|| root.join(LAUNCHER_FILE), PathBuf::from);
+  >         let table = LauncherTable::read(&launcher_path);
+  >         let panes = listing
+  >             .panes
+  >             .iter()
+  >             .map(|(name, dir)| sources::read(name, dir, &table))
+  > ```
+
+- **Fact:** A whole-fleet reconcile pass reports every snapshot pane that no record names as `unregistered-herdr-pane`,
+  through `unmanaged::unregistered`. A pane the import leaves alone gets no record, so `pane doctor` reports it, as the
+  guide's `harness-claude-code` row and the corrected docs of `unregistered` say.
+  **Source:** `crates/holler-pane/src/reconcile.rs:362-372`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// `unregistered-herdr-pane` for each pane of the snapshot that no record names.
+  > fn unregistered_herdr_panes(snapshot: &HerdrSnapshot, records: &[Pane]) -> Vec<Finding> {
+  >     unmanaged::unregistered(snapshot, records)
+  >         .map(|herdr| {
+  >             let message = format!(
+  >                 "Herdr pane {} (session {}, workspace {}) is in no pane record; no holler verb adopts a pane",
+  >                 quoted(herdr.pane_id.as_str()),
+  >                 quoted(&herdr.session),
+  >                 quoted(&herdr.workspace)
+  >             );
+  >             Finding::new(FindingKind::UnregisteredHerdrPane, message).with_herdr_pane(herdr)
+  > ```

@@ -88,7 +88,9 @@ pub enum ImportFinding {
     NameCellDiffers,
     /// The pane's tmux session does not exist (reconcile's code).
     TmuxSessionMissing,
-    /// A port call returned an error, so nothing was concluded from it (reconcile's code).
+    /// A call to the pane's harness server (its health check or its session list) returned an
+    /// error, so nothing was concluded from it (reconcile's code). A failed read of the pane's
+    /// tmux session is `harness-unreadable` instead (#835).
     ObserveFailed,
     /// The pane's harness server accepts a connection and never answers (reconcile's code).
     ServerWedged,

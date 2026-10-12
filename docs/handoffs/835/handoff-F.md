@@ -1,232 +1,173 @@
-# Handoff-F: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code`
+# Handoff-F: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (cycle 2: the guide and the records after the merge with `main`)
 
-**Date:** 2026-10-11 (18:40 MDT)
-**Branch:** `issue-835-implementation` at `36b0de8` (base `2d217dd`, #649 merged), F's changes uncommitted
+**Date:** 2026-10-11 (19:31 MDT)
+**Branch:** `issue-835-implementation` at `526bbd3` (T-red's two-parent merge of `origin/main` `bda1069`), F's changes uncommitted
 **Issue:** #835
+
+This handoff replaces cycle 1's, which is at `9bd101b` and lists the code: the port method, the adapter, the fake, the
+forwards, the import and the switch. This cycle is text only, as handoff-A pass 4 ("Notes for T and F", item 2) and
+handoff-T-red cycle 2 ("Ready for F") say.
+
+| Field | Value |
+|---|---|
+| GitHub issue | #835 |
+| Working branch | `issue-835-implementation` |
+| Phase | F, cycle 2: the rework after T-green's BLOCK (A pass 4 PASS, T-red cycle 2 PASS) |
+| Input documents read | the brief (issue, amendment, rounds 2 and 3); handoff-A pass 4; handoff-T-red cycle 2; handoff-T-green cycle 1; handoff-F cycle 1; `decisions.md`; `evidence.md`; `docs/pane-control.md`; `docs_pane_control_test.rs`; `docs_cli_test.rs`; #654's options (`gh issue view 654`) |
+| What this cycle must turn GREEN | `import_findings_are_named_in_section_3_or_10` and `section_3_names_every_flag_of_pane_import`, plus A's W2 to W4 text items (not pinned by a test) |
+| Handoff document path | `docs/handoffs/835/handoff-F.md` |
 
 ## What was done
 
-The port, the fake and the adapter:
+**The merge (A's W1)** was already made by T-red: `526bbd3` is a two-parent merge of `bda1069`. `git fetch` at 19:30 MDT
+shows `origin/main` still at `bda1069`, so F merged nothing.
 
-- `crates/holler-pane/src/ports.rs`: `HostPort::foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>`,
-  required (R2-1), beside `ps`. `HerdrPort::observe_pane` lost its default (R3-1); `observe_panes` keeps its default. The
-  module docs list #832's and #835's amendments (A's W2).
-- `crates/holler-pane/src/pane.rs`: `pub const CLAUDE_CODE_COMMAND: &str = "claude"` and `pub fn is_claude_code_command(name: &str) -> bool`
-  (exact match), beside `HarnessKind` (R2-7). Their docs say the name is a process name, not the protocol's harness id,
-  and record the rule's limits (R2-5).
-- `crates/holler-pane-testkit/src/host.rs`: `HostOp::ForegroundCommands` (`host.foreground_commands`). `FakeHost` keeps
-  each process's command name (the basename of its argv's first element) beside its pid, so `exit_process`, `stop_owned`
-  and `end_session` take the name with the process; `foreground_commands` answers them in start order, `pane-not-found`
-  for a missing session, through the faults and the call log like every method.
-- `crates/holler-adapter-host/src/tmux.rs`: `foreground_listing` (`list-panes -s -t =NAME: -F "#{pane_dead} #{pane_current_command}"`)
-  and the strict `parse_foreground`, beside `panes`/`parse_ps`.
-- `crates/holler-adapter-host/src/lib.rs`: `TmuxHost::foreground_commands` through `run_tmux`, `Call` and `refused()`;
-  `OP_FOREGROUND_COMMANDS`; the crate docs' error table gains the column, and a paragraph says what is read (I7).
+**`docs/pane-control.md`** (A's W4):
 
-The forwards (the compiler listed them):
+- **Section 1:** the import also creates no record, by default, for a pane whose tmux session runs a process named
+  `claude` (`harness-claude-code`, sections 3 and 10).
+- **Section 3, `pane import`:**
+  - the synopsis gains `[--adopt-claude-code]`;
+  - one sentence says what the switch would do, and that it is refused with `usage` until #831, in a dry run too;
+  - two rows in the one findings table, in `ImportFinding::ALL` order after `harness-not-opencode`:
+    `harness-claude-code` (info) and `harness-unreadable` (problem);
+  - the `observe-failed` row is narrowed to the harness server's two calls, and says a failed tmux read is
+    `harness-unreadable` instead;
+  - the exit-code paragraph says `usage` comes before any file or port, so a dry run gets it too, and names its four
+    causes, the switch among them.
+- **Section 10:**
+  - the fact is restated: why `harness-not-opencode` does not catch these panes, the rule (a process named exactly
+    `claude`), what is still imported as OpenCode (so a merely-down server is still `server-down`), and
+    `harness-unreadable`;
+  - the rule's limits, with a link to ADR-0021 section 13 ("Decided (#835)") as the contract;
+  - step 1's check, as its own paragraph: run the dry run while the Claude Code sessions run; each Claude Code pane
+    should show `harness-claude-code`; one that does not (`record`, or `blocked` for another problem) was not
+    recognised, and the fallback is #654's option (a); the real run of step 3 also runs while those sessions run;
+  - the closing paragraph names `harness-claude-code` beside `harness-not-opencode`.
+- **Section 12:** the #835 line is replaced by the adoption that is still later: `--adopt-claude-code` is refused until
+  #831, and no story owns the adoption yet.
 
-- `crates/holler-cli/src/pane/wiring/bind.rs`: `BindingHost` and `Wired<dyn HostPort>` forward `foreground_commands`.
-  The module docs' sentence that listed `observe_pane` among the defaulted methods is corrected (one sentence).
-- `crates/holler-cli/src/pane/wiring.rs`: `Unwired::foreground_commands` answers `NotImplemented`.
+**The doc comments and the ADR:**
 
-The import:
-
-- `crates/holler-pane/src/import/findings.rs`: `HarnessClaudeCode` (`harness-claude-code`, `info`) and `HarnessUnreadable`
-  (`harness-unreadable`, `problem`), after `HarnessNotOpencode` in `ALL`.
-- `crates/holler-pane/src/import/observe.rs`: the chain is `ps`, then (only once `ps` answered) `foreground_commands`,
-  then the server. `Observed` is now `ClaudeCode`, `Seen(Chain)` or `Lost`. A session that runs Claude Code ends the
-  chain: no harness call. `tmux_finding` maps a `pane-not-found` from either read to `tmux-session-missing` and any other
-  error to `harness-unreadable` naming the call through `failed_message`; `lost_finding` is the lost chain's
-  `harness-unreadable`.
-- `crates/holler-pane/src/import/assess.rs`: `Outcome::claude_code`, beside `not_opencode`, through `left_alone`
-  (`Action::Skipped`, one finding). `assess_all` routes `ClaudeCode` to it before any join, so such a pane has exactly
-  one finding even when it would have had a join problem. A lost chain is `harness-unreadable` (was `observe-failed`).
-- `crates/holler-pane/src/import.rs`: module docs (the reads, the rule) and `Action::Skipped`'s doc.
-
-The switch:
-
-- `crates/holler-cli/src/pane/import.rs`: `--adopt-claude-code` (`adopt_claude_code: bool`), refused as `usage` at the top
-  of `Input::read` (step 1, before any file or port), with the message
-  `--adopt-claude-code: not implemented (story #831); without it the import leaves a pane that runs Claude Code alone`
-  built from `not_implemented_message(831)`. The verb's help text gains the rule, its limits, the two codes and the switch
-  (R2-5 asks for the limits in the help text).
-
-The docs:
-
-- `docs/adr/ADR-0021.md`: section 2 (the `HerdrPort` and `HostPort` rows, the "amended since" sentence), section 9 (the
-  `pane import` row), section 13 (a "Decided (#835)" paragraph: the signal, the rule, never on a guess, the limits, the
-  switch, and why the registry rule of `unmanaged` is not used), section 14 (the `observe_pane` bullet, amended in
-  place), "Deferred to named stories" (the post-#831 adoption, no owner yet) and "Decisions taken" (22 and 23).
-- `docs/adr/ADR-0003.md`: the verb's line gains `[--adopt-claude-code]` and `#835`.
-- `CHANGELOG.md`: one `## [Unreleased]` Enhancements entry linking #835 (and #831, #832).
-- `docs/handoffs/835/evidence.md`: six facts in unchanged code.
+- `crates/holler-pane/src/import/findings.rs`: `ImportFinding::ObserveFailed`'s doc is narrowed to a call to the pane's
+  harness server, and points at `harness-unreadable` for a failed tmux read (W4).
+- `crates/holler-pane/src/unmanaged.rs` (#840's sentences, W2):
+  - the docs of `unregistered` no longer name #835 as a caller; they say the import asks what a pane runs
+    (`is_claude_code_command`, an intra-doc link), because no pane it observes has a record, and that a pane it leaves
+    alone has no record, so this rule lists it;
+  - the docs of `is_unmanaged` say "The question #831 asks".
+- `crates/holler-pane/src/pane.rs`: `CLAUDE_CODE_COMMAND`'s doc names #831 as a story that can reuse the predicate, and
+  no longer says #832 does (W3).
+- `docs/adr/ADR-0021.md`:
+  - section 13: "which #831 can reuse" (W3);
+  - section 14: "that #831 calls instead of writing its own", plus one sentence that the import does not call the
+    registry rule, pointing at section 13's "Not the registry's rule" (W2).
+- `docs/handoffs/835/evidence.md`: three facts in unchanged code (section "F, cycle 2").
 
 ## Design decisions
 
-1. **A pane whose tmux session cannot be read still has its server asked.** Only a pane known to run Claude Code skips
-   `harness.health` and `harness.list_sessions` (brief section 3; A's note 4: "health and the session list only for a pane
-   that is not `claude`"). A pane whose `ps` or names read failed is not known to be Claude Code, so it is observed as #650
-   observed every pane, and its report keeps the server's findings. This keeps `tmux-session-missing` exactly as #650
-   reported it (a server finding beside it when the server is down). The alternative, asking no server for any pane
-   whose session was not read, would cut a few reads of a pane that is blocked anyway, but would change #650's report for
-   a missing session and add a second branch to the chain. A harness read is harmless, and none is made of a Claude
-   Code pane.
-2. **`harness-unreadable` replaces `observe-failed` for a failed `ps` and a lost chain; it is not added beside it.** One
-   finding per cause: the message is `what the pane's tmux session runs could not be read, so the pane is not recorded:
-   host.ps failed (unavailable): ...`, the call named through `failed_message` (A's W4), so the report still says which
-   read failed. The lost chain's message ends `its check did not finish`, as #650's did. `observe-failed` stays for the
-   harness reads only.
-3. **The types: `Observed::{ClaudeCode, Seen(Chain), Lost}`.** `Chain` holds `tmux: Result<(), Unread>` (the op and the
-   error of the read that failed) and the server. `assess` takes `Option<&Chain>` (`None` = lost), so a Claude Code pane
-   cannot reach the join at all, rather than being one more arm the join must ignore.
-4. **The adapter's format is `#{pane_dead} #{pane_current_command}`, no pid.** The dead flag lets the parser drop a dead
-   pane as `ps` does, and makes the listing strict (T's `a_malformed_listing_is_unavailable`); the name comes last, so it
-   is the rest of its line and cannot shift the flag. tmux cuts the name at its first space, so a line has one space
-   before the name. A pid adds nothing the method answers.
-5. **The fake names a process by `Path::file_name` of its program**, which is POSIX basename's reading (`/usr/bin/` is
-   `bin`); a program with no file name (`/`) is named as given. It never sees a shell, so a fresh session names nothing,
-   as before.
-6. **The finding order:** `HarnessClaudeCode` and `HarnessUnreadable` sit after `HarnessNotOpencode` in `ImportFinding`,
-   so a pane's harness findings come first in its list, before the file and join problems. No test pins the order.
-7. **The switch is checked first in `Input::read`**, before `--herdr-session`: it refuses the request whatever the other
-   arguments are, so it is said first.
-8. **Merge-friendly placement against `origin/main`** (which has moved past this branch's base; see Known issues). In
-   ADR-0021 section 14 the `observe_pane` bullet keeps its first line, so this hunk is one unchanged line away from
-   #840's hunk there; the CHANGELOG entry goes after #650's entry, away from the lines #652 and #840 changed.
+1. **Section 10 states the rule and its limits, and links the contract.** A asked for the fact "restated with the rule and
+   its limits", and lists "a guide section that restates ADR-0021 section 13 instead of linking to it" as a parallel path.
+   - The guide keeps what an operator needs to read a dry run: the rule, what is imported as OpenCode, the problem and
+     the limits.
+   - It links section 13 for the rest: the port read, "never on a guess", the switch's reasons and "Not the registry's
+     rule".
+2. **The fact stays one bullet** under "One fact about the live fleet comes first". The rule is how the import meets that
+   fact, so section 10's intro and structure stay as #652 wrote them.
+3. **Step 1 also covers the real run.** Step 3's real run observes the panes again. A Claude Code session that exits
+   between the dry run and the real run shows its shell and would be recorded as OpenCode. So step 1 says the real run
+   also runs while those sessions run. W4 names only the dry-run check, but this sentence is inside step 1's text, which
+   W4 names, and step 3 is not edited.
+4. **The fallback is #654's option (a), in #654's words:** "a copy or a link farm" the operator makes, with the old files
+   untouched (read with `gh issue view 654`).
+5. **The exit-code paragraph lists all four `usage` causes, not only the switch.** Naming the switch alone would suggest it
+   is the only one. The four are ADR-0021 section 9's row and `Input::read`'s checks (evidence, fact 2).
+6. **The `observe-failed` row says where a failed tmux read went.** T-green's blocking issue 1 asks the guide to state that
+   a failed tmux read is now `harness-unreadable`, a problem, rather than an `observe-failed` warning.
+7. **Section 12 says no story owns the adoption yet**, as ADR-0021's "Deferred to named stories" does, so the guide does not
+   imply that #831 builds it.
 
 ## Reuse / extend-vs-new
 
-Extended, per A's reuse map; no parallel path:
+Every edit is in place, in the sentences, rows and sections that A's reuse map names for the rework ("The guide
+(rework)" and "The records of #840 and of #832's reuse (rework)"):
 
-- `HostPort` beside `ps`; in the adapter, a listing beside `panes()`/`stop_listing()`, a parser beside `parse_ps`, the one
-  `run_tmux`/`Call`/`refused()` path and an `OP_*` constant.
-- The import's one per-pane thread scaffold (`observe_all`), one more read on the same thread; `tmux_finding` and
-  `failed_message` reused for the read's errors.
-- `Outcome::left_alone` through a constructor beside `not_opencode`; `Action::Skipped`; two kinds in `ImportFinding::ALL`.
-  No new `Action` or `Level`. A problem kind blocks through `assess`'s existing `blocked` and `Plan::refusal`.
-- The rule is one constant and one predicate in `pane.rs`; the only comparison with `"claude"` is in that predicate. It is
-  not `unmanaged`'s registry rule (section 13's last bullet says why).
-- The decorators forward to the inner port (`BindingHost`, `Wired`); `Unwired` answers not-implemented, as for every method.
-- The switch reuses `Input::read`'s `usage()` and `output::not_implemented_message`.
+- no new section, page, table or helper;
+- the two findings go into the one findings table of section 3; there is no second table of import findings;
+- section 10 links ADR-0021 section 13 rather than restating it (design decision 1);
+- no edit to `main`'s files beyond the sentences W2 to W4 name (design decision 3's sentence is inside step 1).
 
 ## Architecture notes for A
 
-- **Public interface changes:** `HostPort` gains a required method; `HerdrPort::observe_pane` is required (no default);
-  `holler_pane::pane::{CLAUDE_CODE_COMMAND, is_claude_code_command}`; `HostOp::ForegroundCommands`;
-  `PaneImport.adopt_claude_code` (the CLI surface, `cli-surface.txt` line already T's). Every implementation in the
-  workspace now answers both methods; T added the ones in test files.
-- **Layers:** the rule lives in `holler-pane` (domain); the tmux read in `holler-adapter-host`; the switch in
-  `holler-cli`. `holler-pane` knows no CLI flag: the switch's text is the CLI's, the finding's message is the import's.
-- **No new dependency.** No protocol change, no new error code (the two codes are findings), no hub state.
-- **#649's files:** only the forwards, `Unwired`, and the one module-doc sentence of `bind.rs` that named `observe_pane`
-  among the defaulted methods (it is not, after #835).
+None. Docs and doc comments only: no code, interface, dependency, protocol, error code or state change.
+`archChanged: false`, as A's note 2 expects.
 
 ## Deviations from spec / wireframe
 
-None in behaviour. Two readings, recorded here for S:
-
-- R2-6's "a failed `ps` ... is `harness-unreadable`" is read as the one finding for that cause (it replaces #650's
-  `observe-failed`), and the pane's server is still asked (design decision 1).
-- R2-2 asked for ADR-0021 sections 2, 9, 13 and the closing lists; A's W2 added section 14 and `ports.rs`'s module docs.
-  All are done; section 14 is amended in place, as W2 says.
-- R3-1 asked to record `observe_pane`'s new form in section 13's "Decided (#835)" paragraph too. A's W2 (the PASS review,
-  later than the brief's round 3) keeps that paragraph to the import and puts the port change in sections 2 and 14. F
-  followed W2: section 2's row and "amended since" sentence, section 14's bullet, and "Decisions taken" item 23.
+None. Design decision 3 adds one sentence beyond W4's list, inside the step W4 names.
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
 ```
-$ cargo build --workspace --all-targets
-    Finished `dev` profile [unoptimized + debuginfo] target(s)            (no warning)
-$ cargo clippy --workspace --all-targets -- -D warnings
-    Finished `dev` profile [unoptimized + debuginfo] target(s)            (exit 0)
-$ bash scripts/lint.sh            -> exit 0 (warnings only for files this change does not touch; every changed
-                                     source file is under 600 lines, the largest crates/holler-adapter-host/src/lib.rs at 521)
-$ bash scripts/changelog-check.sh -> changelog-check: ok
-$ git diff --check                -> clean
-$ cargo doc --no-deps -p holler-pane -p holler-pane-testkit -p holler-adapter-host   -> 0 warnings
+$ cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test
+  docs_pane_control_test: 17 passed, 0 failed
+    (import_findings_are_named_in_section_3_or_10 ... ok; section_3_names_every_flag_of_pane_import ... ok)
+  docs_cli_test: 3 passed (every_documented_holler_command_parses ... ok, so the new synopsis span parses)
 
-$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
-  153 result groups: 2375 passed, 2 failed, 32 ignored. The only failures:
-    import::harness::a_dry_run_reports_the_pane_left_alone_and_writes_nothing                 harness.rs:75:43 "a spec name"
-    import::harness::a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode    harness.rs:75:43 "a spec name"
-  (T's `spec_names()` reads the key `name`; see "Tests that look wrong".)
+$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   (CI's step)
+  exit 0. 154 result groups: 2398 passed, 0 failed, 32 ignored
+  (T-red's run on the same merged tree: 2396 passed, 2 failed, the two tests above.)
 
-T's RED tests, now GREEN:
-  holler-pane       import_test (5), claude_code_rule_test (2), ports_test (8), doctests ports.rs (4, both
-                    compile_fail,E0046 pass)
-  holler-pane-testkit  fake_host_test (incl. the three foreground_commands tests and the wedged/op-name ones),
-                    host_conformance_test (14, incl. the two new Mutant breaks)
-  holler-adapter-host  fake_tmux_test (29, incl. every_method_is_bounded_and_reaps_its_child and
-                    a_missing_tmux_binary_is_unavailable_from_every_method), foreground_test (4)
-  holler-cli        cli_surface_test (3), pane_integration (69 passed, 4 ignored: incl.
-                    the_wired_host_passes_the_host_conformance_suite, the wired.rs foreground line and the two R3-3
-                    pins), pane_verbs import:: (44 of 46: the_adrs_name_the_switch_and_the_two_new_codes, and
-                    import::harness 5 of 7; the other 2 are the spec-key test bug)
-
-After the last (doc-comment and help-text) edits, re-run: clippy (exit 0); holler-pane, testkit and adapter-host
-(380 passed, 0 failed, 9 ignored); holler-cli pane_verbs, cli_invocation_test, cli_surface_test, docs_cli_test (the
-same two failures only).
-
-F's spot check on a real tmux (a private scratch server; not T's Tier 2):
-$ cargo test -p holler-adapter-host --test real_tmux_test -- --ignored the_tmux_host_passes_the_host_conformance_suite
-  test the_tmux_host_passes_the_host_conformance_suite ... ok          (tmux 3.7c; case 10 names `sleep`)
+$ cargo clippy --workspace --all-targets -- -D warnings     -> exit 0
+$ cargo doc --no-deps -p holler-pane                        -> no warning (the new intra-doc link in unmanaged.rs resolves)
+$ bash scripts/lint.sh                                      -> exit 0
+$ bash scripts/changelog-check.sh                           -> changelog-check: ok
+$ git diff --check                                          -> clean
 ```
+
+Before the edits, `docs_pane_control_test` failed with exactly T-red's two failures (15 passed, 2 failed). The last edit
+(step 1's paragraph in the guide, wording only) came after the workspace run. The only tests that read the guide,
+`docs_pane_control_test` and `docs_cli_test`, were run again after it: 17 and 3 passed, and `git diff --check` was clean.
 
 ## Evidence appendix
 
-`docs/handoffs/835/evidence.md` (six facts: the problem level blocks the row and the real run, the import skips a
-recorded pane before observing, the adapter's `refused()` mapping, `not_implemented_message`'s wording, `usage` is exit 2).
+`docs/handoffs/835/evidence.md`, section "F, cycle 2", three facts:
+
+1. `observe-failed` comes only from the harness server's two calls (`observe.rs:177-187`);
+2. every `usage` comes from `Input::read`, before the files are read and before `plan` (`pane/import.rs:145-146`,
+   `:182-207`);
+3. a whole-fleet reconcile pass reports a pane with no record as `unregistered-herdr-pane` (`reconcile.rs:362-372`).
 
 ## Tests that look wrong (for T)
 
-1. **`crates/holler-cli/tests/pane_verbs/import/harness.rs:75`, `spec_names()`**, reads `spec["name"]`, but a profile
-   spec's JSON key for its pane is `pane` (`ProfileSpec.pane`, `crates/holler-pane/src/profile.rs:181`, no serde rename).
-   It panics `a spec name` in two tests, after every assertion before it has passed:
-   `a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode` and
-   `a_dry_run_reports_the_pane_left_alone_and_writes_nothing`. Test-only: with the key changed to `spec["pane"]` (a
-   temporary local edit, reverted at once and checked byte-identical with `sha256sum -c`), all seven tests of
-   `import::harness` pass, including the harness-call count `(2, 2)` and the text form. F did not edit the test.
-2. Cosmetic: `rustfmt --check` would reformat lines in several of the new or edited test files (for example the long
-   import line of `crates/holler-pane/tests/ports_test.rs:19`). CI runs no `rustfmt`, so nothing fails.
+None.
 
 ## Known issues
 
-1. **The branch is behind `origin/main`.** Base `2d217dd`; `origin/main` is `bda1069` (18:16 MDT), with `7fc00f1` (#655
-   docs), `0e62b51` (#652, the operator guide `docs/pane-control.md`) and `bda1069` (#840, #832's review fixes). F does
-   not commit, so nothing was merged. Before or at the PR:
-   - **#840's two claims about #835 (A's W3).** On main, `crates/holler-pane/src/unmanaged.rs` (the docs of
-     `unregistered` and `is_unmanaged`) and ADR-0021 section 14 (`... that #831 and #835 call instead of writing their
-     own`) say #835 calls the registry rule. It does not, and cannot: section 13's "Not the registry's rule" bullet says
-     why. Those sentences are not on this branch, so F could not correct them; they need a one-line edit each once main
-     is merged in (drop "#835" or point at `holler_pane::pane::is_claude_code_command`).
-   - **#652's guide** describes `pane import` and does not yet know the new default, the two codes or the switch (brief
-     section 6: "#652's guide ... should be told"). It is not on this branch.
-   - **Expected merge overlap:** ADR-0021 section 14 (this branch's hunk is one unchanged line from #840's), `CHANGELOG.md`
-     (no overlap expected) and T's `crates/holler-cli/tests/pane_verbs/launch/rig.rs` (#840 changed it too; the T forward
-     is 4 lines at the `LinkedHost` impl).
-2. The epic's contract block (#633's issue body) is the operator's to edit (brief section 1, "The records"); nothing here
-   changes it.
+1. **`docs/pane-control.md` is 817 lines** (it was 794). `scripts/lint.sh` checks only `crates/**/*.rs`, so nothing
+   fails. #652's A-dup named "about 800" as a soft line for the guide. That is S's or the operator's call, not this
+   story's.
+2. **The epic's contract block** (#633's issue body) is the operator's to edit, as in cycle 1.
 
 ## Files changed
 
-Production:
+This cycle's production files:
 
-- `crates/holler-pane/src/ports.rs`
-- `crates/holler-pane/src/pane.rs`
-- `crates/holler-pane/src/import.rs`
-- `crates/holler-pane/src/import/assess.rs`
-- `crates/holler-pane/src/import/findings.rs`
-- `crates/holler-pane/src/import/observe.rs`
-- `crates/holler-pane-testkit/src/host.rs`
-- `crates/holler-adapter-host/src/lib.rs`
-- `crates/holler-adapter-host/src/tmux.rs`
-- `crates/holler-cli/src/pane/import.rs`
-- `crates/holler-cli/src/pane/wiring.rs`
-- `crates/holler-cli/src/pane/wiring/bind.rs`
+- `docs/pane-control.md`
 - `docs/adr/ADR-0021.md`
-- `docs/adr/ADR-0003.md`
+- `crates/holler-pane/src/import/findings.rs`
+- `crates/holler-pane/src/unmanaged.rs`
+- `crates/holler-pane/src/pane.rs`
+
+For S's scope review, the PR's production files across both cycles are cycle 1's list plus these five:
+
+- `crates/holler-pane/src/{ports.rs, pane.rs, import.rs, unmanaged.rs}`
+- `crates/holler-pane/src/import/{assess.rs, findings.rs, observe.rs}`
+- `crates/holler-pane-testkit/src/host.rs`
+- `crates/holler-adapter-host/src/{lib.rs, tmux.rs}`
+- `crates/holler-cli/src/pane/{import.rs, wiring.rs, wiring/bind.rs}`
+- `docs/adr/ADR-0021.md`, `docs/adr/ADR-0003.md`, `docs/pane-control.md`
 - `CHANGELOG.md`
 
-Run artifacts: `docs/handoffs/835/handoff-F.md`, `docs/handoffs/835/evidence.md`, `docs/handoffs/835/decisions.md`
-(appended).
+Run artifacts: `docs/handoffs/835/handoff-F.md`, `docs/handoffs/835/evidence.md` (appended),
+`docs/handoffs/835/decisions.md` (appended).
