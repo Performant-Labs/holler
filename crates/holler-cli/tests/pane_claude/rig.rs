@@ -2,10 +2,11 @@
 //! port being `FakeHarnesses` (the router over `FakeHarness` and `FakeClaude`, ADR-0021 section 15
 //! item 4) behind a linked host.
 //!
-//! - The **linked host** is the one place a host and the harness fakes meet: `run` of an argv
-//!   either fake built starts it (`FakeHarnesses::start`) and `stop_owned` ends both fakes'
-//!   processes of the pane (`FakeHarnesses::stop`), as tmux runs and stops a pane's processes
-//!   (#802). No case writes its own Claude linker (plan review W5).
+//! - The **linked host** (`verb_harness::linked_host`, #846) is the one place a host and the
+//!   harness fakes meet: `run` of an argv either fake built starts it (`FakeHarnesses::start`)
+//!   and `stop_owned` ends both fakes' processes of the pane (`FakeHarnesses::stop`), as tmux
+//!   runs and stops a pane's processes (#802). No case writes its own Claude linker (plan
+//!   review W5).
 //! - `seed_claude` and `seed_opencode` build a live pane through the fakes' own port methods, not
 //!   through a verb, so a case of one verb fails only on that verb. Each attaches one tmux client
 //!   to the pane's session (the fake host's `attach_client`), as the Herdr pane that shows it
@@ -20,8 +21,7 @@ use holler_pane::ports::SessionChoice;
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
     Actor, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort,
-    Pane, PaneError, PaneName, PaneStore, Ports, Profile, ProfileName, ProfileSpec, ProfileStore,
-    ServeSpec,
+    Pane, PaneName, PaneStore, Ports, Profile, ProfileName, ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::claude::{ClaudeOp, FakeClaude, ProcessView};
 use holler_pane_testkit::envelope::check_envelope;
@@ -37,6 +37,7 @@ use holler_pane_testkit::profile_scope::FakeProfileScope;
 use holler_pane_testkit::profile_store::FakeProfileStore;
 use serde_json::Value;
 
+use crate::verb_harness::linked_host::{FakeHarnessesLink, LinkedHost};
 use crate::verb_harness::{run_verb_with, Outcome};
 
 /// The Herdr session and the workspace of the rig.
@@ -203,7 +204,10 @@ impl Rig {
 
     /// Call `f` with the ports a verb sees.
     pub fn with_ports<R>(&self, f: impl FnOnce(Ports<'_>) -> R) -> R {
-        let host = LinkedHost { rig: self };
+        let host = LinkedHost {
+            host: &self.host,
+            link: FakeHarnessesLink(&self.harnesses),
+        };
         f(Ports {
             pane_store: self.panes.as_ref(),
             profile_store: self.profiles.as_ref(),
@@ -424,43 +428,6 @@ impl Rig {
             .session_of_record
             .expect("a session of record");
         self.claude().seed_conversation(&session);
-    }
-}
-
-/// A `HostPort` over the rig's `FakeHost` whose `run` also starts the harness process an argv of
-/// either fake describes, and whose `stop_owned` also ends both fakes' processes of the pane.
-/// `run` answers what `FakeHost::run` answers, as tmux starts a process whatever it then does.
-struct LinkedHost<'a> {
-    rig: &'a Rig,
-}
-
-impl HostPort for LinkedHost<'_> {
-    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-        self.rig.host.ensure_session(name, cwd)
-    }
-
-    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-        self.rig.host.run(name, cwd, argv)?;
-        let _ = self.rig.harnesses.start(argv);
-        Ok(())
-    }
-
-    fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-        self.rig.host.stop_owned(name)?;
-        self.rig.harnesses.stop(name);
-        Ok(())
-    }
-
-    fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-        self.rig.host.ps(name)
-    }
-
-    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
-        self.rig.host.foreground_commands(name)
-    }
-
-    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
-        self.rig.host.attached_clients(name)
     }
 }
 

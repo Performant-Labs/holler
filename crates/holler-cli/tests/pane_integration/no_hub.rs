@@ -9,11 +9,11 @@
 //! from an absent adapter, which also answers `unavailable`, so the message must name the
 //! missing hub and its state dir, and the traps must stay untouched.
 
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::support::StateDir;
+use crate::traps::{names_the_missing_hub, opencode_trap, NO_HUB, OPENCODE_MARK};
 use crate::{holler_on, Out};
 
 /// Every verb of both namespaces, with arguments that parse (A's W-P: `pane import` takes a
@@ -44,9 +44,6 @@ pub const EVERY_VERB: &[&[&str]] = &[
     &["profile", "import", "/nonexistent-hlr649"],
 ];
 
-/// The phrase the CLI prints for a missing hub (`say_cmd.rs`, `hub_cmd.rs`; A's W-9).
-const NO_HUB: &str = "no live holler hub reachable";
-
 /// The adapter traps of one run, in a scratch directory.
 struct Traps {
     dir: tempfile::TempDir,
@@ -55,19 +52,9 @@ struct Traps {
 
 impl Traps {
     fn new() -> Self {
-        let dir = tempfile::Builder::new()
-            .prefix("hlr649-")
-            .tempdir_in("/tmp")
-            .unwrap();
+        let dir = opencode_trap();
         let herdr = UnixListener::bind(dir.path().join("herdr.sock")).unwrap();
         herdr.set_nonblocking(true).unwrap();
-        let script = dir.path().join("opencode");
-        std::fs::write(
-            &script,
-            format!("#!/bin/sh\ntouch '{}'\n", dir.path().join("opencode-ran").display()),
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::create_dir(dir.path().join("empty-path")).unwrap();
         Self { dir, herdr }
     }
@@ -101,7 +88,7 @@ impl Traps {
         if self.path("tmux.sock").exists() {
             touched.push("a tmux server was started on the tmux socket".to_owned());
         }
-        if self.path("opencode-ran").exists() {
+        if self.path(OPENCODE_MARK).exists() {
             touched.push("the OpenCode binary was run".to_owned());
         }
         touched
@@ -112,10 +99,6 @@ fn run(state: &StateDir, traps: &Traps, argv: &[&str]) -> Out {
     let env = traps.env();
     let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
     holler_on(state, argv, &env)
-}
-
-fn names_the_missing_hub(message: &str, state: &Path) -> bool {
-    message.contains(NO_HUB) && message.contains(&state.display().to_string())
 }
 
 /// JSON mode: one `unavailable` envelope whose message names the missing hub and its state

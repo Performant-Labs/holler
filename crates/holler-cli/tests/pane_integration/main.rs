@@ -11,8 +11,10 @@
 //! (`store_only`), the store clients against a real hub (`clients`: the test kit's two
 //! conformance suites) and against a hub that misbehaves on purpose (`fake_hub`), the
 //! watch (`watch`), the environment the wiring reads (`env`, and `wired` for the ports
-//! `connect` builds from it), the bindings, decorators and
-//! lazy ports (`bind`), and the scenario's guards as pure functions (`guards`). The
+//! `connect` builds from it), the bindings, decorators and lazy ports (`bind`), the Herdr
+//! wrappers' delegation of the observe methods (`observe`), and the scenario's guards as pure
+//! functions (`guards`). `traps` (the OpenCode trap and the no-hub text) and `wrappers` (the
+//! call log, the Herdr suite runner and the unbuildable `LazyHerdr`) are shared glue. The
 //! scenario itself (`scenario`) is `#[ignore]` and runs only with
 //! `HOLLER_TEST_PANE_INTEGRATION=1` exactly, on scratch instances it starts itself
 //! (`scratch`). `out` and `scratch` are shared with the `profile_apply_scenario` target
@@ -42,8 +44,10 @@ mod out;
 mod scenario;
 mod scratch;
 mod store_only;
+mod traps;
 mod watch;
 mod wired;
+mod wrappers;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
