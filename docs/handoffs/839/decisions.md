@@ -212,3 +212,45 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
     - `diff -w` of the moved `live` tests against the removed block;
     - a scan of the added lines for personal infrastructure names (none);
     - the overlap of `origin/main`'s `6eff9cc` with this branch: five files, and no `Ports` literal.
+
+## S, spec audit: 2026-10-12T10:09-06:00 (MDT)
+
+- **Decided:** REWORK (`docs/handoffs/839/handoff-S.md`), production and test-only together, so `reworkKind:
+  production`.
+  - **Acceptance 1 to 17 and 19 to 22 pass,** each pinned by a named test that asserts behaviour. ADR-0021 section 11
+    matches the brief word for word.
+  - **Acceptance 18 is partial (REWORK 1, test-only).** No test runs a `--pane` verb against an operator or default
+    hold (P5, exit 4), or reaches `PaneHeld` through the hub's gate under `--json`. Of the three verbs, only `say
+    --pane` is pinned to answer `pane-not-driven`, and only for an unknown id. Nothing pins `interrupt` or `answer`,
+    the arm ahead of the ambiguous exit 2, or an offline body at the verb.
+  - **One silent deviation from D3's untrusted-text rule (REWORK 2, production).** `HubClient::held` prints the body's
+    advertised roster name unquoted, and spells `holler release <name>` from it.
+  - **Acceptance 20(d) row (1) is ruled, not held.** The answer is `session-of-other-pane`, as built. D3 step 1 and
+    ADR section 11 point 3 (the contract text) put the refusals of section 8 before the driver, and P6 keeps
+    `session-of-other-pane` for "another pane's session of record". The acceptance clause overstates P6 for that row,
+    and both answers refuse with nothing moved.
+- **Assumed:**
+  - T-green's run (2721 passed, 0 failed) and its eight mutations are the runtime evidence. As S's role says, I re-ran
+    no build or test. `git diff --stat d480424 8d3e7fa` and `8d3e7fa e83ea9c` confirm that what T-green verified is
+    what I audited.
+  - `answer` has no held arm (E125; `talk::answer` checks no hold), so P5's exit-4 pin covers `say` and `interrupt`
+    only.
+- **Hedged:**
+  - REWORK 2 is low severity: it needs a body that advertises a crafted session name and holds a valid token. It is
+    marked rework because the brief states the rule outright and F applied it in every other new message.
+  - The ADR-0021 merge conflict with `origin/main` (#853 took "Decisions taken" 32 and 33) is advisory for O. The
+    brief's clash rule (2) says #839 renumbers to 34 to 47 when it merges second.
+- **Evidence:**
+  - **Read:** the brief (decisions, ADR text, placement, Reuse, Acceptance, Blast radius, clashes, the rules); the
+    issue (`gh issue view 839`); every phase handoff, `evidence.md` and this journal; `CONTRIBUTING.md`.
+  - **The diff:** `git diff origin/main...HEAD` for every production file; the tests named in the table of
+    `handoff-S.md`.
+  - **Commands:**
+    - `wc -l` on every touched `.rs` file;
+    - `grep` of the added lines for `unwrap`, `expect`, `panic`, `#[allow]`, `unsafe` and `set_var`;
+    - `grep` for personal infrastructure names and secrets;
+    - `git show origin/main:` for the old `send_prompt` and `parse_session_id`;
+    - `git diff --name-status` of the goldens;
+    - a whitespace-normalised comparison of ADR section 11 and of section 8's replacement with the brief;
+    - `git merge-tree --write-tree HEAD origin/main`, for the ADR-0021 conflict;
+    - `git log` for the commit trailers.
