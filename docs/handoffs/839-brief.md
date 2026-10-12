@@ -1,8 +1,28 @@
 # [feat(pane): DRIVEN follows each pane's session of record: the hub joins a pane to the body that drives it, the gate keys on the join, switch and reset move it, and `reset --first` goes through the hub's gate](https://github.com/Performant-Labs/holler/issues/839)
 
-Part of epic #633. This is the complete statement of story #839, prepared on 2026-10-11 against `main` at `bda1069` (every line number below was re-checked there; "Line numbers re-checked" says which of the issue's moved). It **absorbs #828** (closed): the issue text is the source of truth where this brief is silent, and this brief is the decision where they differ (the differences are listed in "Where this brief is the decision"). The story is **contract amendment first** (ADR-0021 section 11 and the passages listed in "The ADR and the dependent docs", then `docs/protocol/v2.md`), then tests (RED), then code. Rigor is `in-session`: no outside model reviews it, so the Evidence section quotes every source fact a decision rests on, and a reviewer needs no other source. Cite an entry as E<n>.
+Part of epic #633. This is the complete statement of story #839, prepared on 2026-10-11 against `main` at `bda1069` (every line number below was re-checked there; "Line numbers re-checked" says which of the issue's moved). It **absorbs #828** (closed): the issue text is the source of truth where this brief is silent, and this brief is the decision where they differ (the differences are listed in "Where this brief is the decision"). The story is **contract amendment first** (ADR-0021 section 11 and the passages listed in "The ADR and the dependent docs", then `docs/protocol/v2.md`), then tests (RED), then code. Rigor is `in-session`: no outside model reviews it, so the Evidence section quotes every source fact a decision rests on, and a reviewer needs no other source. Cite an entry as E<n>. **Amended on 2026-10-11 after the plan check's BLOCK** (`docs/handoffs/839/handoff-A.md`: 3 blocks and 10 warns, every one applied; "Changes since the plan check" says where each is answered). The branch is merged with `origin/main` at `d6ae539` (#851): every Evidence command was re-run on the merged tree, E67 to E70 and E74 to E76 were re-cut, and E98 onward are new.
 
-**Status of the decisions.** The five questions the issue asks (the address, how a body follows, who records DRIVEN and when, hold keys, the order of `reset --first`) and the decisions that follow from them (D1 to D12) were **decided by the preparer under the operator's standing rules ("decide, don't ask"), to be confirmed at the plan check**. Each lists what it rejected and why. "Questions only the operator can answer" lists the three the preparer did not decide.
+**Status of the decisions.** The five questions the issue asks (the address, how a body follows, who records DRIVEN and when, hold keys, the order of `reset --first`) and the decisions that follow from them (D1 to D12) were **decided by the preparer under the operator's standing rules ("decide, don't ask"), to be confirmed at the plan check**. Each lists what it rejected and why. "Questions only the operator can answer" lists the four the preparer did not decide. Three further decisions were taken by the main session at the plan check (P1 to P3 below: the generic forward stays closed, one source for the body's attach id, the ADR amendments and the bare-id CLI form); they are recorded as decided, with what each rejected, and are not to be re-opened.
+
+## Changes since the plan check
+
+The plan check (`docs/handoffs/839/handoff-A.md`, `decisions.md`) blocked the brief with 3 `block` and 10 `warn` findings. Every one is applied. Numbers are the handoff's.
+
+- **1 (block), the rebind leaks onto the generic forward:** P1; D2 "Hub" bullet (`LiveHandle::rebind` in `live/target.rs`, the allowlist untouched); F8; Acceptance 13 (`-32601` through `control/query_remote` and `admin/query`); E98 to E100.
+- **2 (block), the body silently returns to the old session:** P2; F7; D2 "How the body swaps" (one source, the presence mirror, `live_configs`, the registry baseline) and "A body restart reverts the binding"; D2 "Bound" (the deadline is in the task); D3 "Ambiguous drivers" (the remedy works); Acceptance 9 (an errored turn keeps the next prompt on the new id, a restart reverts) and 20; ADR section 11 points 2 and 3; E101 to E109.
+- **3 (block), ADRs 0005, 0003 and 0014 are not amended:** P3; D1 "The CLI keeps the human form name-only"; "The ADR and the dependent docs" (the Amends row and the ADR 0014, 0005 and 0003 passages); Acceptance 18 (`holler say ses_… TEXT` is refused); Blast radius; E131, E130, E123, E126.
+- **4, `advertise` replaces a token's whole set of rows:** D2 "Hub" bullet (the whole cached list after `replace_session`); Acceptance 9 (a two-session body); E112.
+- **5, `DriverState` duplicates `Activity`:** D3 (`Advertised.state: Activity`, one `activity_refusal` shared with `check_idle`); Acceptance 8; E118, E119.
+- **6, the accept rule, the refusal mapping and the `SayError` mapping must each exist once:** D5 ("Send" reuses `wait_ended`; "One mapping each, reused": `pane/hub_refusal.rs`, `control_say.rs`); `interrupt_cmd.rs`, `answer_cmd.rs`, `prompt_target.rs` in "Where the code goes" and the Blast radius; E124, E125, E122.
+- **7, the `.send_prompt(` scan:** D5 last bullet (one allowed call, `wiring/bind.rs`, which is not edited); Acceptance 13; E127.
+- **8, a new `FixState` is JSON-visible:** D3 reconcile (`fix: not-fixable`, the finding's own `remedy`); Acceptance 6; E120, E121.
+- **9, a body that is behind is not gated:** D1 gate bullet (keyed on the recorded DRIVEN too, the remaining window stated); Acceptance 4 and 19; ADR section 11 points 1 and 3.
+- **10, the I2 sentence over-claims:** the ADR table's I2 row (switch and reset only; launch and relaunch keep the stored DRIVEN); D3 residue; ADR section 11 point 3; E128, E129.
+- **11, one `pending_query` slot per connection:** D2 "Hub" bullet (`query_slot`, held by `query` and `rebind`; the residue named); D11; Acceptance 21; E116, E113.
+- **12, the resolver's name and the ADR file list:** `resolve_prompt_target` throughout (E117 is the lookup it must not be mistaken for); the ADR table's section 2 row names `src/hub.rs`.
+- **13, files the plan needs but did not list:** "Where the code goes" and the Blast radius now list `codec_test.rs` (E132), the body's fake server with a stall mode (E133, E134), `interrupt_cmd.rs`, `answer_cmd.rs`, `prompt_target.rs`; D8's test moves to `holler-cli`, which already links `holler-proto` (E135), so the testkit's manifest is not touched.
+
+Found while amending, and not in the handoff: (a) `pane_gate` is private to `circuit::dispatch`, so `talk::admit` could not call the function `send_prompt` calls: it moves, with its tests, to `panes/gate.rs` (D1). (b) A 5 s timer around the body's handler alone would answer "old binding kept" while the task went on to swap: the deadline is carried into the task (D2 "Bound"). (c) The body's hello is sent with an empty `sessions` list (E110), so the hello needs no change. (d) The branch is merged with `origin/main` at `d6ae539` and seven excerpts were re-cut ("Line numbers re-checked"). (e) Question 4 (a remote rebind) is new.
 
 ## Where this brief is the decision
 
@@ -14,29 +34,42 @@ Part of epic #633. This is the complete statement of story #839, prepared on 202
 - F4. A body's harness session is configuration, fixed when the body starts (E44, E45), advertised as `harness_session_id` (E40, E46). The closed v2 catalog has no request that changes it (E42, E43). The hub runs no adapters, and a prompt reaches a body only through `send_prompt` (E3, E77).
 - F5. Nothing writes `last_observed.driven` (E32, E34). The engine sends `reset --first` straight to `HarnessPort::send_prompt` (E31), and `Ports` has no port that faces the hub's live sessions (E29).
 - F6. Holds are keyed `<label>/<session>` (E15), and a hub started with `--join-held` holds a name on first sight (E17).
+- F7. A body's attach id is read from the session task's own configuration every time the task attaches: at start, on the 30 s retry while an attach session has no driver, and at the next prompt after a turn that ended in error (OpenCode's `session.error` ends the turn with `StopReason::Error`, and the task then drops its driver) (E101, E102, E103, E104, E105). Presence, `query/support` and the registry's baseline read the as-started `SessionConfig` (E108, E109, E46). A re-point that changes only some of these readers is undone silently by the others.
+- F8. `LiveHandle::query` is the hub's generic request forward: `control/query_remote` hands any `params.method` to it, and `admin/query` with a target maps to `query_remote` (E98, E99); its allowlist (E6) is their only filter. The circuit keeps one `pending_query` slot per connection, overwritten by each forwarded request (E116).
+
+**Decided at the plan check (2026-10-11, the main session; final, not to be re-opened).**
+
+- **P1. The generic forward stays closed; the rebind has its own forward.** `LiveHandle::query`'s allowlist (`query/*` and `session/answer`) and its comment are **not changed** (E6). `session/rebind` is sent by a dedicated `LiveHandle::rebind(params, timeout)` in `crates/holler-hub/src/live/target.rs` (a child module of `live`, so its `impl LiveHandle` block reaches the private `tx` and `LiveCommand`), as a `LiveCommand::Query` with `method: "session/rebind"`; `circuit.rs` grows by nothing. Why: an allowlisted `session/rebind` would be carried by `control/query_remote` and by `admin/query` from an admin-role remote connection (E98, E99), so a local control client or a remote admin could re-point any body without `control/rebind`'s cache and roster update, and it would contradict D2's choice to keep the rebind off the admin surface. Rejected: **(a) widen the allowlist** (that exposure; Acceptance 13 would have pinned it); **(b) a new `LiveCommand::Rebind` variant** (grows `circuit.rs`, 898 lines); **(c) an `admin/rebind`** through `dispatch_allowlisted` (a remote re-point is not asked for: question 4).
+- **P2. One source for the body's attach id: `Inner.config.session_id`, mirrored into `SessionPresence`.** Every reader named in F7 reads that one source (D2 says how). A body **restart** reverts to the id in its configuration: accepted, **not persisted** (persistence would add state under the state-directory rules, a path, an atomic write, mode `0600`, a corrupt file failing closed, for a window the cutover does not need). The remedy is `holler pane switch` or `holler pane reset`; D3 makes it work when two bodies on one data directory make `driver_of` ambiguous, and `doctor` reports the reverted body as `shown-driven-mismatch`. Rejected: **(a) a "swapped state" value beside the configuration** (two sources; the re-attach paths read the old one); **(b) persisting the binding** (above); **(c) rewriting the body's configuration file** (the wizard owns it, E88).
+- **P3. ADR 0014 (point 5 and Consequences), ADR 0005 section 3, ADR 0003's Addressing line and ADR-0021's Amends line are all amended**, and a bare harness id as the `SESSION` positional of `say`, `interrupt` and `answer` **stays refused** (`unknown session`, as before): the id is an address only for `--pane` resolution and the hub's gate. Pinned by a test that `holler say ses_… TEXT` is refused (Acceptance 18). Rejected: **(a) let the bare form work** (a second typed address that the guide, ADR 0003 and every script would owe, and a stale id would reach a body); **(b) a hub-side flag that says who typed a target** (a new param on three methods for one caller); **(c) amend only ADR 0014's rebind bullet** (ADR 0005 section 3, ADR 0003 and ADR 0014's own point 5 would contradict D1).
 
 **Decided, and what each rejected.** (All "decided by the preparer, to be confirmed at the plan check".)
 
 **D1. The address: the advertised `harness_session_id`, joined to `Pane.session_of_record` by string equality.**
-- The hub resolves a prompt target that is not a valid name as a harness session id, against the live attach sessions, for `say`, `interrupt` and `answer` alike: one new function `Registry::resolve_target(&str) -> ResolveOutcome` (a target that parses as a `RoutableName` is resolved by `resolve_session`, exactly as before; any other string matches live ads with `mode == attach` and `harness_session_id == Some(target)`; no match is `Unknown`, or `NotConnected` when an offline ad had it; two matches are `Ambiguous`: the outcomes of E8). The three callers replace their two lines (parse, then `resolve_session`) with one call. Names and ids cannot collide where the grammar separates them: an OpenCode id is `ses_` and 26 characters (E96, the doc of `parse_session_id`), and `_` is not a name character (E39). An id that is also a valid name (the v2 document's example `openc-abc`, E67) is resolved as a name; it is not routable by id, and the ADR says so.
-- The pane gate is keyed on the **advertised id of the session being prompted**, however the prompt addressed it: `SayOpts` and `LiveCommand::Say` carry `harness_session: Option<String>` (set in `send_turn` from `ad.harness_session_id`, E10), `HoldGate` carries it, and `pane_gate` matches `pane.session_of_record.as_deref() == Some(id)`. The name-keyed match of E2 is **removed**, not kept beside the new one. A bare `say alpha` to a body session that drives a parked pane's session of record is therefore refused too, which is what the pane hold's doc already claims ("whatever route the prompt takes", E68).
+- The hub resolves a prompt target that is not a valid name as a harness session id, against the live attach sessions, for `say`, `interrupt` and `answer` alike: one new function `Registry::resolve_prompt_target(&str) -> ResolveOutcome` in `live/target.rs` (the name says what it resolves: `Registry::find_target` beside it is `hub query`'s lookup by token, client or label, E117, a different grammar). A target that parses as a `RoutableName` is resolved by `resolve_session`, exactly as before; any other string matches live ads with `mode == attach` and `harness_session_id == Some(target)`; no match is `Unknown`, or `NotConnected` when an offline ad had it; two matches are `Ambiguous`: the outcomes of E8. The three callers replace their two lines (parse, then `resolve_session`) with one call. Names and ids cannot collide where the grammar separates them: an OpenCode id is `ses_` and 26 characters (E96, the doc of `parse_session_id`), and `_` is not a name character (E39). An id that is also a valid name (the v2 document's example `openc-abc`, E67) is resolved as a name; it is not routable by id, and the ADR says so.
+- **The CLI keeps the human form name-only (P3).** The id is an address at the hub, for `--pane` and the hub's gate, and not something a person types as a SESSION. `holler say ses_… TEXT`, `holler interrupt ses_…` and `holler answer ses_… CHOICE` stay refused as before (`unknown session: ses_…`, exit 1): `route_target` (E123) checks a `PromptTarget::Session` with `RoutableName::parse` (the CLI already depends on `holler-proto`; E136) and stops with the hub's own text and exit code before any hub is contacted (with no hub running it now says `unknown session` rather than `no live holler hub reachable`; the input was never one the grammar allowed). Only `--pane` sends an id: `Routed` gains `pane: Option<String>` (the `--pane` name, `None` for a SESSION), which E126 lacks, so that the one refusal mapping of D5 can tell a `--pane` target from a typed one. A client that speaks to the hub's control socket directly (`control/say` with an id; `admin/say` from an admin-role connection) is resolved like any other, because the id is an address at the hub; the human surface of the CLI does not change.
+- The pane gate is keyed on the **advertised id of the session being prompted**, however the prompt addressed it: `SayOpts` and `LiveCommand::Say` carry `harness_session: Option<String>` (set in `send_turn` from `ad.harness_session_id`, E10; `send_turn` is the only place `SayOpts` is built, so plain, `--queue` and interrupt-redirect prompts are all keyed), `HoldGate` carries it, and `pane_gate(panes, id)` selects the panes whose `session_of_record == Some(id)` **or whose `last_observed.driven == Some(id)`** and judges each by `holler_pane::gate::prompt_refusal`. The recorded-DRIVEN key closes the case the record key cannot see: a body that is **behind** (it still drives an earlier session of a pane, after a failed record write or after a restart reverted it, P2) advertises an id that no record names as a session of record, so a bare `say <name>` to it would be admitted and land in a session the pane's TUI does not show; once a pass of `doctor` or a verb has recorded that id as the pane's DRIVEN, the pair (SHOWN differs from DRIVEN) refuses it as `pane-shown-driven-mismatch`. The window that remains is stated in the ADR (section 11, point 3): a body that is behind and that no pass or verb has observed yet is not gated. A pane whose recorded DRIVEN is stale (the body has moved on) can refuse a session it no longer concerns; that is fail-closed, as the gate already is across panes that record one session. The name-keyed match of E2 is **removed**, not kept beside the new one. A bare `say alpha` to a body session that drives a parked pane's session of record is therefore refused too, which is what the pane hold's doc already claims ("whatever route the prompt takes", E68). `pane_gate` and `pane_state_refusal` leave `circuit/dispatch.rs` for a new `crates/holler-hub/src/panes/gate.rs` (`pub(crate) fn pane_gate`, with their tests), because `talk::admit` (D5) must call the very function `send_prompt` calls and `dispatch` is private to `circuit`.
 - One predicate, not three. `holler_pane::gate::prompt_refusal(&Pane) -> Option<PromptRefusal>` (`Parked`, `Unhealthy`, `ShownDrivenMismatch`, checked in that order, one side absent is not a mismatch) replaces the hub's copy (E1) and the CLI's (E22); each keeps its own message text, and the pair test it uses, `holler_pane::gate::shown_driven_pair_differs(&LastObserved) -> bool`, is public (#648's roster would otherwise write it a third time, E93). The three code constants move to `holler_pane::gate` and `say_cmd` re-exports them (E20). `holler-pane` may change because this brief amends the contract first (the comments in E1 and E22 say it is frozen "except through the amend-first rule").
-- Rejected: **(a) join on the pane's name** (a pane's name equal to its body session's name). Nothing on `main` establishes it: the wizard names attach sessions `alpha` and `beta`, independent of any pane (E88), and a pane's name is its tmux session's name (E94). It would make the join a naming rule the cutover must impose on a live fleet, and a miss would be silent. **(b) a new `Pane` field naming the body session**: a second source of truth beside the advertisement, a change of the stored record (`deny_unknown_fields`, the byte-compatibility test of E78), and `import` would have to fill it. **(c) a new wire request to ask a body which session it drives**: presence already carries it (ADR 0014 point 6, E51). **(d) keep the name match beside the id match**: two keys with different meanings, and the only inputs that match the old one are test fixtures.
+- Rejected: **(a) join on the pane's name** (a pane's name equal to its body session's name). Nothing on `main` establishes it: the wizard names attach sessions `alpha` and `beta`, independent of any pane (E88), and a pane's name is its tmux session's name (E94). It would make the join a naming rule the cutover must impose on a live fleet, and a miss would be silent. **(b) a new `Pane` field naming the body session**: a second source of truth beside the advertisement, a change of the stored record (`deny_unknown_fields`, the byte-compatibility test of E78), and `import` would have to fill it. **(c) a new wire request to ask a body which session it drives**: presence already carries it (ADR 0014 point 6, E51). **(d) keep the name match beside the id match**: two keys with different meanings, and the only inputs that match the old one are test fixtures. **(e) key the gate on the session of record alone**: a body that is behind is then not gated at all.
 
 **D2. How a body ends up on the pane's new session: the hub asks it to re-point, with a new additive request `session/rebind`. I5 bound: 5 s in the body, 10 s at the hub and at the CLI.**
 - Wire: `session/rebind`, a request, hub to body. Params `{session, harness_session_id}` (`session` is the body's bare session name); result `{session, harness_session_id}`. It is **additive**: the catalog goes from 22 to 23 rows, and `Rebind` and `RebindResult` get golden files that are new files (no existing golden moves).
-- The body re-points **one attach-mode session of its own** to another harness session **on the same endpoint**, fail closed: a name that is not a session of this body is `-32003 unknown_session`; a spawn-mode session is `-32602 invalid_params` (`data.reason: "not an attach session"`); a session with a turn in flight, a queued prompt or a pending question is `-32009 session_busy` (with the existing `state`, `turn_age_ms` and `last_update_age_ms`); an id the endpoint does not have (the same `GET {endpoint}/session/{id}` existence check as `attach`, bare route then `/api`, E50; never `POST /session`) is `-32602 invalid_params` (`data.reason: "session not found on the endpoint"`) and the old binding is kept. On success the driver targets the new id, the session's presence advertises it, and the result returns it. The body's `hello` row also carries `harness_session_id` (E41), but it is sent at connect and not again; presence is what the roster and the resolver read (E7, E40), so the rebind changes presence and leaves the hello alone. The session's **name does not change** (ADR 0005 section 3, E52: the name is the identity, the locator changes; ADR 0014 point 5, E51).
-- Bound (I5). The attach driver builds its HTTP client with `reqwest::Client::new()`, which sets no timeout (E97), so the body wraps the whole handler in `tokio::time::timeout(5 s)`. On expiry the body answers `-32004 not_connected` with `data.reason: "endpoint did not answer"` (no catalog code means "the endpoint hung"; this is the one the v2 table already uses for "the party asked about cannot be reached", E70's neighbouring row) and keeps the old binding. The hub's forward (10 s) and the CLI's call (10 s) are then never the first to expire.
-- How the body swaps is the implementor's, if the observable behaviour above holds. The expected way: build the new driver first with `HttpAttachDriver::attach` on a copy of the session's config with the new id (that is the existence check, E97), swap it into the session task, then shut the old driver down (`shutdown` ends only the body's own loop and touches nothing on the harness, ADR 0014 point 3, E51); `presence_doc` must read the id from the swapped state, not from the immutable `managed.config.session_id` (E46).
-- Hub: the forward rides `LiveHandle::query` (E6, the generic request forward `answer` already uses; E11): its allowlist (`query/*` and `session/answer`) adds `session/rebind`, one condition on the same line, and its comment says why a rebind may pass (it starts no turn). A new hub control method `control/rebind {token, session, harness_session_id}` in a **new file** `crates/holler-hub/src/control_rebind.rs` (the precedent is `control_hold.rs`) resolves the body by `token_id` (a roster field, E18) and the bare session name, forwards with a 10 s bound, passes a body refusal through verbatim, and **on success overwrites the cached ad (`Registry::replace_session`) and re-advertises the roster row (`Roster::advertise`) before it replies**, so a `control/roster` or a `resolve_target` made right after the reply already sees the new id (nothing waits for the next presence beat). The dispatch arm is one line in `dispatch_session_control` (E13's file). On the body, `dispatch_session_request` (E49) gets a fourth arm and its caller's `matches!` list (E48) a fourth name; the session task's mailbox (E47) gets a `Rebind` command beside `Answer`.
+- The body re-points **one attach-mode session of its own** to another harness session **on the same endpoint**, fail closed: a name that is not a session of this body is `-32003 unknown_session`; a spawn-mode session is `-32602 invalid_params` (`data.reason: "not an attach session"`); a session with a turn in flight, a queued prompt or a pending question is `-32009 session_busy` (with the existing `state`, `turn_age_ms` and `last_update_age_ms`); an id the endpoint does not have (the same `GET {endpoint}/session/{id}` existence check as `attach`, bare route then `/api`, E50; never `POST /session`) is `-32602 invalid_params` (`data.reason: "session not found on the endpoint"`) and the old binding is kept. On success the driver targets the new id, the session's presence advertises it, and the result returns it. The `hello` row type carries `harness_session_id` (E41), but the body's hello is sent with an empty `sessions` list (E110), so no hello names an id; presence is what the roster and the resolver read (E7, E40), so the rebind changes presence. The session's **name does not change** (ADR 0005 section 3, E52: the name is the identity, the locator changes; ADR 0014 point 5, E51).
+- Bound (I5). The attach driver builds its HTTP client with `reqwest::Client::new()`, which sets no timeout (E97). The 5 s lives in the session task, not around the handler: the `Rebind` command carries a `deadline` (now + 5 s, set by the handler), the task does nothing with a command it dequeues after it, and wraps its `HttpAttachDriver::attach` in `tokio::time::timeout` for the time left, so a swap can only happen before the deadline; the handler awaits the reply for the deadline plus 1 s. On expiry the body answers `-32004 not_connected` with `data.reason: "endpoint did not answer"` (no catalog code means "the endpoint hung"; this is the one the v2 table already uses for "the party asked about cannot be reached", E70's neighbouring row) and **the old binding is kept, for certain**: an attach that finishes after the deadline is dropped, never swapped in (a 5 s timer around the handler alone would answer "kept" while the task went on to swap). The hub's forward (10 s) and the CLI's call (10 s) are then never the first to expire.
+- **How the body swaps, and the one source of the attach id (P2).** `Inner.config.session_id` (the session task's own configuration, `session_manager/task.rs`) is the one source of the id a body attaches to. The `Rebind` command builds the new driver first with `HttpAttachDriver::attach` on a copy of that configuration with the new id (that is the existence check, E97) and, only when it has attached: writes the new id to `Inner.config.session_id`, swaps the driver in, mirrors the id into `SessionPresence`, notifies presence, and shuts the old driver down (`shutdown` ends only the body's own loop and touches nothing on the harness, ADR 0014 point 3, E51). A failed rebind writes nothing. Every later reader follows that one source:
+  - the attach paths read `inner.config` and need no change of their own: `start_turn`'s re-attach at the next prompt after a turn that ended in error (E103; the driver is dropped when OpenCode sends `session.error`, E105, E104) and the attach retry, which runs while the driver is `None` (E101, E102);
+  - presence reads a mirror: `SessionPresence` (E106) gains `harness_session_id: Option<String>`, written only by the task through one helper (`mirror_session_id(inner)`: at task start from the configuration, in `attempt_initial_attach`, in `start_turn`'s re-attach and in the rebind swap), and `SessionManager::presence_doc` reads it from there, never from `managed.config.session_id` (E46; `ManagedSession.config` stays the as-started configuration, E107);
+  - `query/support`'s live probe (E108) probes the live id: `SessionManager::live_configs(&self, configs) -> Vec<SessionConfig>` returns the as-started configurations with each attach session's `session_id` taken from the mirror, and the body's `handle_query` call passes its result in place of `self.configs` (E111; the same number of lines);
+  - `SessionRegistry::presence_doc` (E109) is the as-started baseline, built before any task exists; production presence is `SessionManager::presence_doc` (`connection.rs:869`) and the registry's version is called only by `config_test`. It keeps reading the configuration, and its doc says it is the configured baseline and not the live id.
+- **A body restart reverts the binding (P2).** The rebind is not persisted: a restarted body attaches the `session_id` of its configuration again, so a pane whose body was re-pointed and then restarted has a body that drives an earlier session (a reboot or a deploy does this to the whole fleet at once). The consequences are specified and tested, none left to F: (1) `doctor` reads the reverted body's advertised id, which the pane's server still lists (no port deletes a session), records it as the pane's DRIVEN and reports `shown-driven-mismatch`, `fix: not-fixable`, with the remedy `holler pane switch PANE <session of record>` (D3); (2) the gate refuses prompts to that body from then on (D1: it is keyed on the recorded DRIVEN too), until the switch re-points it; (3) the remedy works when `driver_of` is ambiguous (D3 defines the tie-break and the refusal). The cutover guide says to run `pane doctor` after every body restart.
+- Hub: the rebind rides its **own forward**, not `LiveHandle::query`'s (P1). The allowlist of `LiveHandle::query` and its comment are unchanged: `control/query_remote` and `admin/query` with a target hand any `params.method` to it, and the existing test `hold_hub_test::a_prompt_cannot_be_forwarded_around_the_hold` (E100) is the pattern that pins that a method outside the allowlist is refused `-32601`. `LiveHandle::rebind(params, timeout)` in the new `crates/holler-hub/src/live/target.rs` sends `LiveCommand::Query { method: "session/rebind", .. }` (the same plumbing, so `circuit.rs` is not touched). **One request at a time per connection:** the circuit keeps a single `pending_query` slot and overwrites it (E116), shared by `session/answer`, `query/*` and now the rebind, so two overlapping requests drop one reply, which is then reported as not connected, and a rebind whose reply was dropped may still have re-pointed the body. `LiveHandle` therefore gains `query_slot: Arc<tokio::sync::Mutex<()>>` (E113, created where the handle is, E115), and both `query` (after its allowlist check) and `rebind` hold it across their send and their wait; `rebind` takes it inside its own `timeout`, so its 10 s bound includes the wait for the slot. The doc of `LiveHandle::rebind` says so. The residue that stays: a rebind that times out at the hub while the body is still re-pointing; `doctor` reports it and `pane switch` re-points the body. A new hub control method `control/rebind {token, session, harness_session_id}` in a **new file** `crates/holler-hub/src/control_rebind.rs` (the precedent is `control_hold.rs`) resolves the body by `token_id` (a roster field, E18) with `Registry::find_by_token` and checks that the bare session name is in that handle's cached presence (E114), calls `LiveHandle::rebind` with a 10 s bound, passes a body refusal through verbatim, and **on success updates the cache and the roster before it replies**: `Registry::replace_session` for the one row, then `Roster::advertise(token, &Presence { hostname, sessions })` with the handle's **whole** cached session list after that replacement, because `advertise` replaces the token's whole set of rows and a row missing from the frame goes `gone` at once (E112; a one-row frame would drop the body's other sessions). So a `control/roster` or a `resolve_prompt_target` made right after the reply already sees the new id (nothing waits for the next presence beat). `control/rebind` is **not** in `dispatch_allowlisted`: it is a local control-socket method only, and there is no `admin/rebind` (question 4). The dispatch arm is one line in `dispatch_session_control` (E13's file). On the body, `dispatch_session_request` (E49) gets a fourth arm and its caller's `matches!` list (E48) a fourth name; the session task's mailbox (E47) gets a `Rebind` command beside `Answer`.
 - Scope limit, stated in the ADR: only the HTTP attach driver implements it. ACP and spawn sessions refuse. A body for a Claude Code pane (#850) implements the same request in its own driver kind (a relaunch of the process); nothing here assumes OpenCode beyond the existence check inside the HTTP attach driver.
-- Rejected: **(a) restart the body with a new config**: not bounded by I5, needs the CLI to supervise another process and rewrite a file the wizard owns (E88), and ADR 0014 point 3 says a body must be able to leave without touching the harness (E51). **(b) a new body session per `ses_`**: a new name is a new hold key, so `--join-held` would default-hold every reset (E17) and operator holds would not carry over; the roster would grow by a row per reset; and ADR 0005 section 3 says the name is the stable identity (E52). **(c) the hub or the CLI posts the prompt to the pane's OpenCode server itself**: that is an adapter in the hub (ruling 1, section 5 of the ADR, E56), it skips the body's turn tracking, and it is a second way to deliver a prompt, which the single-sender guard exists to prevent (E77). **(d) leave it to the cutover**: the story's own acceptance (a healthy pane's `reset --first` is delivered) cannot hold in production, and after every switch the body would still drive the old session, so the gate would refuse everything as `pane-shown-driven-mismatch`. **(e) hot reload of the body's config file**: the body has no reload path and the file would become a control channel.
+- Rejected: **(a) restart the body with a new config**: not bounded by I5, needs the CLI to supervise another process and rewrite a file the wizard owns (E88), and ADR 0014 point 3 says a body must be able to leave without touching the harness (E51). **(b) a new body session per `ses_`**: a new name is a new hold key, so `--join-held` would default-hold every reset (E17) and operator holds would not carry over; the roster would grow by a row per reset; and ADR 0005 section 3 says the name is the stable identity (E52). **(c) the hub or the CLI posts the prompt to the pane's OpenCode server itself**: that is an adapter in the hub (ruling 1, section 5 of the ADR, E56), it skips the body's turn tracking, and it is a second way to deliver a prompt, which the single-sender guard exists to prevent (E77). **(d) leave it to the cutover**: the story's own acceptance (a healthy pane's `reset --first` is delivered) cannot hold in production, and after every switch the body would still drive the old session, so the gate would refuse everything as `pane-shown-driven-mismatch`. **(e) hot reload of the body's config file**: the body has no reload path and the file would become a control channel. **(f) allowlist `session/rebind` on `LiveHandle::query`**, **(g) a body-side "swapped state" separate from the configuration**, **(h) persist the binding across a restart**: see P1 and P2.
 
 **D3. Who records `last_observed.driven`, and where in the step order: the verb and reconcile record it from what the body acknowledged or advertised; the hub records nothing.**
 - A new port, `HubPort` (`holler-pane`, new file `crates/holler-pane/src/hub.rs`), with three **required** methods (no defaults: #835 made `observe_pane` and `foreground_commands` required for exactly the reason that a default answers silently for a wrapper that forgot to forward, E92) and `Ports` gains `pub hub: &'a dyn HubPort` (E29; `Wiring::ports` lends the real ports, E25, and `Unwired` is the not-implemented set, E26; `PaneStore`, E27, gets no new method):
   ```rust
-  pub struct Advertised { pub token: String, pub name: String /* "label/session" */, pub harness_session_id: String, pub state: DriverState }
-  pub enum DriverState { Idle, Working, InputRequired }
+  pub struct Advertised { pub token: String, pub name: String /* "label/session" */, pub harness_session_id: String, pub state: Activity /* holler_pane::ports::Activity */ }
   pub enum PromptMode { Check, Send }
   pub trait HubPort: Send + Sync {
       /// The live attach-mode sessions the hub knows, with the id each advertises.
@@ -47,19 +80,21 @@ Part of epic #633. This is the complete statement of story #839, prepared on 202
       fn prompt(&self, harness_session_id: &str, text: &str, mode: PromptMode) -> Result<(), PaneError>;
   }
   ```
-- The join the engine and reconcile use, a pure function in a new file `crates/holler-pane/src/driven.rs`: `driver_of(pane, advertised, server_sessions, other_records) -> Driver<'_>` (`None`, `One(&Advertised)`, `Ambiguous(Vec<&Advertised>)`). Candidates are the advertised ids that the pane's **own server lists** and that are **not another pane's session of record** (servers that share a data directory list every pane's sessions; `check_unclaimed` says so, E31's plan). The pane's record wins among the candidates; otherwise exactly one candidate is the driver; none is `None`; two or more is `Ambiguous`. Why membership in the server's list and not equality with the record: a body still attached to an **earlier** session must be both **found** (to re-point it) and **seen** (DRIVEN differs from SHOWN); equality with the new record would find nothing and report nothing.
-- The real `HubPort` is `crates/holler-cli/src/pane/wiring/hub.rs`: `advertised` reads `control/roster` (E19; keep rows whose `mode` is `attach`, `conn_state` is `connected` and `harness_session_id` is present); `rebind` calls `control/rebind` (D2); `prompt` calls `control/say` (D5). `Unwired` answers `not-implemented`; the test kit gets `FakeHub` (D10).
+- `Advertised.state` is the existing `holler_pane::ports::Activity { Idle, Busy, HoldingQuestion }` (E118), not a new enum: the wiring maps the roster's `working` and `stalled` to `Busy`, `input-required` to `HoldingQuestion`, `idle` to `Idle`, and any other string to `Busy` (fail closed). One function turns an `Activity` into its refusal, `activity_refusal(Activity) -> Option<(RefusalCode, &'static str)>` in `tx_switch.rs`, and both `check_idle` (E119, where the match sits today) and the new driver check call it.
+- The join the engine and reconcile use, a pure function in a new file `crates/holler-pane/src/driven.rs`: `driver_of(pane, advertised, server_sessions, other_records, target) -> Driver<'_>` (`None`, `One(&Advertised)`, `Ambiguous(Vec<&Advertised>)`; `target: Option<&str>` is the session a switch is moving to, `None` for a reset and for reconcile). Candidates are the advertised ids that the pane's **own server lists** and that are **not another pane's session of record** (servers that share a data directory list every pane's sessions; `check_unclaimed` says so, E31's plan). Among the candidates, in this order: the one that advertises the pane's session of record is the driver; else, **for a switch**, the one that advertises `target`, when exactly one does (it already drives where the pane is going, so it is the driver and needs no rebind); else the only candidate; none is `None`; two or more is `Ambiguous`. Why membership in the server's list and not equality with the record: a body still attached to an **earlier** session must be both **found** (to re-point it) and **seen** (DRIVEN differs from SHOWN); equality with the new record would find nothing and report nothing. Why the target rule: after a restart the bodies of two panes on one data directory advertise their configured ids, which are stale for both panes; nothing in the roster or the records says which body belongs to which pane, so no id can decide, and the operator is the one who knows (next bullet).
+- **Ambiguous drivers (P2: the remedy must work).** `Ambiguous` is refused `pane-not-driven` in the plan, before anything moves, for switch and reset alike. The message names every candidate as `label/session` with the id it advertises, and gives the manual step: `two bodies could drive PANE: label1/oc (ses_…a), label2/oc (ses_…b); switch PANE to the session its own body drives (holler pane switch PANE ses_…), then holler pane switch PANE <session of record>`. The two steps work because of the target rule: `holler pane switch PANE <the id one candidate advertises>` makes that body the driver (no rebind; the record, SHOWN and DRIVEN become that id in one write), after which the record is an advertised id and the plain rule picks the body; the second switch then re-points it to the session of record. A reset has no such target, so a reset on an ambiguous pane is refused the same way, and the message names the switch. Choosing the id of the wrong body pairs the pane with that body, visibly (the record, SHOWN and DRIVEN all show the id) and undoably (switch again); nothing else about the pane changes. Pinned by `driver_of`'s table and by the verbs' tests (Acceptance 20). Rejected: choosing among the candidates by order or by guess (a wrong pairing, silently); a flag to name the body (D12: no flag, `cli-surface.txt` stays); trying `rebind` on each candidate (servers that share a data directory all have the target, so every rebind would succeed).
+- The real `HubPort` is `crates/holler-cli/src/pane/wiring/hub.rs`: `advertised` reads `control/roster` (E19; keep rows whose `mode` is `attach`, `conn_state` is `connected` and `harness_session_id` is present; the row's `state` maps to `Activity`); `rebind` calls `control/rebind` (D2); `prompt` calls `control/say` (D5). Every hub refusal the three methods meet is mapped to a pane code by **one** function (D5). `Unwired` answers `not-implemented`; the test kit gets `FakeHub` (D10).
 - **Switch and reset, the new order** (the engine, `tx_switch`; `Check` and `Send` are `PromptMode`):
-  1. Plan (nothing written or moved): the existing refusals; then `hub.advertised()`, `harness.list_sessions` and `pane_store.list` give `driver_of`. `Ambiguous` is refused `pane-not-driven` (the message names the candidates). A driver whose `state` is `Working` is refused `session-busy`, `InputRequired` `session-holds-question` (both existing open codes) for switch and reset alike: the body would refuse the rebind, and the refusal must come before the TUI moves. With `--first`: unless a driver exists **and the id it advertises is the pane's session of record** (the gate joins by that id, so it can judge no other), the run is refused `pane-not-driven`; otherwise `hub.prompt(session of record, text, Check)` (D5).
+  1. Plan (nothing written or moved): the existing refusals; then `hub.advertised()`, `harness.list_sessions` and `pane_store.list` give `driver_of`. `Ambiguous` is refused `pane-not-driven` (the message names the candidates and the manual step; see the "Ambiguous drivers" bullet). A driver whose `state` is `Busy` is refused `session-busy`, `HoldingQuestion` `session-holds-question` (both existing open codes, from the one `activity_refusal` function that `check_idle` also calls) for switch and reset alike: the body would refuse the rebind, and the refusal must come before the TUI moves. With `--first`: unless a driver exists **and the id it advertises is the pane's session of record** (the gate joins by that id, so it can judge no other), the run is refused `pane-not-driven`; otherwise `hub.prompt(session of record, text, Check)` (D5).
   2. Act: `create_session` (reset), `select_session`.
   3. Observe: `shown_session` (unchanged: a mismatch is `unavailable`, nothing recorded).
-  4. **Drive**: with a driver, `hub.rebind(driver, target)`; the acknowledged id must equal the target, else `unavailable`. A failure here is a failure after the act: `acted: true`, the message ends with the reconcile step (`doctor --fix` selects the old session again, which is the state the unmoved body still matches).
+  4. **Drive**: with a driver, `hub.rebind(driver, target)`; the acknowledged id must equal the target, else `unavailable`. A driver that already advertises the target (the idempotent re-run of the remedy, and the target rule of `driver_of`) is not asked: its advertised id is the acknowledgement. A failure here is a failure after the act: `acted: true`, the message ends with the reconcile step (`doctor --fix` selects the old session again, which is the state the unmoved body still matches).
   5. Record, one compare-and-swap at the generation the plan read: the four fields of `recorded` (E32) **and `last_observed.driven`** = the acknowledged id, or `None` when no body drives the pane (observed by step 1, not inferred; this overwrites a stale stored value).
   6. First message, `--first` only: `hub.prompt(target, text, Send)`. A refusal or failure here is the existing `unprompted` failure (the record stands; E31's tail; the message says the session was created, shown and recorded, but the first message did not land), with the refusal's code.
   7. A run now makes at most **thirteen** port calls, each bounded by I5 (E30 said eight).
-- Reconcile (`pane doctor`): reads `hub.advertised()` **once per pass**, as it reads `herdr.snapshot` (E34), computes `driver_of` for each pane from the server list it already observed, and records `last_observed.driven` with `shown` in the same write. A failed `advertised()` is an `observe-failed` finding for `hub.advertised` and leaves `driven` as stored (the rule for every failed read, E34). `shown-driven-mismatch` keeps its test, SHOWN against the session of record (E35, E36), and **also** reports a pane whose observed DRIVEN is `Some(d)` with `d` equal to neither SHOWN nor the session of record. (The kind's doc, E37, says it is the one kind `--fix` repairs; that stays true of the TUI side.) `--fix` repairs only the TUI side (it selects the session of record); a pane whose TUI is right and whose body is behind is `not-fixable` by `--fix`, and its remedy is `holler pane switch PANE SESSION` for its session of record, which is idempotent and re-points the body (E38's table gets that one case; if it needs a new internal `FixState`, that is allowed, it is not on the wire).
+- Reconcile (`pane doctor`): reads `hub.advertised()` **once per pass**, as it reads `herdr.snapshot` (E34), computes `driver_of` for each pane from the server list it already observed, and records `last_observed.driven` with `shown` in the same write. A failed `advertised()` is an `observe-failed` finding for `hub.advertised` and leaves `driven` as stored (the rule for every failed read, E34). `shown-driven-mismatch` keeps its test, SHOWN against the session of record (E35, E36), and **also** reports a pane whose observed DRIVEN is `Some(d)` with `d` equal to neither SHOWN nor the session of record. (The kind's doc, E37, says it is the one kind `--fix` repairs; that stays true of the TUI side.) `--fix` repairs only the TUI side (it selects the session of record). A pane whose TUI is right and whose body is behind is `fix: not-fixable` and gets **no new `FixState`** (a state's name is its JSON form, E120, and `--json` does not change): reconcile sets the finding's own `remedy` field (E121) to `holler pane switch PANE <session of record>`, which is idempotent and re-points the body (E38's table is unchanged: it answers every other not-fixable mismatch). A pane whose driver is `Ambiguous` records DRIVEN `None` (nothing is observed) and is reported as `shown-driven-mismatch`, `not-fixable`, `remedy: None` (no one verb repairs it unattended), with the message of the ambiguity refusal.
 - Rejected: **(a) the hub writes or reports DRIVEN into the record**: the hub is the store only (ruling 1) and `last_observed` is "written by reconcile, never inferred" (I6, E33). **(b) record `driven = session_of_record` without observing it**: that is inference. **(c) drive before `select_session`**: a failed select would leave the body moved and nothing in `doctor --fix` could move it back; driving after the observation leaves the state `--fix` already restores. **(d) a `driven` field on the pane store's wire or a new `pane/*` method**: `PANE_METHODS` is frozen (E58) and the roster already carries every fact (E18).
-- Known residue, documented: if the compare-and-swap fails after a successful rebind (a lost race or a `timeout`), the body is ahead of the record. `doctor` reports it as `shown-driven-mismatch`, and `holler pane switch PANE <session of record>` re-points the body back. No step is compensated (the engine's rule, E30).
+- Known residue, documented: if the compare-and-swap fails after a successful rebind (a lost race or a `timeout`), the body is ahead of the record. `doctor` reports it as `shown-driven-mismatch`, and `holler pane switch PANE <session of record>` re-points the body back. No step is compensated (the engine's rule, E30). A **body restart** (P2) and a **rebind whose reply the hub never saw** (the slot residue of D2) reach the same state and have the same report and remedy. A **relaunch** onto a new session (the restarted server no longer lists the old one, E129) does too: `launch` and `relaunch` keep the stored DRIVEN and never infer it (E128), so the body stays on the old session until `pane switch PANE <session of record>`, which `doctor` names. And the window the gate cannot close: a body that is behind and that no `doctor` pass or verb has observed yet is not gated (D1).
 
 **D4. Hold keys: the key `<label>/<session>` is the body session's and does not change when it is re-pointed.**
 - An operator hold or a default hold on a pane's body session therefore **carries across a switch or reset**, and `--join-held` (which holds a key on first sight, E17) does not fire again after a rebind, because no new name appears. `reset --first` onto a held pane is refused before anything moves (D5) with the new open code `session-held` (exit 3; message: the hold kind, the reason, and `holler release <label>/<session>`); `release` lifts it as it lifts any hold (the pane hold of `hold_kind: "pane"` is not lifted by `release`, E68, and keeps its own remedy). A `rebind` is not refused by a hold: a hold stops prompts, not re-pointing.
@@ -67,12 +102,13 @@ Part of epic #633. This is the complete statement of story #839, prepared on 202
 - Rejected: a hold keyed on the harness session id (a new key space; an operator holds a session by the name `holler roster` shows, E18).
 
 **D5. `reset --first`: checked before the switch, sent after it; the hub's `send_prompt` stays the only authority.**
-- The plan step 1 above sends `hub.prompt(id, text, Check)`: the hub resolves the id, runs `holds.would_refuse` and the pane gate (the same functions `send_prompt` calls, E16, E2) and **sends nothing** (no frame to the body, no TalkLog line, no turn id moved, no grant consumed). A refusal changes nothing: no session is created, SHOWN, DRIVEN and the session of record are unchanged. This is the advisory fast path `talk::say` already has for holds (E9: "a fast path only"), not a second enforcement site: it calls the same functions, and the authority that cannot be raced is still `send_prompt`.
+- The plan step 1 above sends `hub.prompt(id, text, Check)`: the hub resolves the id, runs `holds.would_refuse` and the pane gate (the same functions `send_prompt` calls, E16, E2; `pane_gate` is reachable from `talk::admit` because D1 moves it to `panes/gate.rs`) and **sends nothing** (no frame to the body, no TalkLog line, no turn id moved, no grant consumed). A refusal changes nothing: no session is created, SHOWN, DRIVEN and the session of record are unchanged. This is the advisory fast path `talk::say` already has for holds (E9: "a fast path only"), not a second enforcement site: it calls the same functions, and the authority that cannot be raced is still `send_prompt`.
 - `Check` is the new optional parameter `check_only: bool` of `control/say` (and so of `admin/say`, which shares the handler, E13): additive, absent means a normal send; documented in `docs/protocol/v2.md`.
-- `check_only` is read where `control/say`'s other params are (E14). `Send` is `control/say` with `queue: true`, no grant, and the CLI's accept-and-return rule: the reply wait is `QUEUE_ACCEPT_WAIT` (2 s) and a read deadline means accepted (E23), never the turn's reply, so the verb is bounded (I5).
+- `check_only` is read where `control/say`'s other params are (E14). `Send` is `control/say` with `queue: true`, no grant, and the CLI's accept-and-return rule, which exists **once**: `wiring/hub.rs` sets the call's timeout to `say_cmd::QUEUE_ACCEPT_WAIT` (2 s) and passes the reply through `say_cmd::wait_ended` (made `pub(crate)`), whose read deadline means accepted (E23), never the turn's reply, so the verb is bounded (I5). `wiring/hub.rs` writes no accept rule of its own.
+- **One mapping each, reused.** (a) The hub's refusal to a pane code (D7's table) is one function in a new file `crates/holler-cli/src/pane/hub_refusal.rs`, used by `wiring/hub.rs` (`rebind` and `prompt`) and by the `--pane` arms of `say_cmd`, `interrupt_cmd` and `answer_cmd` (E124, E125): each calls it when `Routed.pane` is `Some` and falls through to its generic arms otherwise (a typed SESSION keeps today's `unknown session`, exit 1). (b) On the hub, `control/say`'s `SayError` arms are extracted from `control_server::say` (E122) into one function in a new file `crates/holler-hub/src/control_say.rs`, and the `check_only` branch maps the `talk::admit` error through the same function.
 - If `Check` admitted and `Send` is refused (a race: a park, hold or health change in between), the reset has completed: the existing `unprompted` failure applies (the record stands, exit 3 with the refusal's code, the message says the first message did not land). That residue is accepted and documented.
 - Rejected: **(a) roll back the switch on a refusal**: no port deletes a session, so a reset's new session would stay behind as a stray and "unchanged" would be false; undoing the TUI is a second act with its own failure modes; and the engine compensates nothing after the act (E30). **(b) no pre-check, refuse only after the record**: the issue's acceptance says SHOWN, DRIVEN and the session of record stay unchanged. **(c) a plan-time predicate in the engine without the hub** (the A review's finding 3, option iii): a third copy of the pane-state predicate and no view of holds.
-- `HarnessPort::send_prompt` stays in the trait with its permissive default (E28; the OpenCode adapter implements it, #649's pass-through test and #831's fake use it) but **no verb and no engine calls it any more**. A source-scan test (like E77 and E95) fails if `holler-pane/src` or `holler-cli/src` calls `.send_prompt(` outside the adapter's own conformance. Retiring the method is a follow-up (finding 8's other option).
+- `HarnessPort::send_prompt` stays in the trait with its permissive default (E28; the OpenCode adapter implements it, #649's pass-through test and #831's fake use it) but **no verb and no engine calls it any more**. A source-scan test (like E77 and E95) enforces it, defined precisely: in `holler-pane/src` and `holler-cli/src`, with comments and the text of `fn send_prompt` definitions stripped, the only `.send_prompt(` call is the one in the pass-through of `impl HarnessPort for Wired<dyn HarnessPort>` in `crates/holler-cli/src/pane/wiring/bind.rs` (E127; #649's rule is that a wrapper forwards every method, so F cannot remove it), and the test asserts that file has exactly one; any other call fails. `tx_switch.rs:218` (E31) is the call F removes. Retiring the method is a follow-up (finding 8's other option).
 
 **D6. A pane no body drives, and a harness that is not OpenCode.**
 - DRIVEN means "a live attach-mode body advertises a session the pane's server lists". On `main` only an OpenCode attach body can advertise one. For any pane with no such body (`Driver::None`): `last_observed.driven` is `None`; switch and reset work as before without the drive step; `say --pane` and `interrupt --pane` and `answer --pane` answer `pane-not-driven` (exit 3) instead of today's `unknown session` (exit 1); and **`reset --first` is refused `pane-not-driven` before anything moves**, as it is for a pane whose body is behind its session of record or whose record names no session (`pane reset PANE` without `--first` heals either, and `--first` can follow as a `say --pane`). Today `reset --first` works through the adapter; this is the behaviour change the one-gate rule costs, recorded in the CHANGELOG, and it is the operator's question 3.
@@ -85,7 +121,7 @@ Part of epic #633. This is the complete statement of story #839, prepared on 202
 | `-32011 session_held`, `hold_kind: "pane"`, `reason` = `pane-parked`, `pane-unhealthy` or `pane-shown-driven-mismatch` | the same code (3), the message of `say_cmd::pane_hold_refusal` (E24) |
 | `-32011 session_held`, `hold_kind` `operator` or `default` | `session-held` (3), **new** |
 | `unknown session`, `not_connected` or `ambiguous` for the pane's id; no driver in the plan; `Ambiguous` drivers | `pane-not-driven` (3), **new** |
-| `-32009 session_busy`; a driver whose state is `Working` or `InputRequired` | `session-busy`, `session-holds-question` (3, existing, #645) |
+| `-32009 session_busy`; a driver whose `Activity` is `Busy` or `HoldingQuestion` | `session-busy`, `session-holds-question` (3, existing, #645) |
 | a refused `rebind`: `-32003 unknown_session`, `-32004 not_connected`, `-32602 invalid_params` | `unavailable` (1), carrying the body's reason (the rebind comes after the act, so it is a failure, not a refusal) |
 | `-32012 invalid_grant` (cannot happen: no grant is sent) | `unavailable` (1) |
 | the accept wait's read deadline on `Send` | accepted (not an error) |
@@ -93,27 +129,27 @@ Part of epic #633. This is the complete statement of story #839, prepared on 202
 
 `prompt-unsupported` leaves the `pane reset` row of section 9 (only the `HarnessPort` default raised it). No code goes into `holler_proto::Code`, and no pane verb exits 4.
 
-**D8. Fixtures are `ses_`-shaped, and a test proves the shape.** Every fixture of a hub-routed case uses `ses_` and 26 characters (E78, E79, E80): the test kit gains `holler_pane_testkit::fixture::session_id(n: u32) -> String` = `format!("ses_{n:026x}")` (the format `FakeHarness` mints, E80), and one test asserts that it has 30 characters and that `RoutableName::parse` refuses it, so a fixture cannot pass by being a valid name. The #646 gate tests (E81, E82) are rewritten onto it. A test that passes only on `ses-demo-*` names does not satisfy the story.
+**D8. Fixtures are `ses_`-shaped, and a test proves the shape.** Every fixture of a hub-routed case uses `ses_` and 26 characters (E78, E79, E80): the test kit gains `holler_pane_testkit::fixture::session_id(n: u32) -> String` = `format!("ses_{n:026x}")` (the format `FakeHarness` mints, E80), and one test asserts that it has 30 characters and that `RoutableName::parse` refuses it, so a fixture cannot pass by being a valid name. The test lives in `crates/holler-cli/tests/pane_verbs/driven.rs`, which already links both `holler-pane-testkit` and `holler-proto`: the testkit depends only on `holler-pane` and `serde_json` (E135), and a `holler-proto` dev-dependency there would be a manifest change for one assertion. The #646 gate tests (E81, E82) are rewritten onto it. A test that passes only on `ses-demo-*` names does not satisfy the story.
 
 **D9. Where the opt-in scenario changes (#649's `reset_with_a_first_message`, E86).** The scenario has a hub and no body, so a `reset --first` there is now refused. Step 3 becomes: `reset C2 --first "…"` exits 3 with `pane-not-driven` and the record is byte-for-byte unchanged (no session created); then `reset C2` without `--first` makes the fresh session the later steps use. The "its session reads Busy" assertion moves to the default-run end-to-end test (Acceptance 3), which has a real body. The scenario starts no body (that would need a hub join and a token flow in the scratch rig; it is a possible follow-up, not this story).
 
 **D10. The test kit.** `FakeHub` (new file `crates/holler-pane-testkit/src/hub.rs`) implements `HubPort`: scripted bodies (`with_body(token, name, harness_session_id, state)`), `rebind` updates the matching body's id (or answers a scripted fault), `prompt(Check|Send)` finds the pane whose `session_of_record` equals the id **in the `FakePaneStore` it was built over** and applies `holler_pane::gate::prompt_refusal` plus scripted holds (`hold(name, kind)`), a call log (`calls()`), and the `Send` log (`prompts()`). A conformance function (new file `conformance/hub.rs`) runs against `FakeHub` and, in the default-run end-to-end test, against the real client over a real hub.
 
-**D11. Size rules.** `scripts/lint.sh` fails at 900. "Where the code goes" lists the files and what each may grow by; `circuit.rs` takes **no** growth, `docs.rs` (899) and `roster.rs` (892) take none, `live.rs` at most +6, and no file crosses about 850 by this story. New tests go in new files.
+**D11. Size rules.** `scripts/lint.sh` fails at 900. "Where the code goes" lists the files and what each may grow by (sizes re-measured on the merged tree); `circuit.rs` takes **no** growth, `docs.rs` (899) and `roster.rs` (892) take none, `live.rs` at most +6 (`mod target;`, the `query_slot` field, its initialiser and its lock in `query`: +4), `control_server.rs` and `circuit/dispatch.rs` end smaller than they are, `codec_test.rs` (889) gains one arm (+1), and no file crosses about 850 by this story. New tests go in new files.
 
-**D12. What this story does not do** (named so a test can pin the edge): it builds no Claude Code body (#850); it adds no `doctor --fix` that re-points a body (the remedy is `pane switch`); it does not retire `HarnessPort::send_prompt`; it adds no CLI flag (`cli-surface.txt` is unchanged); it starts no body in the opt-in scenario; it does not change `pane list`'s columns (DRIVEN prints what the record holds, which is now real); it does not touch the roster command (#648).
+**D12. What this story does not do** (named so a test can pin the edge): it builds no Claude Code body (#850); it adds no `doctor --fix` that re-points a body (the remedy is `pane switch`); it does not retire `HarnessPort::send_prompt`; it adds no CLI flag (`cli-surface.txt` is unchanged); it starts no body in the opt-in scenario; it does not change `pane list`'s columns (DRIVEN prints what the record holds, which is now real); it does not touch the roster command (#648); it adds no `admin/rebind` (question 4); it does not persist a rebind across a body restart (P2).
 
 ## Scope
 
 In this order:
 
-1. **Contract.** ADR-0021 (the edit list below, section 11 verbatim), `docs/protocol/v2.md` (`session/rebind`, `check_only`, the pane hold paragraph, the error rows), a one-line extension note in ADR-0014. One commit, before any test.
+1. **Contract.** ADR-0021 (the edit list below, section 11 verbatim), `docs/protocol/v2.md` (`session/rebind`, `check_only`, the pane hold paragraph, the error rows), and the passages D1 changes in ADR-0014 (point 5, Consequences), ADR-0005 (section 3) and ADR-0003 (the Addressing line and a header note). One commit, before any test.
 2. **`holler-proto`:** `Rebind`, `RebindResult` (new file `rebind.rs`), the catalog row, the count test, the two golden files.
-3. **`holler-body`:** the `session/rebind` handler (dispatch, session manager command, HTTP attach driver re-point, presence).
-4. **`holler-hub`:** `resolve_target`, the re-keyed gate, `LiveHandle::query`'s allowlist, `control/rebind`, `check_only`, the `SayOpts`/`LiveCommand::Say`/`HoldGate` field.
+3. **`holler-body`:** the `session/rebind` handler (dispatch, session manager command with its deadline, HTTP attach driver re-point), the one source of the attach id (`Inner.config.session_id`, the `SessionPresence` mirror, `live_configs`), the fake server's stall mode.
+4. **`holler-hub`:** `resolve_prompt_target`, the re-keyed gate (moved to `panes/gate.rs`), `LiveHandle::rebind` and the per-connection query slot (the allowlist of `LiveHandle::query` is **unchanged**), `control/rebind`, `check_only` (`talk::admit`, `control_say.rs`), the `SayOpts`/`LiveCommand::Say`/`HoldGate` field.
 5. **`holler-pane`:** `gate`, `driven`, `hub` (the port), `Ports.hub`, the engine's new order, reconcile's observation and finding, the module docs.
 6. **`holler-pane-testkit`:** `session_id`, `FakeHub`, its conformance.
-7. **`holler-cli`:** `wiring/hub.rs`, `Unwired`, `say_cmd` (the shared predicate, `pane-not-driven` for routed verbs), `ControlCall` constructors, the 15 `Ports { … }` literals (13 files) (one line each).
+7. **`holler-cli`:** `wiring/hub.rs`, `pane/hub_refusal.rs`, `Unwired`, `say_cmd` (the shared predicate, a bare id refused as a SESSION, `pane-not-driven` for routed verbs), `interrupt_cmd`, `answer_cmd` and `prompt_target` (`Routed.pane`), `ControlCall` constructors, the 15 `Ports { … }` literals (13 files) (one line each).
 8. **Docs:** `docs/pane-control.md`, `CHANGELOG.md`, the module docs.
 
 ## The ADR and the dependent docs
@@ -122,9 +158,9 @@ In this order:
 
 | Where (by words) | Change |
 |---|---|
-| Header, the **Amends:** line (E53) | Append: "[ADR 0014](ADR-0014.md) is extended by section 11 (#839): a hub may ask an attach-mode body to re-point one of its sessions to another harness session on the same endpoint (`session/rebind`); the session's name, and so its address, does not change." |
-| Section 2, the port table (E54 and the table above it) | Add the row: `\| HubPort \| advertised, rebind(driver, harness_session_id), prompt(harness_session_id, text, mode) (#839) \| holler-cli/src/pane/wiring/hub.rs, a client of the hub's control socket \|`. In the sentence "Both `HarnessPort` and `HostPort` are amended since, under that rule", append: "and `Ports` by #839, which gains `HubPort` (section 11)". |
-| Section 4, invariant I2's test idea (E55) | Append: "The driven session is the one the fake hub's body advertises (#839)." |
+| Header, the **Amends:** line (E53) | Append: "[ADR 0014](ADR-0014.md) (point 5 and its Consequences bullet on `roster`/`status`), [ADR 0005](ADR-0005.md) section 3 and [ADR 0003](ADR-0003.md)'s Addressing line are extended by section 11 (#839): the hub also resolves a live attach-mode session's `harness_session_id` as an address (the `holler` CLI sends one only for `--pane`; a person's `SESSION` is still a name), and may ask an attach-mode body to re-point one of its sessions to another harness session on the same endpoint (`session/rebind`); the session's name, and so its identity, does not change." |
+| Section 2, the port table (E54 and the table above it) | Add the row: `\| HubPort \| advertised, rebind(driver, harness_session_id), prompt(harness_session_id, text, mode) (#839) \| holler-cli/src/pane/wiring/hub.rs, a client of the hub's control socket \|`. In the sentence "Both `HarnessPort` and `HostPort` are amended since, under that rule", append: "and `Ports` by #839, which gains `HubPort` (section 11)". In the sentence "All ports are traits in `holler-pane` (`src/ports.rs`, `src/profile.rs`)" (E54) add `src/hub.rs`. |
+| Section 4, invariant I2's test idea (E55) | Append: "After a switch or a reset the driven session is the one the fake hub's body advertises (#839). A launch and a relaunch keep the stored DRIVEN and never infer it; a relaunch onto a new session leaves the body on the old one until `pane switch` (section 11, point 3)." |
 | Section 5, "Wiring as built (#649)", bullet "What the wiring makes live" (E57), the sentences from "And since #642 part 3 the first message of `pane reset --first` is a real prompt through `HarnessPort::send_prompt`" through "Until #828 lands, the operator does not use `reset --first` on a parked or held pane." | Replace with: "Since #839 the first message of `pane reset --first` goes through the hub's prompt path, so a parked, held or unhealthy pane refuses it (section 8, 'Switch and reset as built')." |
 | Same section, bullet "Not done here", the sentence "The hub's DRIVEN session is not pointed at `session_of_record` (section 11, #654)." | Delete it (done: section 11, #839). |
 | Section 5, the "Wiring as built (#649)" bullets (E56) | Add a bullet: "**The hub port (#839).** `connect` also builds `HubPort`, a client of the hub's control socket; it needs only the hub, as the registries' clients do." |
@@ -138,11 +174,11 @@ In this order:
 | Section 13 (E64), "is replaced by `session_of_record` once the cutover (#654) points the hub's DRIVEN session at it (section 11)" | "is replaced by `session_of_record` once a body is re-pointed to it (#839, section 11); the cutover (#654) starts one attach body for each pane." |
 | "Deferred to named stories" (E65), the bullet "How the hub's DRIVEN session follows `session_of_record`: #654 …" | Replace with: "A body for a Claude Code pane, so that DRIVEN exists for it: #850. A `doctor --fix` that re-points a body, and retiring `HarnessPort::send_prompt`: unscheduled." |
 | Same section, the bullet "The refusal of a pane that is not idle or holds a question, and `reset --first`", from "and the wiring (#649) makes the first message's path live, and whether it moves to the hub's one prompt path is #828's." | Replace with "and since #839 the first message goes through the hub's one prompt path." |
-| "Decisions taken" (end of the ADR) | Append the decisions D1 to D6 of this brief, each as one numbered item marked "(2026-10-11, #839, under the operator's standing rules)". |
+| "Decisions taken" (end of the ADR) | Append the decisions D1 to D6 of this brief and P1 to P3 of the plan check, each as one numbered item marked "(2026-10-11, #839, under the operator's standing rules)". |
 
 **Replacement text for section 8, "Switch and reset as built (#645)"** (E59). Keep the paragraph up to "…in one compare-and-swap at the generation the plan read, never retried;" and replace everything from "`last_observed.driven` is left as stored (section 11). Then, only for `reset --first TEXT`," through "it has no reconcile step, because the record is correct." with:
 
-> `last_observed.driven` is written in the same compare-and-swap, from the id the body acknowledged (section 11), or `None` when no body drives the pane. Before the act, the plan reads the live attach sessions through `HubPort::advertised` and finds the pane's driver (`holler_pane::driven::driver_of`); a driver that reports a turn or a question is refused (`session-busy`, `session-holds-question`), and for `reset --first TEXT` a pane no body drives, or whose body does not advertise its session of record, is refused `pane-not-driven` and the hub's gate is asked, without sending, whether it would admit the prompt (`HubPort::prompt` with `Check`), so a parked, held or unhealthy pane, or one whose SHOWN and DRIVEN differ, is refused before anything moves: no session is created and the record is unchanged. After `shown_session` shows the target, `HubPort::rebind` asks the body to drive it; a failure there is a failure after the act (the message ends with the reconcile step). Then, only for `reset --first TEXT`, `HubPort::prompt` with `Send` queues `TEXT` through the hub's one prompt path (`send_prompt`), accepted and returned (never waiting for the turn). A prompt that fails after the record, a refusal in a race included, is that call's own error (a refusal is exit 3 with its code), and its message says the session was created, shown and recorded but the first message did not land; it has no reconcile step, because the record is correct.
+> `last_observed.driven` is written in the same compare-and-swap, from the id the body acknowledged (section 11), or `None` when no body drives the pane. Before the act, the plan reads the live attach sessions through `HubPort::advertised` and finds the pane's driver (`holler_pane::driven::driver_of`); a driver that reports a turn or a question is refused (`session-busy`, `session-holds-question`), and an ambiguous driver is refused `pane-not-driven` unless a switch's target is advertised by exactly one candidate, and for `reset --first TEXT` a pane no body drives, or whose body does not advertise its session of record, is refused `pane-not-driven` and the hub's gate is asked, without sending, whether it would admit the prompt (`HubPort::prompt` with `Check`), so a parked, held or unhealthy pane, or one whose SHOWN and DRIVEN differ, is refused before anything moves: no session is created and the record is unchanged. After `shown_session` shows the target, `HubPort::rebind` asks the body to drive it; a failure there is a failure after the act (the message ends with the reconcile step). Then, only for `reset --first TEXT`, `HubPort::prompt` with `Send` queues `TEXT` through the hub's one prompt path (`send_prompt`), accepted and returned (never waiting for the turn). A prompt that fails after the record, a refusal in a race included, is that call's own error (a refusal is exit 3 with its code), and its message says the session was created, shown and recorded but the first message did not land; it has no reconcile step, because the record is correct.
 
 Also in that paragraph: "Neither verb checks the pane's park state; a refusal derived from pane state belongs to the prompt gate of #646, which `reset --first` does not pass through (see the seam below)." becomes "Neither verb checks the pane's park state itself; `reset --first` is refused for it by the prompt gate of #646, asked before the act and applied at the send." And "a run makes at most eight port calls" becomes "at most thirteen".
 
@@ -153,48 +189,73 @@ Also in that paragraph: "Neither verb checks the pane's park state; a refusal de
 advertises (`SessionAd.harness_session_id`, ADR 0014 point 6), and the hub joins it to the pane by that id. Decided under
 the operator's standing rules (2026-10-11). Each point names what it rejected.
 
-1. **The address is the advertised `harness_session_id`.** `say`, `interrupt` and `answer` resolve a target that is a valid
-   name (ADR 0005) by name, as before, and any other target as a harness session id, against the live attach sessions: no
-   match is unknown, a match on an offline body is not connected, two matches are ambiguous. A name is never an id (the name
-   grammar refuses `_`, which every OpenCode id has); an id that happens to be a valid name is resolved as a name and is not
-   routable by id. The pane gate (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) is keyed on the advertised id
-   of the session being prompted, joined to `Pane.session_of_record`, however the prompt addressed that session, and no longer
-   on the session's name; so a bare `say` to a body session that drives a parked pane's session of record is refused too.
-   One predicate, `holler_pane::gate::prompt_refusal`, decides the three refusals for the hub's gate and for `--pane`; their
-   messages stay where they are. Rejected: joining on the pane's name (nothing makes a body's session name its pane's name,
-   and the join would be a naming rule imposed on a fleet); a new field of `Pane` naming the body session (a second source of
-   truth beside the advertisement, and a change of the stored record); a new request to ask a body which session it drives
-   (presence already carries it); keeping the name match beside the id match (two keys, and only test fixtures match the old).
+1. **The address is the advertised `harness_session_id`.** At the hub, `say`, `interrupt` and `answer` resolve a target
+   that is a valid name (ADR 0005) by name, as before, and any other target as a harness session id, against the live
+   attach sessions: no match is unknown, a match on an offline body is not connected, two matches are ambiguous. A name is
+   never an id (the name grammar refuses `_`, which every OpenCode id has); an id that happens to be a valid name is
+   resolved as a name and is not routable by id. The id is an address for `--pane` resolution and the pane gate, not a form
+   a person types: the `holler` CLI refuses a `SESSION` positional that is not a valid name (`holler say ses_… TEXT` is
+   `unknown session`, as before) and sends an id only for `--pane`. This extends ADR 0005 section 3, ADR 0003's Addressing
+   line and ADR 0014 point 5 and its Consequences; the name is still the identity. The pane gate (`pane-parked`,
+   `pane-unhealthy`, `pane-shown-driven-mismatch`) is keyed on the advertised id of the session being prompted, however the
+   prompt addressed that session, and selects the panes whose session of record or recorded DRIVEN it is; it is no longer
+   keyed on the session's name, so a bare `say` to a body session that drives a parked pane's session of record is refused
+   too. One predicate, `holler_pane::gate::prompt_refusal`, decides the three refusals for the hub's gate and for `--pane`;
+   their messages stay where they are. Rejected: joining on the pane's name (nothing makes a body's session name its
+   pane's name, and the join would be a naming rule imposed on a fleet); a new field of `Pane` naming the body session (a
+   second source of truth beside the advertisement, and a change of the stored record); a new request to ask a body which
+   session it drives (presence already carries it); keeping the name match beside the id match (two keys, and only test
+   fixtures match the old); keying the gate on the session of record alone (a body that is behind would not be gated);
+   letting a bare id work as a typed SESSION (a second typed address, and a stale id would reach a body).
 2. **A body is re-pointed, not restarted: `session/rebind`.** A new additive request, hub to body, `{session,
    harness_session_id}` answered `{session, harness_session_id}` (protocol v2 section 4; the catalog has 23 rows). The body
    re-points one of its own attach sessions to another harness session on the same endpoint, after the existence check
    `attach` makes (never `session/new`), and only when the session is idle: a session that is not an attach session is
    `invalid_params`, an unknown name `unknown_session`, a busy session or one holding a question `session_busy`, an id the
    endpoint does not have `invalid_params` with the old binding kept, an endpoint that does not answer within 5 s
-   `not_connected` with the old binding kept. The session's name does not change, so its address and its hold key do not
-   (point 4); ADR 0005 section 3 says the name is the identity and the locator changes. The hub forwards it over the generic
-   request forward (`control/rebind`, bounded by 10 s) and, before it replies, updates its cached presence and the roster row,
-   so a read after the reply sees the new id. Only the HTTP attach driver implements it; a body for another harness
-   implements it in its own driver. Rejected: restarting the body with a new configuration (not bounded by I5, and the CLI
-   would supervise a process and rewrite a file the wizard owns); a new body session for each harness session (a new name is a
-   new hold key, so `--join-held` would default-hold every reset); the hub or the CLI posting the prompt to the pane's server
-   (an adapter in the hub, and a second way to deliver a prompt); leaving it to the cutover (the first message of `reset
-   --first` could not be delivered, and the gate would refuse everything as `pane-shown-driven-mismatch`).
+   `not_connected` with the old binding kept (an attach that finishes after the deadline is dropped, never swapped in). The
+   session's name does not change, so its address and its hold key do not (point 4); ADR 0005 section 3 says the name is
+   the identity and the locator changes. The session task's own configuration is the one source of the id a body attaches
+   to: the rebind writes the new id there once the new driver has attached, so the re-attach after a turn that ended in
+   error and the attach retry follow it, and presence and `query/support` read it from there. The hub sends the request
+   through its own `LiveHandle::rebind`, not through the generic request forward, whose allowlist is unchanged, so
+   `control/query_remote` and `admin/query` cannot carry it. `control/rebind`, a method of the local control socket only
+   (there is no `admin/rebind`), is bounded by 10 s and, before it replies, updates the hub's cached presence and the
+   body's roster rows, so a read after the reply sees the new id. One forwarded request is in flight on a connection at a
+   time: the circuit has one reply slot, shared by `session/answer`, `query/*` and the rebind, and the hub serialises the
+   three. Only the HTTP attach driver implements it; a body for another harness implements it in its own driver. Rejected:
+   restarting the body with a new configuration (not bounded by I5, and the CLI would supervise a process and rewrite a
+   file the wizard owns); a new body session for each harness session (a new name is a new hold key, so `--join-held`
+   would default-hold every reset); the hub or the CLI posting the prompt to the pane's server (an adapter in the hub, and
+   a second way to deliver a prompt); leaving it to the cutover (the first message of `reset --first` could not be
+   delivered, and the gate would refuse everything as `pane-shown-driven-mismatch`); allowlisting the request on the
+   generic forward (`control/query_remote` and `admin/query` would carry it without the cache update); persisting the
+   binding across a body restart (state for a window the cutover does not need).
 3. **DRIVEN is observed, never inferred, and the hub does not write it (I6).** The pure function
    `holler_pane::driven::driver_of` finds the body that drives a pane: among the live attach sessions whose advertised id the
-   pane's own server lists and that are not another pane's session of record, the pane's session of record if it is one,
-   else the only one; none is not driven, more than one is ambiguous. The port `HubPort` (`advertised`, `rebind`, `prompt`)
-   reads the hub through its control socket. A switch or reset writes `last_observed.driven` in the same compare-and-swap as
-   the record, from the id the body acknowledged to `rebind` (`None` when no body drives the pane); reconcile reads
-   `advertised` once per pass and records what it found with `shown`. `shown-driven-mismatch` is also reported when an
-   observed DRIVEN is neither SHOWN nor the session of record; `--fix` repairs only the TUI side, and the remedy for a body
-   that is behind is `holler pane switch PANE SESSION` for the session of record, which is idempotent. The order of a switch
-   or reset is: plan (the refusals of section 8, then the driver, then for `--first` the gate's answer), act, observe, rebind,
-   record, first message. The rebind comes after the observation so that a failed `select_session` leaves the body where it
-   was and `doctor --fix` restores the rest. If the record's write fails after the rebind, the body is ahead of the record:
-   `doctor` reports it and `pane switch` re-points it back; nothing is compensated (section 8). Rejected: the hub writing
-   DRIVEN (the hub is the store only, ruling 1); recording the session of record as DRIVEN without observing it (inference);
-   driving before the act (a failed select would leave the body moved, with no repair).
+   pane's own server lists and that are not another pane's session of record, the one that advertises the pane's session of
+   record, else (for a switch) the only one that advertises the session being switched to, else the only candidate; none is
+   not driven, more than one is ambiguous. The port `HubPort` (`advertised`, `rebind`, `prompt`) reads the hub through its
+   control socket. A switch or reset writes `last_observed.driven` in the same compare-and-swap as the record, from the id
+   the body acknowledged to `rebind` (`None` when no body drives the pane; a body already on the target is not asked);
+   reconcile reads `advertised` once per pass and records what it found with `shown`. `shown-driven-mismatch` is also
+   reported when an observed DRIVEN is neither SHOWN nor the session of record; `--fix` repairs only the TUI side, and a
+   body that is behind is `not-fixable` with the finding's own remedy `holler pane switch PANE SESSION` for the session of
+   record, which is idempotent. The order of a switch or reset is: plan (the refusals of section 8, then the driver, then
+   for `--first` the gate's answer), act, observe, rebind, record, first message. The rebind comes after the observation so
+   that a failed `select_session` leaves the body where it was and `doctor --fix` restores the rest. If the record's write
+   fails after the rebind, the body is ahead of the record: `doctor` reports it and `pane switch` re-points it back;
+   nothing is compensated (section 8). A body restart reverts a re-pointed body to the session in its configuration (the
+   binding is not persisted): `doctor` reports it the same way, the same remedy re-points it, and the gate refuses prompts
+   to it once its id is recorded as the pane's DRIVEN. When servers share a data directory, two or more reverted bodies make
+   the driver ambiguous: the verbs then refuse `pane-not-driven`, naming each candidate, and the operator makes the pairing
+   explicit by switching the pane to the session its own body drives, then to the session of record. `launch` and
+   `relaunch` keep the stored DRIVEN and never infer it, so a relaunch onto a new session (the restarted server no longer
+   lists the old one) leaves the body on the old session until `pane switch`. The window that remains: a body that is
+   behind and that no pass or verb has yet observed is not refused by the gate. Rejected: the hub writing DRIVEN (the hub
+   is the store only, ruling 1); recording the session of record as DRIVEN without observing it (inference); driving
+   before the act (a failed select would leave the body moved, with no repair); choosing among ambiguous bodies by order
+   (a wrong pairing, silently).
 4. **Hold keys.** A hold is keyed `<label>/<session>` by the body session's name, which a rebind does not change, so an
    operator or default hold carries across a switch or reset, and `--join-held` (which holds a name on first sight) does not
    fire again. A hold stops prompts, not a rebind.
@@ -211,60 +272,79 @@ the operator's standing rules (2026-10-11). Each point names what it rejected.
    transport and no verb or engine calls it.
 6. **A pane no body drives.** DRIVEN is then `None`; a switch or reset works as before without the rebind; `say`,
    `interrupt` and `answer` with `--pane` answer `pane-not-driven` (they were `unknown session`); `reset --first` is refused
-   `pane-not-driven` before anything moves, as it is when the body does not advertise the pane's session of record. Only an OpenCode attach body exists today. A Claude Code pane (#831) is in this
-   case until a body can drive it (#850); the join is a string comparison of the advertised id with the session of record, so
-   its session id joins the same way once a body advertises it, and that body implements `session/rebind` in its own driver.
+   `pane-not-driven` before anything moves, as it is when the body does not advertise the pane's session of record, and when
+   more than one body could drive the pane and the call names none of them (point 3). Only an OpenCode attach body exists
+   today. A Claude Code pane (#831) is in this case until a body can drive it (#850); the join is a string comparison of the
+   advertised id with the session of record, so its session id joins the same way once a body advertises it, and that body
+   implements `session/rebind` in its own driver.
 ```
 
 **`docs/protocol/v2.md`** (E66 to E70):
 - Section 4 table (E66): a row after `session/answer`: `session/rebind | request | hub→body | {session, harness_session_id} | {session, harness_session_id} — sent only after the driver targets the new session and presence advertises it (#839)`.
-- Section "Attach-mode sessions" (E69): a paragraph "**Re-pointing (#839).**" stating the body's refusals and the 5 s bound of D2, and that the session name does not change.
+- Section "Attach-mode sessions" (E69): a paragraph "**Re-pointing (#839).**" stating the body's refusals and the 5 s bound of D2 (an attach that finishes after the deadline is not swapped in), that the session name does not change, and that the request is not forwardable through `query/*`: `control/query_remote` and `admin/query` refuse `session/rebind` with `-32601`.
 - Section 7, presence (E67): after the sentence "`harness_session_id` is present for `attach`": "A `session/rebind` changes it; the hub's cache and roster row are updated when the rebind is acknowledged."
-- The `control/say` description (wherever `admin/say`'s "identical to control/say's `{session, text, queue?, grant?, timeout_ms?}`" is, E66): add `check_only?`, and say that `session` may be a harness session id (D1).
+- The `control/say` description (wherever `admin/say`'s "identical to control/say's `{session, text, queue?, grant?, timeout_ms?}`" is, E66): add `check_only?`, and say that `session` may be a harness session id at the hub (D1; the `holler` CLI sends one only for `--pane`, and refuses one typed as a SESSION).
 - The pane hold paragraph (E68): "the session of record of a pane" → "a session whose advertised `harness_session_id` is the session of record of a pane"; keep the rest.
 - Error rows (E70): `-32009` and `-32004` rows gain the rebind cases ("or a `session/rebind` of a session with a turn in flight or a question pending"; "or a `session/rebind` whose endpoint did not answer").
-- The non-normative note at the end about `pane/*` (v2.md line 817): leave, and add one sentence that `control/rebind` is a control-socket method as `pane/*` are, outside the catalog.
+- The non-normative note at the end about `pane/*` (v2.md line 824, 817 before #851): leave, and add one sentence that `control/rebind` is a control-socket method as `pane/*` are, outside the catalog.
 
-**`docs/adr/ADR-0014.md`:** one bullet at the end of "Consequences": "- Extended by [ADR 0021](ADR-0021.md) section 11 (#839): a hub may ask an attach-mode body to re-point one of its sessions to another harness session on the same endpoint (`session/rebind`). The session's name, and so its address, does not change."
+**`docs/adr/ADR-0014.md`, `docs/adr/ADR-0005.md`, `docs/adr/ADR-0003.md`** (P3; E51, E52, E131, E130). Each passage D1 changes is amended in the contract commit:
+- **ADR 0014 point 5** ("Addressing is unaffected"): append "Since [ADR 0021](ADR-0021.md) section 11 (#839) the hub also accepts the `ses_…` id as an address, for its own `--pane` resolution and pane gate (the `holler` CLI's `SESSION` stays a name), and a `session/rebind` can change it; the name is still the identity."
+- **ADR 0014 Consequences**, the bullet "`roster`/`status` surface `mode` and the harness session id so an operator can tell attach apart from spawn without it changing how they address the session": append "(Extended by [ADR 0021](ADR-0021.md) section 11 (#839): the hub also resolves that id as an address for `--pane`; a person's `SESSION` is still a name.)". And one new bullet at the end: "- Extended by [ADR 0021](ADR-0021.md) section 11 (#839): a hub may ask an attach-mode body to re-point one of its sessions to another harness session on the same endpoint (`session/rebind`). The session's name, and so its address, does not change."
+- **ADR 0005 section 3** (E52), after "a command is never issued to a locator it was handed earlier.": "Since [ADR 0021](ADR-0021.md) section 11 (#839), a `say`, `interrupt` or `answer` target that is not a valid name is resolved at call time as the `harness_session_id` that a live attach-mode session advertises (the `holler` CLI sends one only for `--pane`; a person's `SESSION` is still a name); the name stays the identity, and the locator may change (`session/rebind`)."
+- **ADR 0003**, "Not decided here", the Addressing line (E130): append "A bare harness session id (`ses_…`) is not a `SESSION`: `holler say ses_… TEXT`, `interrupt` and `answer` refuse it as `unknown session` (exit 1); only `--pane` resolves to one, and the hub accepts it as an address ([ADR 0021](ADR-0021.md) section 11, #839)." And one `**Clarified by:**` line in the header, after the last one, in the form of the others: "[#839](https://github.com/Performant-Labs/holler/issues/839) (2026-10-11) — a harness session id is an address at the hub, for `--pane` only; the CLI's `SESSION` positional stays a name."
+- **ADR-0021's Amends line** names all of the above (the first row of the table).
 
-**`docs/pane-control.md`** (E71 to E75; `docs_pane_control_test` pins the guide to the code's tables, so it must still pass): section for `reset` (E71): replace the paragraph "**Do not use `--first` on a parked or held pane.** …" with the new rule (the first message goes through the hub's gate; a parked, held or unhealthy pane, one whose SHOWN and DRIVEN differ, and one no body drives are refused before anything moves, `pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`, `pane-not-driven`), and add that a pane needs a body attached to its server for `--first`; section for `park` (E71): delete "; the first message of `reset --first` is not (see `reset`)"; DRIVEN column (E72) and "SHOWN against DRIVEN" (E73): DRIVEN is the session the body that drives the pane advertises, recorded by `switch`, `reset` and `doctor`, `-` when no body drives the pane; SYNC and `doctor` compare as ADR section 11 says; cutover steps (E74): delete "and `reset --first` is not used on a parked or held pane (section 3)", and add that each pane needs an attach body before the cutover step that uses `reset --first`; "Later" (E75): delete the bullet "DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839)". Section 9's error table gains `pane-not-driven` and `session-held`.
+**`docs/pane-control.md`** (E71 to E75; `docs_pane_control_test` pins the guide to the code's tables, so it must still pass): section for `reset` (E71): replace the paragraph "**Do not use `--first` on a parked or held pane.** …" with the new rule (the first message goes through the hub's gate; a parked, held or unhealthy pane, one whose SHOWN and DRIVEN differ, and one no body drives are refused before anything moves, `pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`, `pane-not-driven`), and add that a pane needs a body attached to its server for `--first`; section for `park` (E71): delete "; the first message of `reset --first` is not (see `reset`)"; DRIVEN column (E72) and "SHOWN against DRIVEN" (E73): DRIVEN is the session the body that drives the pane advertises, recorded by `switch`, `reset` and `doctor`, `-` when no body drives the pane; SYNC and `doctor` compare as ADR section 11 says; cutover steps (E74): delete "and `reset --first` is not used on a parked or held pane (section 3)", and add that each pane needs an attach body before the cutover step that uses `reset --first`; "Later" (E75): delete the bullet "DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839)". Section 9's error table gains `pane-not-driven` and `session-held`. Also: a short paragraph that a body restart reverts a re-pointed body to its configured session, that `pane doctor` is run after restarting bodies and reports it as `shown-driven-mismatch` with the remedy `holler pane switch PANE SESSION`; the message of the ambiguous-body refusal and its two steps (switch to the session the pane's own body drives, then to the session of record); and that a `ses_…` id is typed only as `--pane` resolution, never as a `SESSION` (`holler say ses_… TEXT` is `unknown session`).
 
-**Module docs that repeat the old sentences** (edit by words): `crates/holler-pane/src/tx_switch.rs` lines 27-35 and 50 (E30), `crates/holler-pane/src/reconcile.rs` lines 33-35 (E34), `crates/holler-cli/src/pane/reset.rs` lines 1-15, `crates/holler-pane/src/ports.rs` line 345 ("`pane reset --first` calls it") and the amendments list at its top, `crates/holler-adapter-opencode/src/prompt.rs` line 7 ("`pane reset --first` sends through `send_prompt` outside that path"), `crates/holler-hub/src/circuit/dispatch.rs` (the doc of `pane_state_refusal` and of the tests that name the CLI twin), `crates/holler-cli/src/say_cmd.rs` (the doc of `resolve_pane_target` that names the twin), `crates/holler-proto/src/methods.rs` (the "22-row" doc and the count test, E42, E43), and `crates/holler-hub/src/live.rs` (the allowlist comment, E6).
+**Module docs that repeat the old sentences** (edit by words): `crates/holler-pane/src/tx_switch.rs` lines 27-35 and 50 (E30), `crates/holler-pane/src/reconcile.rs` lines 33-35 (E34), `crates/holler-cli/src/pane/reset.rs` lines 1-15, `crates/holler-pane/src/ports.rs` line 345 ("`pane reset --first` calls it") and the amendments list at its top, `crates/holler-adapter-opencode/src/prompt.rs` line 7 ("`pane reset --first` sends through `send_prompt` outside that path"), `crates/holler-hub/src/panes/gate.rs` (the moved docs of `pane_state_refusal` and of the tests that name the CLI twin; `circuit/dispatch.rs` loses them), `crates/holler-cli/src/say_cmd.rs` (the doc of `resolve_pane_target` that names the twin), `crates/holler-proto/src/methods.rs` (the "22-row" doc and the count test, E42, E43), and `crates/holler-body/src/registry.rs` (the doc of `SessionRegistry::presence_doc`: the as-started baseline, not the live id). `crates/holler-hub/src/live.rs`'s allowlist comment (E6) is **not** edited (P1).
 
 **`CHANGELOG.md`**, under `## [Unreleased]`, `### Enhancements`, one new item (E76 shows the shape), linking `/issues/839` and `/issues/828`:
 
-> - Pane control, DRIVEN (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the session the hub drives now follows each pane's session of record ([#839](https://github.com/Performant-Labs/holler/issues/839), which absorbs [#828](https://github.com/Performant-Labs/holler/issues/828)). The hub joins a pane to the attach-mode body that advertises its session of record, and `say`, `interrupt` and `answer` accept that `ses_…` id as their target, so `--pane` now reaches a real pane; the pane gate (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) is keyed on the same id instead of the body's session name. `holler pane switch` and `holler pane reset` ask the body to follow the new session (a new additive hub-to-body request, `session/rebind`; the protocol catalog has 23 rows) and record `last_observed.driven` from its answer, and `holler pane doctor` records it too and reports `shown-driven-mismatch` when it differs. The first message of `holler pane reset --first` now goes through the hub's prompt path: a parked, held or unhealthy pane refuses it before anything moves (`pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`), and a pane no body drives refuses it (`pane-not-driven`; it worked through the harness before). `control/say` gains an optional `check_only`. This replaces the caution about `reset --first` on a parked or held pane in the entry above. [ADR 0021](docs/adr/ADR-0021.md) section 11 records the decisions.
+> - Pane control, DRIVEN (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the session the hub drives now follows each pane's session of record ([#839](https://github.com/Performant-Labs/holler/issues/839), which absorbs [#828](https://github.com/Performant-Labs/holler/issues/828)). The hub joins a pane to the attach-mode body that advertises its session of record, and the hub resolves that `ses_…` id as an address for `say`, `interrupt` and `answer`, so `--pane` now reaches a real pane (a `ses_…` typed as the session argument is still refused, as before); the pane gate (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) is keyed on the same id, and on a pane's recorded DRIVEN, instead of the body's session name. `holler pane switch` and `holler pane reset` ask the body to follow the new session (a new additive hub-to-body request, `session/rebind`; the protocol catalog has 23 rows) and record `last_observed.driven` from its answer, and `holler pane doctor` records it too and reports `shown-driven-mismatch` when it differs. A restarted body attaches its configured session again; `holler pane doctor` reports that and `holler pane switch PANE SESSION` re-points it. The first message of `holler pane reset --first` now goes through the hub's prompt path: a parked, held or unhealthy pane refuses it before anything moves (`pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`), and a pane no body drives refuses it (`pane-not-driven`; it worked through the harness before). `control/say` gains an optional `check_only`. This replaces the caution about `reset --first` on a parked or held pane in the entry above. [ADR 0021](docs/adr/ADR-0021.md) section 11 records the decisions.
 
 and, in the existing #649 item (E76's neighbour, "so until [#828] lands, do not use `reset --first` on a parked or held pane"), replace that clause with "and, since [#839](https://github.com/Performant-Labs/holler/issues/839), through the hub's gate".
 
 ## Where the code goes
 
-Sizes measured with `wc -l` at `bda1069`; `scripts/lint.sh` fails at 900. The issue's numbers for `switch.rs` (~833) and `support/mod.rs` (~849) have grown to 868 and 857.
+Sizes measured with `wc -l` on 2026-10-11 on the tree merged with `d6ae539` (#851 touched none of these files' sizes); `scripts/lint.sh` fails at 900. The issue's numbers for `switch.rs` (~833) and `support/mod.rs` (~849) have grown to 868 and 857.
 
 | File | Now | What | Rule |
 |---|---|---|---|
 | `crates/holler-hub/src/circuit.rs` | 898 | The `LiveCommand::Say` arm (E4): destructure `harness_session` and set `HoldGate.harness_session` | **+0 lines**: edit the existing lines in place (they already exceed 100 columns); do not reformat the file |
-| `crates/holler-hub/src/live.rs` | 884 | `SayOpts` and `LiveCommand::Say` gain one field each (E5); `query`'s allowlist condition (E6); `mod target;` | at most **+6**; `resolve_target` itself goes in the new `crates/holler-hub/src/live/target.rs` |
-| `crates/holler-hub/src/circuit/dispatch.rs` | 820 | `HoldGate.harness_session`; `pane_gate` re-keyed; `pane_state_refusal` deleted (E1) | net **negative**; the pane-gate tests (E81, E82 and their neighbours) move to a new `crates/holler-hub/src/circuit/dispatch/gate_tests.rs` (`#[cfg(test)] mod gate_tests;`), rewritten on `ses_` ids |
+| `crates/holler-hub/src/live.rs` | 884 | `SayOpts` and `LiveCommand::Say` gain one field each (E5); `mod target;`; `LiveHandle.query_slot` (field, its initialiser in `insert`, its lock in `query`); **the allowlist and its comment are unchanged** (P1) | at most **+6**; `resolve_prompt_target` and `LiveHandle::rebind` go in the new `crates/holler-hub/src/live/target.rs` |
+| `crates/holler-hub/src/circuit/dispatch.rs` | 820 | `HoldGate.harness_session`; `pane_gate` and `pane_state_refusal` leave for `panes/gate.rs` (E1, E2); `send_prompt` calls the moved `pane_gate` | net **negative**; the pane-gate tests (E81, E82 and their neighbours) move with them to a new `crates/holler-hub/src/panes/gate_tests.rs` (`#[cfg(test)] mod gate_tests;` in `panes/gate.rs`), rewritten on `ses_` ids |
 | `crates/holler-hub/src/talk.rs` | 540 | the two resolve lines of `say` and `answer`; `SayOpts` gets `harness_session`; the `check_only` branch calls a new `talk::admit` | ok (+30); if more, `crates/holler-hub/src/talk/admit.rs` |
 | `crates/holler-hub/src/interrupt.rs` | 155 | the two resolve lines | ok |
-| `crates/holler-hub/src/control_server.rs` | 837 | one arm for `control/rebind` in `dispatch_session_control`; `check_only` read in `say` | at most **+8**; everything else in `control_rebind.rs` (new) |
+| `crates/holler-hub/src/control_server.rs` | 837 | one arm for `control/rebind` in `dispatch_session_control`; `check_only` read in `say`; the `SayError` arms of `say` (E122) move to `control_say.rs` | net **negative**; everything else in `control_rebind.rs` and `control_say.rs` (both new, each under 200) |
+| new `crates/holler-hub/src/panes/gate.rs`, `panes/gate_tests.rs`; `panes/mod.rs` | 0; 213 | the moved gate and its tests; `mod gate;` | each under 300; `mod.rs` +1 |
+| `crates/holler-hub/src/lib.rs` | 32 | `pub mod control_rebind;`, `pub mod control_say;` | +2 |
 | `crates/holler-hub/src/control.rs` | 518 | `ControlCall::rebind`, `ControlCall::say_check` | ok |
 | `crates/holler-hub/src/roster.rs` | 892 | nothing: `Roster::advertise` is reused | **no growth** |
 | `crates/holler-proto/src/docs.rs` | 899 | nothing | **no growth**; `Rebind`, `RebindResult` in new `crates/holler-proto/src/rebind.rs` |
 | `crates/holler-proto/src/methods.rs` | 219 | one catalog row, the count and doc | ok |
-| `crates/holler-body/src/connection.rs` | 873 | the `matches!` list (E48) and `static_wire_method` gain the name | at most **+2**; the handler is in `prompt_dispatch.rs` (355) and `session_dispatch.rs` (120) |
-| `crates/holler-body/src/session_manager/task.rs` | 705 | the command `Rebind` | ok; the driver swap in `http_attach_driver/` (`http_attach_driver.rs` 435, `connection.rs` 618) |
+| `crates/holler-body/src/connection.rs` | 873 | the `matches!` list (E48) and `static_wire_method` gain the name; the `handle_query` call passes `live_configs(...)` in place of `self.configs` (E111) | at most **+2**; the handler is in `prompt_dispatch.rs` (355) and `session_dispatch.rs` (120) |
+| `crates/holler-body/src/session_manager/task.rs` | 705 | the `Rebind` handler (deadline, build-then-swap), `mirror_session_id`, the `SessionPresence` field | ~+90 (about 795); if it would pass 850, the handler goes to `session_manager/task/rebind.rs`; its unit tests are in a new `session_manager/task/rebind_tests.rs` (`#[cfg(test)] mod rebind_tests;`, +1); the driver swap in `http_attach_driver/` (`http_attach_driver.rs` 435, `connection.rs` 618) |
+| `crates/holler-body/src/session_manager.rs` | 389 | the `Rebind` command and `SessionManager::rebind`, `presence_doc` reads the mirror, `live_configs` | ~+45 |
+| `crates/holler-body/tests/http_attach_driver_test/fake_server.rs` | 347 | a stall mode for the existence check (E133, E134) | ~+25; the CLI's `attach_mode_test` includes this file by `#[path]` (E87), so it must keep compiling there |
+| `crates/holler-proto/tests/codec_test.rs` | 889 | one `canonical_frame` arm for `session/rebind` (E132) | **+1** (890) |
 | `crates/holler-pane/src/ports.rs` | 423 | `Ports.hub` | +1 |
-| `crates/holler-pane/src/tx_switch.rs` | 399 | the new order | ~+70, ok; if it passes 600, the plan helpers go to `tx_switch/plan.rs` |
+| `crates/holler-pane/src/tx_switch.rs` | 399 | the new order; `activity_refusal` shared with `check_idle` | ~+70, ok; if it passes 600, the plan helpers go to `tx_switch/plan.rs` |
 | `crates/holler-pane/src/reconcile.rs`, `reconcile/observe.rs` | 450, 391 | the observation and the finding | ok |
 | new `crates/holler-pane/src/{gate,driven,hub}.rs` | 0 | D1, D3 | each under 200 |
-| `crates/holler-cli/src/say_cmd.rs` | 494 | the shared predicate; `pane-not-driven` | net negative |
+| `crates/holler-cli/src/say_cmd.rs` | 494 | the shared predicate; a bare id refused in `route_target`; `Routed.pane` set; `wait_ended` made `pub(crate)`; `pane-not-driven` through `hub_refusal` | net negative |
+| `crates/holler-cli/src/{interrupt_cmd,answer_cmd,prompt_target}.rs` | 84, 72, 202 | the `--pane` arms call `hub_refusal` (E124, E125); `Routed.pane` (E126) | ok (+12, +12, +3) |
+| new `crates/holler-cli/src/pane/hub_refusal.rs` | 0 | D5's one mapping from a hub refusal to a pane code | under 150 |
+| `crates/holler-cli/src/pane/wiring/bind.rs` | 439 | **not edited**: its `send_prompt` pass-through (E127) is the one call the scan allows | 0 |
 | `crates/holler-cli/src/pane/wiring.rs` | 396 | `mod hub;`, the field, `Unwired`'s impl | ok; the client is `wiring/hub.rs` (new) |
 | `crates/holler-cli/tests/pane_verbs/switch.rs` | 868 | **no growth** (it already holds `SeamHarness`) | new tests in new files |
 | `crates/holler-cli/tests/support/mod.rs` | 857 | at most a `mod driven;` line | helpers in new `crates/holler-cli/tests/support/driven.rs` |
-| `crates/holler-cli/tests/pane_verbs/reset.rs` | 530 | E83 and E84 are rewritten in place; the rest of the new tests are in new `crates/holler-cli/tests/pane_verbs/driven.rs` (add `mod driven;` to `main.rs`, 66 lines) | |
+| `crates/holler-cli/tests/pane_verbs/reset.rs` | 530 | E83 and E84 are rewritten in place; the rest of the new tests are in new `crates/holler-cli/tests/pane_verbs/driven.rs` (add `mod driven;` to `main.rs`, 66 lines; it also holds D8's fixture test) | |
 | the 15 `Ports { … }` literals (13 files) | | one line each (`hub: &hub,`): `verb_harness/mod.rs`, `pane_integration/bind.rs`, `pane_verbs/{park/rig,list,doctor/rig,park,close/rig,launch/rig,import/rig}.rs`, `profile_verbs/{rig,apply/rig}.rs`, `holler-pane/tests/ports_test.rs` (two), `pane/wiring.rs` | `launch/rig.rs` is 835: +1 is fine |
+
+## Reuse (the survey for T and F)
+
+Extend these; write a new one only where "Where the code goes" says so. `talk::send_turn` (the one place `SayOpts` is built, E10); `LiveCommand::Query` and `LiveHandle::query`'s plumbing (E6, the rebind's transport); `Registry::replace_session` and `Registry::find_by_token`; `control_hold.rs` and `holds.rs` (the precedents for `control_rebind.rs`, the hold keys); `wiring/store.rs` (the precedent for `wiring/hub.rs`); `say_cmd::{QUEUE_ACCEPT_WAIT, wait_ended}` (the accept rule); `holler_pane::ports::Activity` and `tx_switch::check_idle` (the activity mapping); `Finding.remedy` (E121); `holler_pane::gate` (new, but the one predicate that replaces the hub's and the CLI's copies); the body's fake OpenCode server (`http_attach_driver_test/fake_server.rs`, with its `exists_v1`/`exists_v2` toggles and `push_event`); `hold_hub_test::a_prompt_cannot_be_forwarded_around_the_hold` (the pattern for the closed forward).
 
 ## Acceptance (each is a test)
 
@@ -273,36 +353,42 @@ Fixtures use `ses_`-shaped ids (D8). "On the fakes" means the test kit's fakes w
 1. **I2 extended to DRIVEN.** After a switch and after a reset on the fakes, with a body advertising the old session, `session_of_record`, SHOWN and the fake hub's advertised id are equal, `last_observed.driven` equals them, and the record was written by one `cas_put` (new file `pane_verbs/driven.rs`).
 2. **The step order.** The fakes' call logs show: reads, `advertised`, [`prompt(Check)`], `create_session` (reset), `select_session`, `shown_session`, `rebind`, `cas_put`, [`prompt(Send)`]; `rebind` is after `shown_session` and before `cas_put`; `prompt(Send)` is after `cas_put`; `HarnessPort::send_prompt` is never called; no keystroke (I4).
 3. **A message through the hub's prompt path reaches a pane's real session of record.** Default-run end-to-end test (new file `crates/holler-cli/tests/driven_e2e_test.rs`, pattern E87): a real hub, a real body in attach mode against the fake OpenCode server with a `ses_`-shaped id, the pane registered through the pane store; `holler say --pane P "hi"` is delivered to `POST /session/<id>/prompt_async` and the reply returns. `say --pane` on a pane with no body exits 3 with `pane-not-driven`. `interrupt --pane` and `answer --pane` resolve the same id.
-4. **The gate refuses a real-shaped pane**, in `gate_tests.rs` and in the end-to-end test: parked gives `pane-parked`, unhealthy `pane-unhealthy`, SHOWN differing from DRIVEN `pane-shown-driven-mismatch`; one side absent is no mismatch; two panes recording one session are fail-closed with the first bad one named; an operator hold refuses first with its own kind; a body session with no `harness_session_id` (spawn) is never pane-gated; **a session whose NAME equals a pane's session of record is not gated** (the old key is gone); a bare `say <name>` to the body that drives a parked pane is refused.
-5. **Resolution.** `resolve_target`: an id matches the one live attach ad; a name still resolves by name; an unknown id is `Unknown`; an id on an offline body is `NotConnected`; two bodies advertising one id are `Ambiguous`; a valid-name-shaped id string never resolves by id. `say`, `interrupt` and `answer` accept an id (new file `crates/holler-hub/tests/driven_resolve_test.rs`).
-6. **`doctor`.** `shown-driven-mismatch` is reported for a pane whose observed DRIVEN differs from SHOWN (TUI right, body behind: `not-fixable`, remedy `holler pane switch PANE SESSION`; TUI wrong: fixable as today), and not for one that agrees; `last_observed.driven` is recorded in the same write as `shown`; `hub.advertised` failing is an `observe-failed` finding and leaves `driven` as stored; `driver_of`'s table (record preferred, a stale body found, another pane's record excluded, none, ambiguous) in `crates/holler-pane/tests/driven_test.rs`.
+4. **The gate refuses a real-shaped pane**, in `panes/gate_tests.rs` and in the end-to-end test: parked gives `pane-parked`, unhealthy `pane-unhealthy`, SHOWN differing from DRIVEN `pane-shown-driven-mismatch`; one side absent is no mismatch; two panes recording one session are fail-closed with the first bad one named; an operator hold refuses first with its own kind; a body session with no `harness_session_id` (spawn) is never pane-gated; **a session whose NAME equals a pane's session of record is not gated** (the old key is gone); a bare `say <name>` to the body that drives a parked pane is refused; **a pane's recorded DRIVEN is a key too**: a body advertising `ses_old` while the pane's session of record is `ses_new` and its recorded DRIVEN is `ses_old` is refused `pane-shown-driven-mismatch` for a bare `say`, and is admitted when no DRIVEN was recorded (the window the ADR states).
+5. **Resolution.** `resolve_prompt_target`: an id matches the one live attach ad; a name still resolves by name; an unknown id is `Unknown`; an id on an offline body is `NotConnected`; two bodies advertising one id are `Ambiguous`; a valid-name-shaped id string never resolves by id. `say`, `interrupt` and `answer` accept an id (new file `crates/holler-hub/tests/driven_resolve_test.rs`). A typed bare id is refused at the CLI (Acceptance 18).
+6. **`doctor`.** `shown-driven-mismatch` is reported for a pane whose observed DRIVEN differs from SHOWN (TUI right, body behind: `not-fixable`, remedy `holler pane switch PANE SESSION`; TUI wrong: fixable as today), and not for one that agrees; `last_observed.driven` is recorded in the same write as `shown`; `hub.advertised` failing is an `observe-failed` finding and leaves `driven` as stored; `driver_of`'s table (record preferred, a stale body found, another pane's record excluded, none, ambiguous, the target rule; Acceptance 20) in `crates/holler-pane/tests/driven_test.rs`. **A reverted body:** one body advertising its configured `ses_old` (listed by the pane's server), the record and SHOWN `ses_new`: exactly one `shown-driven-mismatch` finding, `fix: not-fixable`, `remedy` = `holler pane switch PANE ses_new`, DRIVEN recorded `ses_old`; the five `FixState` names and their JSON are unchanged (no new state); `pane switch PANE ses_new` then re-points that body and records `ses_new`.
 7. **`reset --first` obeys the gate.** On a parked pane, an unhealthy pane, a pane whose SHOWN and DRIVEN differ, a held pane (operator hold and default hold) and a pane no body drives: exit 3 with `pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`, `session-held` and `pane-not-driven`; in each, `create_session` and `select_session` were never called, the record is byte-for-byte unchanged (session of record, SHOWN, DRIVEN, generation), and no prompt was sent. On a healthy pane it is delivered through `HubPort::prompt(Send)` and the harness fake records no prompt. A race (`Check` admits, `Send` is refused) gives exit 3 with the refusal's code, the record stands, and the message says the first message did not land.
-8. **Rebind failures.** A refused rebind (body busy, id not on the endpoint, endpoint silent) after the act: exit 1 or 3 by the code's class, `acted: true`, the message ends with the reconcile step, the record unchanged. A busy or questioning driver in the plan: `session-busy` or `session-holds-question` with nothing moved, for switch and reset. `switch` still queries no `session_activity` (E85 stays green).
-9. **The body.** `crates/holler-body/tests/rebind_test.rs` (fake OpenCode server; toggle `exists_v1` and `exists_v2`, since the fake answers one verdict for every id): the happy path (presence advertises the new id; the next prompt goes to the new id's `prompt_async`; the name is unchanged), the five refusals of D2, the old binding kept on every refusal, and the 5 s bound with a server that never answers. The hub's `control/rebind` (in `driven_resolve_test.rs` or its own file): forwards, passes a body refusal through verbatim, updates `control/roster` and `resolve_target` before the reply.
+8. **Rebind failures.** A refused rebind (body busy, id not on the endpoint, endpoint silent) after the act: exit 1 or 3 by the code's class, `acted: true`, the message ends with the reconcile step, the record unchanged. A busy or questioning driver in the plan: `session-busy` or `session-holds-question` with nothing moved, for switch and reset. `switch` still queries no `session_activity` (E85 stays green). A driver whose `Activity` is `Busy` or `HoldingQuestion` maps through the same `activity_refusal` as `check_idle` (one test table drives both).
+9. **The body.** `crates/holler-body/tests/rebind_test.rs` (fake OpenCode server; toggle `exists_v1` and `exists_v2`, since the fake answers one verdict for every id; the fake gains a **stall mode** that never answers the existence check, because the 5 s test needs only that check to hang on the same endpoint): the happy path (presence advertises the new id; the next prompt goes to the new id's `prompt_async`; the name is unchanged), the five refusals of D2, the old binding kept on every refusal, and the 5 s bound with a server that never answers, **including that an attach that finishes after the deadline is not swapped in** (the next prompt still goes to the old id). **One source of the id:** after a rebind, the fake pushes `session.error` (`session_error(id)` through `push_event`) during a turn on the new id; the turn ends in error and the driver is dropped; the **next prompt goes to the new id's `prompt_async`**, the re-attach's existence check is for the new id (the request log has no `GET` of the old id after the rebind), and presence advertises the new id throughout. A unit test in `session_manager/task/rebind_tests.rs` calls `attempt_initial_attach` (the function the 30 s retry timer calls) on an `Inner` whose driver was dropped after a rebind and asserts the same; `query/support` probes the new id (the fake's request log). **A restart reverts:** a second `SessionManager` started over the same configuration advertises the configured id again (it pins the decision of P2). The hub's `control/rebind` (in `driven_resolve_test.rs` or its own file): forwards, passes a body refusal through verbatim, refuses a session that is not in the handle's cached presence, and updates `control/roster` and `resolve_prompt_target` before the reply **with a two-session body whose other session's row stays `connected` and keeps its id** (`advertise` replaces the whole set).
 10. **`check_only`.** `control/say` with `check_only` and a body that would refuse answers the refusal and one that would admit answers `{admitted: true}`; in both no frame reaches the body, no TalkLog line is written, no turn id moves, no grant is consumed.
 11. **The protocol.** The catalog has 23 rows (`session/rebind`: request, `HubToBody`); the goldens `Rebind.json` and `RebindResult.json` are new files and `scripts/golden-diff-summary.sh` shows no value drift in any existing golden; `docs/protocol/v2.md` has the row.
 12. **Hold behaviour across a reset (D4).** The three tests of D4, with the key `<label>/<session>` asserted equal before and after.
-13. **No bypass.** A source-scan test (like E77) fails if `holler-pane/src` or `holler-cli/src` calls `.send_prompt(` and if a second `session/prompt` builder appears in the hub (E77 itself stays green); `LiveHandle::query`'s allowlist is exactly `query/*`, `session/answer`, `session/rebind`.
+13. **No bypass.** `LiveHandle::query`'s allowlist is exactly `query/*` and `session/answer` (its text and comment unchanged), and `control/query_remote` and `admin/query` with a target, carrying `method: session/rebind`, are refused `-32601` with the body's binding unchanged: a `hold_hub_test`-style test on a real hub and a real body in attach mode against the fake OpenCode server (E100 is the pattern), keeping the fixture realistic, not a stub that refuses everything. A source-scan test (like E77) fails if a second `session/prompt` builder appears in the hub (E77 itself stays green), and fails if `.send_prompt(` is called in `holler-pane/src` or `holler-cli/src` other than by the one pass-through D5 names.
 14. **One predicate.** The three pane-state cases are decided by `holler_pane::gate::prompt_refusal` for the hub and for `--pane`: a test builds the same records for both and asserts the same code; no other copy of the rule exists in `holler-hub` or `holler-cli` (a source scan for `PANE_SHOWN_DRIVEN_MISMATCH` definitions).
 15. **Fixtures.** `session_id(n)` has 30 characters and `RoutableName::parse` refuses it; every hub-routed fixture uses it.
 16. **Scenario.** `reset_with_a_first_message` is rewritten as D9 says (it is `#[ignore]`d behind `HOLLER_TEST_PANE_INTEGRATION=1`, so CI compiles it and does not run it; the build run compiles it).
 17. **Docs.** `docs_pane_control_test` passes with the amended guide; the ADR and the module docs carry none of the old sentences listed above (a grep for "#828", "until the cutover wires DRIVEN", "No port observes DRIVEN" finds nothing outside `docs/handoffs/`); the CHANGELOG has the entry.
+18. **A bare id is not a SESSION.** `holler say ses_… TEXT`, `holler interrupt ses_…` and `holler answer ses_… 0` (a `ses_`-shaped id of D8) exit 1 with `unknown session: ses_…` and open no socket (run them with no hub), while `holler say --pane P …` resolves the same id through the hub; `control/say` sent straight to the control socket with the id is resolved (the id is an address at the hub). `Routed.pane` is `Some` only for `--pane`, and a `--pane` hub refusal of `unknown session`, `not_connected` or `ambiguous` is `pane-not-driven` (exit 3) in all three verbs, from the one mapping. (Files: `driven_e2e_test.rs`, `pane_verbs/driven.rs`.)
+19. **The gate sees a body that is behind.** Fakes and a real hub: a body advertising `ses_old`, a pane with session of record and SHOWN `ses_new`: with no recorded DRIVEN a bare `say <name>` is admitted (the stated window); after `pane doctor` records DRIVEN `ses_old` it is refused `pane-shown-driven-mismatch`; after `pane switch PANE ses_new` re-points the body it is delivered.
+20. **Ambiguous drivers.** Two bodies advertising `ses_a` and `ses_b`, both listed by one server that two panes share, neither a pane's record: `driver_of` is `Ambiguous`; `pane switch P1 <new>` and `pane reset P1` exit 3 `pane-not-driven`, the message names both `label/session` with their ids and the two steps, and nothing moved (record bytes and generation unchanged, no `create_session`, no `select_session`, no `rebind`); `pane switch P1 ses_a` succeeds without a `rebind` call (record, SHOWN and DRIVEN are `ses_a`); then `pane switch P1 <new>` calls `rebind` on that body only and records. A target advertised by two bodies stays `Ambiguous`; a reset has no target. `pane doctor` on the ambiguous state gives one `shown-driven-mismatch` finding, `not-fixable`, `remedy: None`, DRIVEN recorded `None`.
+21. **One request at a time per connection.** On a real hub and a real body: a `control/rebind` and several `query/status` requests (`hub query`) issued at the same moment on one connection each get their own reply (none is reported as not connected) and the rebind applies; `LiveHandle::rebind` times out inside its 10 s bound even when the slot is held by a query that never answers.
 
 ## Blast radius
 
-- `docs/adr/ADR-0021.md`, `docs/adr/ADR-0014.md`, `docs/protocol/v2.md`, `docs/pane-control.md`, `CHANGELOG.md`, `docs/handoffs/839-brief.md`.
-- `crates/holler-proto/src/{rebind.rs (new),lib.rs,methods.rs}`, `crates/holler-proto/tests/golden/docs/{Rebind,RebindResult}.json` (new), `crates/holler-proto/tests/golden_test.rs`.
-- `crates/holler-body/src/{connection.rs,connection/session_dispatch.rs,prompt_dispatch.rs,session_manager.rs,session_manager/task.rs,http_attach_driver.rs,http_attach_driver/connection.rs}`, `crates/holler-body/tests/rebind_test.rs` (new).
-- `crates/holler-hub/src/{circuit.rs,circuit/dispatch.rs,circuit/dispatch/gate_tests.rs (new),live.rs,live/target.rs (new),talk.rs,interrupt.rs,control_server.rs,control_rebind.rs (new),control.rs,lib.rs}`, `crates/holler-hub/tests/driven_resolve_test.rs` (new).
+- `docs/adr/ADR-0021.md`, `docs/adr/ADR-0014.md`, `docs/adr/ADR-0005.md`, `docs/adr/ADR-0003.md`, `docs/protocol/v2.md`, `docs/pane-control.md`, `CHANGELOG.md`, `docs/handoffs/839-brief.md`.
+- `crates/holler-proto/src/{rebind.rs (new),lib.rs,methods.rs}`, `crates/holler-proto/tests/golden/docs/{Rebind,RebindResult}.json` (new), `crates/holler-proto/tests/{golden_test.rs,codec_test.rs}`.
+- `crates/holler-body/src/{connection.rs,connection/session_dispatch.rs,prompt_dispatch.rs,session_manager.rs,session_manager/task.rs,session_manager/task/rebind_tests.rs (new),http_attach_driver.rs,http_attach_driver/connection.rs,registry.rs (doc only)}`, `crates/holler-body/tests/{rebind_test.rs (new),http_attach_driver_test/fake_server.rs (stall mode)}`.
+- `crates/holler-hub/src/{circuit.rs (the `Say` arm only),circuit/dispatch.rs,live.rs,live/target.rs (new),panes/gate.rs (new),panes/gate_tests.rs (new),panes/mod.rs,talk.rs,interrupt.rs,control_server.rs,control_rebind.rs (new),control_say.rs (new),control.rs,lib.rs}`, `crates/holler-hub/tests/driven_resolve_test.rs` (new).
 - `crates/holler-pane/src/{lib.rs,ports.rs,gate.rs,driven.rs,hub.rs (the last three new),tx_switch.rs,reconcile.rs,reconcile/observe.rs,findings.rs}`, `crates/holler-pane/tests/{driven_test.rs (new),ports_test.rs}`.
 - `crates/holler-pane-testkit/src/{lib.rs,fixture.rs,hub.rs (new),conformance/hub.rs (new),conformance/mod.rs}`, and its tests.
-- `crates/holler-cli/src/{say_cmd.rs,pane/wiring.rs,pane/wiring/hub.rs (new),pane/reset.rs (doc)}`, `crates/holler-cli/Cargo.toml` (the new `[[test]]` `driven_e2e_test`), the 15 `Ports` literals listed above, `crates/holler-cli/tests/{driven_e2e_test.rs (new),pane_verbs/driven.rs (new),pane_verbs/reset.rs,pane_verbs/main.rs,support/driven.rs (new),support/mod.rs (one line),pane_integration/scenario.rs}`.
+- `crates/holler-cli/src/{say_cmd.rs,interrupt_cmd.rs,answer_cmd.rs,prompt_target.rs,pane/wiring.rs,pane/wiring/hub.rs (new),pane/hub_refusal.rs (new),pane/reset.rs (doc)}`, `crates/holler-cli/Cargo.toml` (the new `[[test]]` `driven_e2e_test`), the 15 `Ports` literals listed above, `crates/holler-cli/tests/{driven_e2e_test.rs (new),pane_verbs/driven.rs (new),pane_verbs/reset.rs,pane_verbs/main.rs,support/driven.rs (new),support/mod.rs (one line),pane_integration/scenario.rs}`. `pane/wiring/bind.rs` is **not edited** (its `send_prompt` forward is the one call the scan allows).
 - `crates/holler-adapter-opencode/src/prompt.rs` (the module doc line only).
-- Not touched: `crates/holler-cli/tests/fixtures/cli-surface.txt`, `docs/adr/ADR-0003.md` (no CLI flag, no `--json` shape change: `last_observed.driven` is an existing field that now holds a value).
+- Not touched: `crates/holler-cli/tests/fixtures/cli-surface.txt` (no CLI flag; no `--json` shape change: `last_observed.driven` is an existing field that now holds a value, and no `FixState` or `FindingKind` is added), `crates/holler-pane-testkit/Cargo.toml` (D8's test lives in `holler-cli`), `crates/holler-hub/src/circuit.rs` beyond the `Say` arm, and the allowlist of `LiveHandle::query`.
 
 ## Clashes with stories in flight
 
 State on 2026-10-11 (read only; branches and shas as found). The shared hot spots are `ports.rs`/`Ports` literals, `pane_integration/bind.rs`, the ADR's "Deferred" bullet, the ADR's section 8 and 11, and `CHANGELOG.md`.
+
+**Updated at the plan-check amendment:** #851 (`holler --version` names the commit) merged to `main` as `d6ae539` and is merged into this branch. It touches `CHANGELOG.md` (a new first item of `### Enhancements`, above the #649 item, so E76 was re-cut), `docs/protocol/v2.md` and `docs/pane-control.md` (lines shifted: E67 to E70, E74, E75 were re-cut), `docs/adr/ADR-0003.md` (a new `Clarified by` header line, so its Addressing line is now 118), `crates/holler-body/src/query.rs` and `crates/holler-proto/src/docs.rs` (one line each, not the lines cited); no DRIVEN logic. The sibling branches below were **not re-read** at this amendment: their rows are as found on the first preparation, and "Clashes" is to be re-read at the plan check's second pass.
 
 | Story | Shared files and hunks | Does the DRIVEN decision change what it assumes? |
 |---|---|---|
@@ -318,6 +404,8 @@ State on 2026-10-11 (read only; branches and shas as found). The shared hot spot
 ## Line numbers re-checked
 
 The issue and the #828 review cite lines "true at 4366fb8". Against `main` at `bda1069` (`git diff 4366fb8 HEAD` touches only `tx_switch.rs` among the hub and CLI files named; the six commits since are #832's and docs):
+
+**After the merge with `d6ae539` (#851):** every Evidence command was re-run: 90 of the 97 excerpts matched as they were and seven moved with #851 and were re-cut: E67 to E70 (`docs/protocol/v2.md`, +7), E74 and E75 (`docs/pane-control.md`, +4) and E76 (`CHANGELOG.md`, now headed by #851's item). `docs/protocol/v2.md` line 817 (the `pane/*` note) is now 824; `ADR-0003.md`'s Addressing line 117 is now 118.
 
 | Citation | Now |
 |---|---|
@@ -352,6 +440,7 @@ The preparer did not guess these. Each has a default, which the brief above alre
 1. **Scope: one story, or two?** D2 adds a protocol request, a body change, a hub control method, a new port and a CLI client, and rewrites the engine's tail, in six crates. The brief keeps it one story, in the order contract, tests, code, because the issue says so and the acceptance ("a healthy pane's `reset --first` is delivered") cannot hold without the re-point. The alternative is to split `holler-proto` + `holler-body` + the hub control method (`session/rebind` and `control/rebind`, with the body tests) into a first story, and leave the join, the gate, the port and the verbs for the second. Default: one story.
 2. **A fleet fact the repository cannot show.** The design assumes the production fleet runs **one attach-mode body session per registry pane, whose endpoint is that pane's OpenCode server** (the wizard's attach rows, E88, do). If a body hosts several panes' sessions, or a pane is driven in spawn mode, `driver_of` and `session/rebind` still work per session, but the cutover (#654) must start one attach session per pane, and the guide says so. Please confirm the shape before the cutover.
 3. **The behaviour change.** `reset --first` on a pane no body drives is **refused** (`pane-not-driven`); today it works through the adapter. That is the price of one gate, and it also removes the only way to send a first message to a Claude pane until #850. Default: accept it and say so in the CHANGELOG. The alternative (keep the adapter path for panes with no body) is a second enforcement site, which the A review rejected for #828.
+4. **A remote rebind.** The rebind is a local control-socket method only (P1); there is no `admin/rebind`, so an admin-role connection (remote, less trusted than the local socket) cannot re-point a body. If remote admins should ever be able to, decide it as an `admin/rebind` through `dispatch_allowlisted`, not as a side effect of an allowlist. Default: no remote rebind.
 
 **Decided at the launch (2026-10-11, the main session, under the standing rule to decide and report; the operator can overrule at the plan check).** (1) One story, as the brief keeps it: the issue says so, and a split would leave the first half with nothing to test its re-point against. If the plan check judges the F phase too large, the split line is the one the question names. (2) The default stands. The live fleet's bodies are addressed as `<label>/oc` (one attach session per pane, seen in the operator's own `say` commands), which matches the assumed shape; the cutover (#654) re-confirms it against `holler roster` before relying on it. (3) Accepted: `reset --first` on a pane no body drives is refused `pane-not-driven`, and the CHANGELOG says so.
 
@@ -359,17 +448,20 @@ The preparer did not guess these. Each has a default, which the brief above alre
 
 - The production fleet's body shape (question 2).
 - The attach driver's request timeout: the code builds `reqwest::Client::new()` with no timeout (E97), so the 5 s wrapper in D2 is mine; a measured rebind time on a real server was not taken.
-- `Roster::advertise` re-advertising a row for a token with a changed `harness_session_id`: `handle_presence_notification` calls it for every beat, so it should, but `control_rebind` is the one new caller and its test (Acceptance 9) pins it.
+- `Roster::advertise` re-advertising a row for a token with a changed `harness_session_id`, with the token's other rows left alone: `handle_presence_notification` calls it for every beat with the whole list, so it should, but `control_rebind` is the one new caller and its two-session test (Acceptance 9) pins it.
+- That a `tokio::sync::Mutex` held across `query` and `rebind` (`query_slot`) costs no latency that matters: the longest wait for it is one 10 s forward; nothing was measured. Acceptance 21 pins the behaviour, not the timing.
+- That a real OpenCode server sends `session.error` the way the fake does (E105 reads the code, not a recording), and that a real restart of a body leaves the pane's server listing the old session (no port deletes sessions; assumed, not observed).
+- The ambiguity rule (the target rule of D3) was reasoned from the code, not run: the production fleet may not share a data directory at all (question 2), in which case `Ambiguous` never arises.
 - That the fake OpenCode server (E87's pattern) can serve two session ids: it answers one verdict for every id (`exists_v1`), so the rebind tests toggle it.
 - The branches of #831, #835 and #648 are moving (their runs are in progress): their shas above are the ones read, and "Clashes" should be re-read at the plan check.
 
 ## AI assistance
 
-Drafted by Claude (Sonnet 5.5) for story #839, from the issue, `docs/handoffs/828/handoff-A.md` (on the #828 branch), `main` at `bda1069` and the read-only state of the sibling branches named above, at the operator's direction, per `CONTRIBUTING.md`. The decisions are the preparer's, to be confirmed at the plan check.
+Drafted by Claude (Sonnet 5.5) for story #839, from the issue, `docs/handoffs/828/handoff-A.md` (on the #828 branch), `main` at `bda1069` and the read-only state of the sibling branches named above, at the operator's direction, per `CONTRIBUTING.md`. The decisions are the preparer's, to be confirmed at the plan check. Amended on 2026-10-11 by Claude (Sonnet 5.5) after the plan check's BLOCK, from `docs/handoffs/839/handoff-A.md` and the main session's decisions P1 to P3, on the tree merged with `origin/main` at `d6ae539`.
 
 ## Evidence (verbatim)
 
-Cut on 2026-10-11 from `main` at `bda1069` (a few excerpts come from a named branch commit, shown in their command). Every excerpt below was produced by a command (shown under its heading) that pipes the source through `sed -n 'A,Bp'`; the line numbers on the left were added by `awk` and are those of the file at that commit. Nothing is retyped.
+Cut on 2026-10-11 from `main` at `bda1069` (a few excerpts come from a named branch commit, shown in their command). After the plan check the branch was merged with `main` at `d6ae539` (#851): E67 to E70 and E74 to E76 were re-cut, and E98 onward were cut on the merged tree. Every excerpt below was produced by a command (shown under its heading) that pipes the source through `sed -n 'A,Bp'`; the line numbers on the left were added by `awk` and are those of the file at that commit. Nothing is retyped.
 
 **E1: `crates/holler-hub/src/circuit/dispatch.rs:58-103`** — The hub's gate input and the pane-state predicate (copy 1 of 2): `HoldGate`, the three codes, `pane_state_refusal`. It keys on nothing but the record.
 
@@ -2344,64 +2436,64 @@ Command: `sed -n '276,300p' docs/protocol/v2.md | awk -v s=276 '{printf "%d\t%s\
 300	
 ~~~~
 
-**E67: `docs/protocol/v2.md:507-527`** — Section 7, presence: `harness_session_id` "present for `attach`".
+**E67: `docs/protocol/v2.md:514-534`** — Section 7, presence: `harness_session_id` "present for `attach`".
 
-Command: `sed -n '507,527p' docs/protocol/v2.md | awk -v s=507 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '514,534p' docs/protocol/v2.md | awk -v s=514 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-507	## 7. Presence
-508	
-509	`session/presence` is a **notification** (body→hub), sent periodically as
-510	a heartbeat and on every (re)connect:
-511	
-512	```json
-513	{"jsonrpc":"2.0","method":"session/presence","params":{"hostname":"kiwi","sessions":[
-514	  {"name":"alpha","harness":"opencode","state":"idle","mode":"spawn"},
-515	  {"name":"beta","harness":"opencode","state":"working","mode":"spawn","harness_session_id":"openc-abc",
-516	   "turn_started_at":"2026-09-08T12:00:00Z","last_update_at":"2026-09-08T12:00:03Z",
-517	   "turn_id":"h-01H...",
-518	   "last_turn":{"turn_id":"h-01H...prev","state":"completed","stop_reason":"end_turn","ended_at":"2026-09-08T11:59:50Z"}},
-519	  {"name":"gamma","harness":"opencode","state":"input-required","mode":"spawn",
-520	   "pending":[{"id":"perm-1","kind":"permission","prompt":"Run `rm -rf /`?","options":["allow","reject"]},
-521	               {"id":"el-1","kind":"elicitation","prompt":"Which branch to merge?","options":["main","release/1.0"]}],
-522	   "turn_id":"h-01H..."}
-523	]}}
-524	```
-525	
-526	- `state` is an **A2A session state**: `idle` | `working` | `input-required` (ADR 0005 adds `idle` — A2A states are per *task*, Holler presence is per *session*).
-527	- `mode` is `spawn` | `attach`. `harness_session_id` is present for `attach` (the existing harness session being attached to).
+514	## 7. Presence
+515	
+516	`session/presence` is a **notification** (body→hub), sent periodically as
+517	a heartbeat and on every (re)connect:
+518	
+519	```json
+520	{"jsonrpc":"2.0","method":"session/presence","params":{"hostname":"kiwi","sessions":[
+521	  {"name":"alpha","harness":"opencode","state":"idle","mode":"spawn"},
+522	  {"name":"beta","harness":"opencode","state":"working","mode":"spawn","harness_session_id":"openc-abc",
+523	   "turn_started_at":"2026-09-08T12:00:00Z","last_update_at":"2026-09-08T12:00:03Z",
+524	   "turn_id":"h-01H...",
+525	   "last_turn":{"turn_id":"h-01H...prev","state":"completed","stop_reason":"end_turn","ended_at":"2026-09-08T11:59:50Z"}},
+526	  {"name":"gamma","harness":"opencode","state":"input-required","mode":"spawn",
+527	   "pending":[{"id":"perm-1","kind":"permission","prompt":"Run `rm -rf /`?","options":["allow","reject"]},
+528	               {"id":"el-1","kind":"elicitation","prompt":"Which branch to merge?","options":["main","release/1.0"]}],
+529	   "turn_id":"h-01H..."}
+530	]}}
+531	```
+532	
+533	- `state` is an **A2A session state**: `idle` | `working` | `input-required` (ADR 0005 adds `idle` — A2A states are per *task*, Holler presence is per *session*).
+534	- `mode` is `spawn` | `attach`. `harness_session_id` is present for `attach` (the existing harness session being attached to).
 ~~~~
 
-**E68: `docs/protocol/v2.md:540-540`** — The pane hold paragraph.
+**E68: `docs/protocol/v2.md:547-547`** — The pane hold paragraph.
 
-Command: `sed -n '540,540p' docs/protocol/v2.md | awk -v s=540 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '547,547p' docs/protocol/v2.md | awk -v s=547 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-540	  - **A third kind, sourced from a pane record (issue #646).** A **pane** hold is not operator state at all: the same enforcement point refuses a prompt to the session of record of a pane whose record says it is parked, unhealthy, or showing a session other than the one it drives, whatever route the prompt takes (a bare `say SESSION` included). It never appears on a roster row (`hold`/`hold_reason`/`held_since` stay operator fields), `release` does not lift it (the pane record owns it: `pane unpark` or `pane doctor` is the remedy), and the refusal carries `data.hold_kind: "pane"` with `data.reason` set to the stable pane code (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) instead of a free-text reason, and no `data.since` ([ADR 0021](../adr/ADR-0021.md) records the predicate).
+547	  - **A third kind, sourced from a pane record (issue #646).** A **pane** hold is not operator state at all: the same enforcement point refuses a prompt to the session of record of a pane whose record says it is parked, unhealthy, or showing a session other than the one it drives, whatever route the prompt takes (a bare `say SESSION` included). It never appears on a roster row (`hold`/`hold_reason`/`held_since` stay operator fields), `release` does not lift it (the pane record owns it: `pane unpark` or `pane doctor` is the remedy), and the refusal carries `data.hold_kind: "pane"` with `data.reason` set to the stable pane code (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`) instead of a free-text reason, and no `data.since` ([ADR 0021](../adr/ADR-0021.md) records the predicate).
 ~~~~
 
-**E69: `docs/protocol/v2.md:545-551`** — "Attach-mode sessions": where the rebind paragraph goes.
+**E69: `docs/protocol/v2.md:552-558`** — "Attach-mode sessions": where the rebind paragraph goes.
 
-Command: `sed -n '545,551p' docs/protocol/v2.md | awk -v s=545 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '552,558p' docs/protocol/v2.md | awk -v s=552 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-545	### Attach-mode sessions (issue #195)
-546	
-547	`mode:"attach"` is dispatched to `HttpAttachDriver` instead of `AcpDriver`
-548	(§`crates/holler-body/src/http_attach_driver.rs`) — it never spawns anything;
-549	it attaches to a harness session another process already owns.
-550	
-551	- **Eager, not lazy.** Unlike a `spawn`-mode session (whose driver comes up
+552	### Attach-mode sessions (issue #195)
+553	
+554	`mode:"attach"` is dispatched to `HttpAttachDriver` instead of `AcpDriver`
+555	(§`crates/holler-body/src/http_attach_driver.rs`) — it never spawns anything;
+556	it attaches to a harness session another process already owns.
+557	
+558	- **Eager, not lazy.** Unlike a `spawn`-mode session (whose driver comes up
 ~~~~
 
-**E70: `docs/protocol/v2.md:656-658`** — The error table rows `-32009`, `-32010`, `-32011`.
+**E70: `docs/protocol/v2.md:663-665`** — The error table rows `-32009`, `-32010`, `-32011`.
 
-Command: `sed -n '656,658p' docs/protocol/v2.md | awk -v s=656 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '663,665p' docs/protocol/v2.md | awk -v s=663 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-656	| `-32009` | `session_busy` | `say` to a `working`/`stalled` session without `--queue` (issue #150), **or** to an `input-required` session (issue #151) — `--queue` never overrides the latter; `data.state:"input-required"` distinguishes it from the `working`/`stalled` case, and the CLI hint points at `answer`, not `interrupt`/`--queue`. |
-657	| `-32010` | `nothing_pending` | `answer SESSION CHOICE` to a session that is not `input-required` — nothing to resolve (issue #151). |
-658	| `-32011` | `session_held` | `say` (plain, `--queue` or `--replace`, including the redirect half of `interrupt SESSION TEXT`) to a session an operator has **held** (`holler hold SESSION`, issue #437). New work is refused; the turn already running, turns already accepted into the body's queue, `interrupt` and `roster` are not affected. `data.reason` is the operator's text (absent when none was given), `data.since` is when the hold was set (RFC 3339) and `data.hold_kind` (issue #460) is `operator` or `default` (absent means `operator`). With `data.hold_kind: "pane"` (issue #646) the refusal comes from a pane record and not an operator hold: `data.reason` is the stable pane code (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`), there is no `data.since`, and the `release` verb does not lift it. |
+663	| `-32009` | `session_busy` | `say` to a `working`/`stalled` session without `--queue` (issue #150), **or** to an `input-required` session (issue #151) — `--queue` never overrides the latter; `data.state:"input-required"` distinguishes it from the `working`/`stalled` case, and the CLI hint points at `answer`, not `interrupt`/`--queue`. |
+664	| `-32010` | `nothing_pending` | `answer SESSION CHOICE` to a session that is not `input-required` — nothing to resolve (issue #151). |
+665	| `-32011` | `session_held` | `say` (plain, `--queue` or `--replace`, including the redirect half of `interrupt SESSION TEXT`) to a session an operator has **held** (`holler hold SESSION`, issue #437). New work is refused; the turn already running, turns already accepted into the body's queue, `interrupt` and `roster` are not affected. `data.reason` is the operator's text (absent when none was given), `data.since` is when the hold was set (RFC 3339) and `data.hold_kind` (issue #460) is `operator` or `default` (absent means `operator`). With `data.hold_kind: "pane"` (issue #646) the refusal comes from a pane record and not an operator hold: `data.reason` is the stable pane code (`pane-parked`, `pane-unhealthy`, `pane-shown-driven-mismatch`), there is no `data.since`, and the `release` verb does not lift it. |
 ~~~~
 
 **E71: `docs/pane-control.md:212-236`** — The guide: `reset`, "Do not use `--first` on a parked or held pane", `park`.
@@ -2458,45 +2550,46 @@ Command: `sed -n '420,424p' docs/pane-control.md | awk -v s=420 '{printf "%d\t%s
 424	[#839](https://github.com/Performant-Labs/holler/issues/839), not built), so it prints `-`. `pane doctor` uses the same rule for `shown-driven-mismatch` (section 5).
 ~~~~
 
-**E74: `docs/pane-control.md:733-737`** — The guide's cutover steps 4 to 6.
+**E74: `docs/pane-control.md:737-741`** — The guide's cutover steps 4 to 6.
 
-Command: `sed -n '733,737p' docs/pane-control.md | awk -v s=733 '{printf "%d\t%s\n", s+NR-1, $0}'`
-
-~~~~text
-733	   `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
-734	5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
-735	   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
-736	   `reset --first` is not used on a parked or held pane (section 3).
-737	6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
-~~~~
-
-**E75: `docs/pane-control.md:784-794`** — The guide's "Later" list.
-
-Command: `sed -n '784,794p' docs/pane-control.md | awk -v s=784 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '737,741p' docs/pane-control.md | awk -v s=737 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
-784	
-785	Deferred, so not documented here as existing; none of them is available:
-786	
-787	- the roster extension: the pane columns on `holler roster` (#648);
-788	- applying a pane's model, effort and environment to its harness server (#829);
-789	- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
-790	- an import that leaves the panes Holler does not drive alone (#835);
-791	- the shared subprocess runner of the adapters and the probe (#696);
-792	- the real-adapter scenario for `profile apply` (#667);
-793	- recreating the Herdr workspace from the stored profiles (#666);
-794	- the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).
+737	   `shown-driven-mismatch`, and `holler pane list` shows SYNC `ok` for every pane (section 4).
+738	5. **Cut one pane over** to `holler pane launch PANE` and `holler pane reset PANE`, watch it **through a full overnight**,
+739	   then move the rest. A launch records the pane's model and does not apply it yet (#829, section 2), and
+740	   `reset --first` is not used on a parked or held pane (section 3).
+741	6. **Seven days with no invisible session.** Every day `doctor` reports no `shown-driven-mismatch` and no stray session
 ~~~~
 
-**E76: `CHANGELOG.md:8-11`** — The head of `## [Unreleased]`: the shape of an entry.
+**E75: `docs/pane-control.md:788-798`** — The guide's "Later" list.
 
-Command: `sed -n '8,11p' CHANGELOG.md | awk -v s=8 '{printf "%d\t%s\n", s+NR-1, $0}'`
+Command: `sed -n '788,798p' docs/pane-control.md | awk -v s=788 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+788	
+789	Deferred, so not documented here as existing; none of them is available:
+790	
+791	- the roster extension: the pane columns on `holler roster` (#648);
+792	- applying a pane's model, effort and environment to its harness server (#829);
+793	- DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
+794	- an import that leaves the panes Holler does not drive alone (#835);
+795	- the shared subprocess runner of the adapters and the probe (#696);
+796	- the real-adapter scenario for `profile apply` (#667);
+797	- recreating the Herdr workspace from the stored profiles (#666);
+798	- the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).
+~~~~
+
+**E76: `CHANGELOG.md:8-12`** — The head of `## [Unreleased]`: the shape of an entry.
+
+Command: `sed -n '8,12p' CHANGELOG.md | awk -v s=8 '{printf "%d\t%s\n", s+NR-1, $0}'`
 
 ~~~~text
 8	## [Unreleased]
 9	
 10	### Enhancements
-11	- Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+11	- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+12	  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
 ~~~~
 
 **E77: `crates/holler-cli/tests/hold_single_path_test.rs:1-12`** — The single-sender guard: a source-level scan of the hub.
@@ -3039,3 +3132,775 @@ Command: `sed -n '174,216p' crates/holler-body/src/http_attach_driver.rs | awk -
 216	        }
 ~~~~
 
+**E98: `crates/holler-hub/src/control_server.rs:251-284`** — `hub_query_remote`: `control/query_remote` hands any `params.method` to `LiveHandle::query`; the allowlist (E6) is its only filter.
+
+Command: `sed -n '251,284p' crates/holler-hub/src/control_server.rs | awk -v s=251 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+251	/// `control/query_remote {target, method, params?}` (issue #185): `holler hub
+252	/// query TARGET CMD [ARGS...]` — resolve `target` against the live registry
+253	/// and forward the `query/*` request over that body's socket. No live body
+254	/// for `target` is `-32004 not_connected` (exit 1 at the CLI); more than one
+255	/// match is reported as an ambiguous refusal (the CLI maps that to exit 2,
+256	/// ADR 0003's usage-error code for an unresolvable target).
+257	async fn hub_query_remote(cid: &holler_proto::CorrelationId, obj: &serde_json::Value, registry: &Registry) -> String {
+258	    let params = obj.get("params");
+259	    let (Some(target), Some(method)) = (
+260	        params.and_then(|p| p.get("target")).and_then(|v| v.as_str()),
+261	        params.and_then(|p| p.get("method")).and_then(|v| v.as_str()),
+262	    ) else {
+263	        return encode_error(cid, Code::InvalidParams, "control/query_remote needs params.target and params.method".to_string());
+264	    };
+265	    let inner_params = params.and_then(|p| p.get("params")).cloned();
+266	
+267	    match registry.find_target(target).await {
+268	        crate::live::TargetLookup::Found(handle) => {
+269	            match handle.query(method, inner_params, std::time::Duration::from_secs(10)).await {
+270	                Some(Ok(value)) => encode_response(cid, value),
+271	                // The body itself raised a wire error (e.g. `query/support`'s
+272	                // `-32006 unknown_feature`) — forward it verbatim rather than
+273	                // re-wrapping it in a fresh `Code`.
+274	                Some(Err(e)) => holler_proto::encode(&Envelope::error_frame(cid, &e)).unwrap_or_default(),
+275	                None => encode_error(cid, Code::NotConnected, format!("{target} did not answer")),
+276	            }
+277	        }
+278	        crate::live::TargetLookup::NotConnected => {
+279	            encode_error(cid, Code::NotConnected, format!("{target} is not connected"))
+280	        }
+281	        crate::live::TargetLookup::Ambiguous => {
+282	            encode_error(cid, Code::InvalidRequest, format!("{target} is ambiguous — matches more than one live body"))
+283	        }
+284	    }
+~~~~
+
+**E99: `crates/holler-hub/src/circuit/admin.rs:256-262`** — `admin/query` with a `params.target` maps to `query_remote`, so an admin-role remote connection reaches the same forward.
+
+Command: `sed -n '256,262p' crates/holler-hub/src/circuit/admin.rs | awk -v s=256 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+256	    let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) else { return RequestOutcome::Inline };
+257	    let verb = if method == "admin/query" {
+258	        // MO 2: maps to `control/query_remote` when `params.target` is
+259	        // present, `control/query_local` when it is absent — the same
+260	        // shape `hub_query_remote`/`hub_query_local` already read `obj`
+261	        // for, unchanged.
+262	        let has_target = obj.get("params").and_then(|p| p.get("target")).and_then(|v| v.as_str()).is_some();
+~~~~
+
+**E100: `crates/holler-cli/tests/hold_hub_test.rs:55-70`** — The existing pattern: a raw `session/prompt` sent through `query_remote` is refused `-32601` and the session saw nothing.
+
+Command: `sed -n '55,70p' crates/holler-cli/tests/hold_hub_test.rs | awk -v s=55 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+55	#[test]
+56	fn a_prompt_cannot_be_forwarded_around_the_hold() {
+57	    let rig = Rig::start(&[("alpha", &["--chunks", "1"])]);
+58	    rig.hold(SESSION, None).unwrap();
+59	    let prompt = serde_json::json!({
+60	        "session": "alpha",
+61	        "message": { "messageId": "m-x", "role": "ROLE_USER", "parts": [{ "text": "sneak" }] },
+62	    });
+63	    let res = control::query_remote_at(rig.root(), "b", "session/prompt", Some(prompt));
+64	    match res {
+65	        Err(ControlError::Refused(e)) => assert_eq!(e.code, -32601, "a prompt is not a forwardable method: {e:?}"),
+66	        other => panic!("the generic forward must refuse a session/prompt: {other:?}"),
+67	    }
+68	    // And the session saw nothing: the roster row never left idle.
+69	    assert_eq!(rig.row(SESSION).unwrap()["state"], "idle");
+70	}
+~~~~
+
+**E101: `crates/holler-body/src/session_manager/task.rs:171-186`** — The session task's loop: the attach retry runs while an attach session has no driver (`awaiting_attach`).
+
+Command: `sed -n '171,186p' crates/holler-body/src/session_manager/task.rs | awk -v s=171 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+171	    loop {
+172	        let awaiting_attach = inner.config.mode == SessionMode::Attach && inner.driver.is_none();
+173	        tokio::select! {
+174	            biased;
+175	            cmd = mailbox.recv() => {
+176	                if !dispatch_command(&mut inner, cmd).await {
+177	                    return;
+178	                }
+179	            }
+180	            event = poll_stream(&mut inner.current_stream) => {
+181	                handle_stream_event(&mut inner, event).await;
+182	            }
+183	            _ = retry.tick(), if awaiting_attach => {
+184	                attempt_initial_attach(&mut inner).await;
+185	            }
+186	        }
+~~~~
+
+**E102: `crates/holler-body/src/session_manager/task.rs:258-262`** — `attempt_initial_attach` (what the retry calls) attaches from `inner.config`.
+
+Command: `sed -n '258,262p' crates/holler-body/src/session_manager/task.rs | awk -v s=258 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+258	async fn attempt_initial_attach(inner: &mut Inner) {
+259	    match Driver::spawn_or_attach(&inner.config).await {
+260	        Ok(driver) => {
+261	            inner.driver = Some(driver);
+262	            let mut p = inner.presence.lock().unwrap_or_else(PoisonError::into_inner);
+~~~~
+
+**E103: `crates/holler-body/src/session_manager/task.rs:492-498`** — `start_turn` re-attaches from `inner.config` when the driver is `None`.
+
+Command: `sed -n '492,498p' crates/holler-body/src/session_manager/task.rs | awk -v s=492 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+492	    if inner.driver.is_none() {
+493	        match Driver::spawn_or_attach(&inner.config).await {
+494	            Ok(d) => inner.driver = Some(d),
+495	            Err(e) => {
+496	                let _ = reply_tx.send(PromptOutcome::Error(e.message()));
+497	                return false;
+498	            }
+~~~~
+
+**E104: `crates/holler-body/src/session_manager/task.rs:659-665`** — A turn that ends in `StopReason::Error` drops the driver, so the next prompt (or the retry) re-attaches.
+
+Command: `sed -n '659,665p' crates/holler-body/src/session_manager/task.rs | awk -v s=659 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+659	    inner.last_update_at_ms = None;
+660	    // Crash isolation (issue #189's own acceptance item): drop the driver so
+661	    // the *next* prompt respawns a fresh one, never retried automatically.
+662	    if matches!(reason, StopReason::Error) {
+663	        inner.driver = None;
+664	    }
+665	    if publish_idle {
+~~~~
+
+**E105: `crates/holler-body/src/http_attach_driver/connection.rs:480-481`** — OpenCode's `session.error` event ends the turn with `StopReason::Error`.
+
+Command: `sed -n '480,481p' crates/holler-body/src/http_attach_driver/connection.rs | awk -v s=480 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+480	        "session.idle" => finish_turn(shared, StopReason::EndTurn),
+481	        "session.error" => finish_turn(shared, StopReason::Error),
+~~~~
+
+**E106: `crates/holler-body/src/session_manager/task.rs:31-56`** — `SessionPresence`: the task's presence snapshot, where the mirror of the attach id goes.
+
+Command: `sed -n '31,56p' crates/holler-body/src/session_manager/task.rs | awk -v s=31 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+31	/// The live, presence-facing snapshot of one session — written only by that
+32	/// session's own task, read by [`super::SessionManager::presence_doc`] (and
+33	/// any number of other outside readers) through the shared `Arc<Mutex<_>>`.
+34	#[derive(Debug, Clone)]
+35	pub(super) struct SessionPresence {
+36	    pub(super) state: SessionState,
+37	    pub(super) turn_started_at: Option<String>,
+38	    pub(super) last_update_at: Option<String>,
+39	    pub(super) turn_id: Option<String>,
+40	    pub(super) last_turn: Option<LastTurn>,
+41	    /// The held permission(s)/elicitation(s) (issue #151) — `Some` only
+42	    /// while `state` is `InputRequired`, mirroring `SessionAd.pending`'s own
+43	    /// wire contract. Populated from [`AcpDriver::pending`] by [`set_state`]
+44	    /// every time this session transitions to (or stays in)
+45	    /// `InputRequired`, and cleared the moment it leaves that state.
+46	    pub(super) pending: Option<Vec<PendingItem>>,
+47	    /// `true` while an attach-mode session's *initial*
+48	    /// [`crate::http_attach_driver::HttpAttachDriver::attach`] has not yet
+49	    /// succeeded (its first attempt failed, and the [`ATTACH_RETRY_INTERVAL`]
+50	    /// retry loop has not landed one yet) — [`super::SessionManager::
+51	    /// presence_doc`] omits the whole row while this is `true` (issue #195).
+52	    /// Always `false` for a spawn-mode session (never gated — spawning is
+53	    /// lazy, on the first prompt, not eager at task startup the way an
+54	    /// attach is).
+55	    pub(super) omitted_pending_attach: bool,
+56	}
+~~~~
+
+**E107: `crates/holler-body/src/session_manager.rs:181-189`** — `ManagedSession`: the manager keeps the as-started `config`.
+
+Command: `sed -n '181,189p' crates/holler-body/src/session_manager.rs | awk -v s=181 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+181	/// One registered session's manager-side handle: its (immutable) config, the
+182	/// mailbox to its task, and the read-only presence snapshot that task keeps
+183	/// current.
+184	struct ManagedSession {
+185	    config: SessionConfig,
+186	    tx: mpsc::Sender<SessionCommand>,
+187	    presence: Arc<Mutex<SessionPresence>>,
+188	    join: JoinHandle<()>,
+189	}
+~~~~
+
+**E108: `crates/holler-body/src/query.rs:151-158`** — `query/support`'s live probe reads the configured `session_id`.
+
+Command: `sed -n '151,158p' crates/holler-body/src/query.rs | awk -v s=151 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+151	    for s in &sessions {
+152	        match s.mode {
+153	            SessionMode::Attach => {
+154	                let (endpoint, session_id) = (s.endpoint.as_deref(), s.session_id.as_deref());
+155	                let ok = match (endpoint, session_id) {
+156	                    (Some(endpoint), Some(session_id)) => {
+157	                        probe_attach_session_live(endpoint, session_id)
+158	                    }
+~~~~
+
+**E109: `crates/holler-body/src/registry.rs:74-90`** — `SessionRegistry::presence_doc`: the as-started baseline reads `entry.config.session_id` (called only by `config_test`; production uses `SessionManager::presence_doc`, E46).
+
+Command: `sed -n '74,90p' crates/holler-body/src/registry.rs | awk -v s=74 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+74	    /// Build this body's `session/presence` params (the notification issue
+75	    /// #182 sends on every heartbeat and reconnect): one [`SessionAd`] per
+76	    /// registered session, reflecting its current state. `hostname` is the
+77	    /// body's own hostname/label (`Presence::hostname`).
+78	    pub fn presence_doc(&self, hostname: String) -> Presence {
+79	        let sessions = self
+80	            .sessions
+81	            .values()
+82	            .map(|entry| SessionAd {
+83	                name: entry.config.name.as_str().to_string(),
+84	                harness: entry.config.harness.clone(),
+85	                state: entry.state,
+86	                mode: match entry.config.mode {
+87	                    SessionMode::Spawn => Mode::Spawn,
+88	                    SessionMode::Attach => Mode::Attach,
+89	                },
+90	                harness_session_id: entry.config.session_id.clone(),
+~~~~
+
+**E110: `crates/holler-body/src/connection/handshake.rs:230-238`** — The body's `hello` sends an empty `sessions` list (`.then(Vec::new)`).
+
+Command: `sed -n '230,238p' crates/holler-body/src/connection/handshake.rs | awk -v s=230 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+230	    let harnesses = if role == HelloRole::Body {
+231	        let mut h: Vec<String> = configs.iter().map(|c| c.harness.clone()).collect();
+232	        h.sort();
+233	        h.dedup();
+234	        Some(h)
+235	    } else {
+236	        None
+237	    };
+238	    let sessions = (role == HelloRole::Body).then(Vec::new);
+~~~~
+
+**E111: `crates/holler-body/src/connection.rs:703-705`** — The body's `handle_query` call passes `self.configs`.
+
+Command: `sed -n '703,705p' crates/holler-body/src/connection.rs | awk -v s=703 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+703	            Envelope::Request { id, method, params } if method.starts_with("query/") => {
+704	                crate::dispatch::handle_query(self.sink, &id, &method, params, self.identity, self.state_root, self.configs).await
+705	            }
+~~~~
+
+**E112: `crates/holler-hub/src/roster.rs:343-376`** — `Roster::advertise` replaces a token's whole set of rows; a row absent from the frame goes `gone` at once.
+
+Command: `sed -n '343,376p' crates/holler-hub/src/roster.rs | awk -v s=343 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+343	    /// <session>` (see [`qualified_name`]); idempotent, like [`Roster::
+344	    /// set_token`]/[`Roster::set_hostname`].
+345	    pub fn set_label(&self, token_id: &str, label: &str) {
+346	        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).bind_label(token_id, label);
+347	    }
+348	
+349	    /// A `session/presence` from a body: replace (not merge) that token's set
+350	    /// of rows. A row in the frame is upserted (`connected`, `last_seen` =
+351	    /// now); a row the token previously held but which is absent from the frame
+352	    /// goes `gone` **immediately**. Returns the names **rejected** by the
+353	    /// collision policy (a connected different-token holder blocks them) — the
+354	    /// rest of the frame was applied.
+355	    pub fn advertise(&self, token_id: &str, p: &Presence) -> Vec<String> {
+356	        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+357	        inner.bind_token(token_id, None, Some(&p.hostname));
+358	        let info = inner.tokens.get(token_id).cloned().unwrap_or_default();
+359	        let incoming: HashSet<String> = p.sessions.iter().map(|s| qualified_name(&info, s)).collect();
+360	        // The newest ad timestamp in this frame (the `last_update_at` base):
+361	        // the body emits one presence per body, so its sessions share one
+362	        // clock and this is the frame's "now" on the body's wall.
+363	        let base = p
+364	            .sessions
+365	            .iter()
+366	            .filter_map(|s| parse_rfc3339_secs(s.last_update_at.as_deref()))
+367	            .max();
+368	        let mut rejected = Vec::new();
+369	        let mut changed = 0usize;
+370	        for s in &p.sessions {
+371	            if let Some(name) = inner.apply_ad(token_id, &info, s, base) {
+372	                rejected.push(name);
+373	            } else {
+374	                changed += 1;
+375	            }
+376	        }
+~~~~
+
+**E113: `crates/holler-hub/src/live.rs:222-250`** — `LiveHandle`: its fields (`tx`, `presence`), where `query_slot` goes.
+
+Command: `sed -n '222,250p' crates/holler-hub/src/live.rs | awk -v s=222 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+222	/// A live, authenticated circuit's command channel — how another task (the
+223	/// control socket) reaches this specific connection.
+224	#[derive(Clone)]
+225	pub struct LiveHandle {
+226	    pub client_id: String,
+227	    pub hostname: String,
+228	    pub token_id: String,
+229	    /// The transport peer address (`ip:port`) this connection was accepted
+230	    /// from (issue #184: captured at accept, reported in every connection
+231	    /// log line and in `hub status --json`'s `clients_detail[].peer`).
+232	    pub peer: String,
+233	    /// The moment this circuit was registered (issue #184's `connected_at`,
+234	    /// epoch milliseconds).
+235	    pub connected_at: u64,
+236	    /// This registry entry's monotonic generation stamp (issue #184). Not
+237	    /// exposed on the wire; used by [`Registry::remove_if_current`] so a
+238	    /// superseded connection's own teardown never evicts the entry that
+239	    /// replaced it (see that fn's doc for the race it closes).
+240	    seq: u64,
+241	    tx: tokio::sync::mpsc::UnboundedSender<LiveCommand>,
+242	    /// The priority channel a `session/cancel` travels instead of `tx`
+243	    /// (issue #191) — see [`CancelCommand`]'s own doc.
+244	    cancel_tx: tokio::sync::mpsc::UnboundedSender<CancelCommand>,
+245	    state: Arc<Mutex<LiveState>>,
+246	    /// The last `session/presence` this body sent (issue #190's roster
+247	    /// stand-in — see the module doc). `None` until its first presence.
+248	    presence: Arc<Mutex<Option<Vec<SessionAd>>>>,
+249	}
+250	
+~~~~
+
+**E114: `crates/holler-hub/src/live.rs:357-360`** — `LiveHandle::presence`: the cached session list.
+
+Command: `sed -n '357,360p' crates/holler-hub/src/live.rs | awk -v s=357 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+357	    /// The last presence this body reported, if any yet.
+358	    pub async fn presence(&self) -> Option<Vec<SessionAd>> {
+359	        self.presence.lock().await.clone()
+360	    }
+~~~~
+
+**E115: `crates/holler-hub/src/live.rs:504-515`** — `Registry::insert` builds a `LiveHandle`.
+
+Command: `sed -n '504,515p' crates/holler-hub/src/live.rs | awk -v s=504 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+504	        let handle = LiveHandle {
+505	            client_id: client_id.to_string(),
+506	            hostname: hostname.to_string(),
+507	            token_id: token_id.to_string(),
+508	            peer: peer.to_string(),
+509	            connected_at: now_millis_u64(),
+510	            seq,
+511	            tx,
+512	            cancel_tx,
+513	            state: Arc::new(Mutex::new(LiveState::default())),
+514	            presence: Arc::new(Mutex::new(None)),
+515	        };
+~~~~
+
+**E116: `crates/holler-hub/src/circuit.rs:728-735`** — The circuit's single `pending_query` slot, overwritten by each `LiveCommand::Query`.
+
+Command: `sed -n '728,735p' crates/holler-hub/src/circuit.rs | awk -v s=728 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+728	            LiveCommand::Query { method, params, reply: reply_tx } => {
+729	                match dispatch::send_query_forward(self.sink, &method, params).await {
+730	                    Ok(cid) => {
+731	                        self.pending_query = Some((cid, reply_tx));
+732	                        Ok(())
+733	                    }
+734	                    Err(()) => Err(()),
+735	                }
+~~~~
+
+**E117: `crates/holler-hub/src/live.rs:626-631`** — `Registry::find_target`: `hub query`'s lookup by token, client or label.
+
+Command: `sed -n '626,631p' crates/holler-hub/src/live.rs | awk -v s=626 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+626	    /// Resolve a `hub query TARGET …` target against the live registry
+627	    /// (issue #185): `target` may name a token id, a client id, or a
+628	    /// hostname/label (a `label/session` form's label part). Exactly one
+629	    /// match is [`TargetLookup::Found`]; zero is `NotConnected`; more than
+630	    /// one is `Ambiguous`.
+631	    pub async fn find_target(&self, target: &str) -> TargetLookup {
+~~~~
+
+**E118: `crates/holler-pane/src/ports.rs:379-388`** — `Activity`: the idle/busy/question enum that already exists.
+
+Command: `sed -n '379,388p' crates/holler-pane/src/ports.rs | awk -v s=379 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+379	/// What a harness session is doing, as [`HarnessPort::session_activity`] reports it.
+380	#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+381	pub enum Activity {
+382	    /// Waiting for a prompt.
+383	    Idle,
+384	    /// Running a turn.
+385	    Busy,
+386	    /// Waiting for an answer to a question it asked.
+387	    HoldingQuestion,
+388	}
+~~~~
+
+**E119: `crates/holler-pane/src/tx_switch.rs:308-327`** — `check_idle`: the one mapping from an `Activity` to `session-busy` and `session-holds-question`.
+
+Command: `sed -n '308,327p' crates/holler-pane/src/tx_switch.rs | awk -v s=308 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+308	/// A reset does not drop a conversation that is mid-turn or waiting on an answer: the
+309	/// pane's session of record must be idle. A pane with no session of record has no
+310	/// conversation to drop, and is not asked. A query that fails is passed on as it is.
+311	fn check_idle(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
+312	    let Some(session) = &record.session_of_record else {
+313	        return Ok(());
+314	    };
+315	    let activity = ports
+316	        .harness
+317	        .session_activity(record.harness.port, session)?;
+318	    let (code, doing) = match activity {
+319	        Activity::Idle => return Ok(()),
+320	        Activity::Busy => (SESSION_BUSY, "is running a turn; reset it once it ends"),
+321	        Activity::HoldingQuestion => (SESSION_HOLDS_QUESTION, "holds a question; answer it first"),
+322	    };
+323	    Err(PaneError::Refused {
+324	        code,
+325	        message: format!("session {} of {} {doing}", quoted(session), record.name),
+326	    })
+327	}
+~~~~
+
+**E120: `crates/holler-pane/src/findings.rs:177-179`** — `FixState::as_str`: a state's name is its JSON form.
+
+Command: `sed -n '177,179p' crates/holler-pane/src/findings.rs | awk -v s=177 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+177	impl FixState {
+178	    /// The state's kebab-case name, which is also its JSON form.
+179	    pub const fn as_str(self) -> &'static str {
+~~~~
+
+**E121: `crates/holler-pane/src/findings.rs:237-242`** — `Finding.remedy`: the finding's own command.
+
+Command: `sed -n '237,242p' crates/holler-pane/src/findings.rs | awk -v s=237 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+237	    /// One line for a person; untrusted values in it are quoted.
+238	    pub message: String,
+239	    /// The command to run (see [`FindingKind::remedy`]); `None` when no Holler verb repairs
+240	    /// it, or it was fixed.
+241	    pub remedy: Option<String>,
+242	    pub fix: FixState,
+~~~~
+
+**E122: `crates/holler-hub/src/control_server.rs:315-353`** — `control/say`'s `SayError` arms, inline.
+
+Command: `sed -n '315,353p' crates/holler-hub/src/control_server.rs | awk -v s=315 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+315	        Err(crate::talk::SayError::UnknownSession) => {
+316	            encode_error(cid, Code::UnknownSession, format!("unknown session: {session}"))
+317	        }
+318	        // Issue #192, rule 4: `detail` already carries the roster's own
+319	        // `conn_state` (and, for `reconnecting`, the last-seen age) when the
+320	        // roster still remembers this name — see `talk::not_connected_detail`.
+321	        Err(crate::talk::SayError::NotConnected(detail)) => encode_error(cid, Code::NotConnected, detail),
+322	        Err(crate::talk::SayError::Ambiguous(candidates)) => {
+323	            let message = format!("ambiguous session {session}: candidates are {}", candidates.join(", "));
+324	            let err = WireError::new(Code::UnknownSession, message, Some("ambiguous"));
+325	            encode_error_frame(cid, &err)
+326	        }
+327	        Err(crate::talk::SayError::Busy { state, turn_age_ms, last_update_age_ms }) => {
+328	            let err = WireError::session_busy(state, turn_age_ms, last_update_age_ms);
+329	            encode_error_frame(cid, &err)
+330	        }
+331	        // Issue #151: reported as `-32009 session_busy` with `data.state
+332	        // = "input-required"` (distinct from `working`/`stalled`) so the
+333	        // CLI's own busy hint (`say_cmd::busy_hint`) can point at `answer`
+334	        // instead of `interrupt`/`--queue` — neither of which resolves a
+335	        // held permission/elicitation.
+336	        Err(crate::talk::SayError::InputRequired { question, turn_age_ms, last_update_age_ms }) => {
+337	            let mut err = WireError::session_busy("input-required", turn_age_ms, last_update_age_ms);
+338	            if let Some(q) = question {
+339	                err.message = q;
+340	            }
+341	            encode_error_frame(cid, &err)
+342	        }
+343	        Err(crate::talk::SayError::Refused(err)) => encode_error_frame(cid, &err),
+344	        Err(crate::talk::SayError::ConnectionLost) => {
+345	            encode_error(cid, Code::ConnectionLost, format!("{session} io disconnected mid-turn; ask again"))
+346	        }
+347	        Err(crate::talk::SayError::Timeout) => {
+348	            let secs = timeout.as_secs();
+349	            encode_error(cid, Code::NotConnected, format!("no reply from {session} within {secs}s"))
+350	        }
+351	        Err(crate::talk::SayError::Cancelled) => {
+352	            encode_error(cid, Code::NotConnected, "prompt was interrupted before it completed".to_string())
+353	        }
+~~~~
+
+**E123: `crates/holler-cli/src/say_cmd.rs:230-260`** — `route_target`: a SESSION is sent as it is; a `--pane` is resolved over the wiring.
+
+Command: `sed -n '230,260p' crates/holler-cli/src/say_cmd.rs | awk -v s=230 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+230	/// Clear a resolved prompt verb to run, or say why it stops; `say`, `interrupt` and
+231	/// `answer` all call it. A malformed tail is `usage` (exit 2), as before. A SESSION is
+232	/// sent to as it is, and a SESSION with `--profile` is `usage`, naming `--pane`. A
+233	/// `--pane` target is resolved by [`resolve_pane_target`] over the run's wiring, before
+234	/// any hub is contacted: its error prints with the exit of its code's class, a refusal
+235	/// (exit 3) naming its stable code.
+236	pub fn route_target(
+237	    resolved: Result<PromptArgs, Usage>,
+238	    profile: &ProfileOpt,
+239	) -> Result<Routed, Stop> {
+240	    let args = resolved.map_err(|usage| Stop {
+241	        message: usage.to_string(),
+242	        exit_code: ErrorClass::Usage.exit_code(),
+243	    })?;
+244	    let session = match (args.target, profile.profile.as_deref()) {
+245	        (PromptTarget::Session(session), None) => session,
+246	        (PromptTarget::Session(_), Some(_)) => {
+247	            return Err(Stop {
+248	                message: PROFILE_NEEDS_PANE.to_owned(),
+249	                exit_code: ErrorClass::Usage.exit_code(),
+250	            })
+251	        }
+252	        (PromptTarget::Pane(pane), profile) => Wiring::connect()
+253	            .and_then(|wiring| resolve_pane_target(wiring.ports(), &pane, profile))
+254	            .map_err(|error| routing_stop(&error))?,
+255	    };
+256	    Ok(Routed {
+257	        session,
+258	        arg: args.arg,
+259	    })
+260	}
+~~~~
+
+**E124: `crates/holler-cli/src/interrupt_cmd.rs:65-74`** — `interrupt`'s refusal arm: the `--pane` handling is inline.
+
+Command: `sed -n '65,74p' crates/holler-cli/src/interrupt_cmd.rs | awk -v s=65 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+65	        Err(holler_hub::control::ControlError::Refused(e)) => {
+66	            // The pane arm comes first (story #646): the redirect passes
+67	            // `send_prompt`, whose pane-state gate is no hold to release.
+68	            if let Some(refused) = pane_hold_refusal(&session, &e, json) {
+69	                return InterruptResult {
+70	                    message: refused.message,
+71	                    to_stderr: refused.to_stderr,
+72	                    exit_code: refused.exit_code,
+73	                };
+74	            }
+~~~~
+
+**E125: `crates/holler-cli/src/answer_cmd.rs:61-70`** — `answer`'s refusal arm.
+
+Command: `sed -n '61,70p' crates/holler-cli/src/answer_cmd.rs | awk -v s=61 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+61	        Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
+62	        Err(holler_hub::control::ControlError::Refused(e)) => {
+63	            // `ambiguous` (matching `say`'s own convention: "lists
+64	            // candidates") is the one refusal that exits 2, not 1 — every
+65	            // other refusal (unknown session, nothing_pending, not_connected,
+66	            // invalid_params, connection_lost) is a runtime failure (exit 1).
+67	            let is_ambiguous = e.data.as_ref().and_then(|d| d.reason.as_deref()) == Some("ambiguous");
+68	            err(e.message.clone(), if is_ambiguous { 2 } else { 1 })
+69	        }
+70	        Err(e) => err(e.to_string(), 1),
+~~~~
+
+**E126: `crates/holler-cli/src/prompt_target.rs:41-46`** — `Routed { session, arg }`: it does not record that a target came from `--pane`.
+
+Command: `sed -n '41,46p' crates/holler-cli/src/prompt_target.rs | awk -v s=41 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+41	/// A prompt verb that is cleared to contact a hub: the session to prompt and the argument after it.
+42	#[derive(Debug, Clone, PartialEq, Eq)]
+43	pub struct Routed {
+44	    pub session: String,
+45	    pub arg: Option<String>,
+46	}
+~~~~
+
+**E127: `crates/holler-cli/src/pane/wiring/bind.rs:326-328`** — `wiring/bind.rs`'s pass-through of `send_prompt`: the one `.send_prompt(` call that stays.
+
+Command: `sed -n '326,328p' crates/holler-cli/src/pane/wiring/bind.rs | awk -v s=326 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+326	    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+327	        self.port()?.send_prompt(port, session, text)
+328	    }
+~~~~
+
+**E128: `crates/holler-pane/src/tx_launch.rs:361-372`** — `launch` and `relaunch` keep the record's stored DRIVEN.
+
+Command: `sed -n '361,372p' crates/holler-pane/src/tx_launch.rs | awk -v s=361 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+361	    /// The record R writes: what the act brought up and observed, and the spec's values. A
+362	    /// relaunch keeps the record's hold, its stored DRIVEN (never inferred) and, without a
+363	    /// profile, its profile.
+364	    fn record(&self, seen: &Seen, live: Live, at: i64) -> Pane {
+365	        let (hold, driven, profile) = match self.old {
+366	            Some(old) => (
+367	                old.hold.clone(),
+368	                old.last_observed.driven.clone(),
+369	                self.profile.or(old.profile.as_ref()).cloned(),
+370	            ),
+371	            None => (Hold::None, None, self.profile.cloned()),
+372	        };
+~~~~
+
+**E129: `crates/holler-pane/src/tx_launch.rs:678-688`** — A relaunch keeps the session of record only if the restarted server lists it, else creates a new one.
+
+Command: `sed -n '678,688p' crates/holler-pane/src/tx_launch.rs | awk -v s=678 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+678	/// A6: a new session, created through the harness API. B8 for a relaunch: the record's session
+679	/// of record when the restarted server still lists it, else a new one (decision 8).
+680	fn session_of_record(ports: Ports<'_>, plan: &Plan<'_>) -> Result<String, PaneError> {
+681	    if let Some(kept) = plan.old.and_then(|old| old.session_of_record.as_deref()) {
+682	        let listed = ports.harness.list_sessions(plan.port)?;
+683	        if listed.iter().any(|session| session == kept) {
+684	            return Ok(kept.to_owned());
+685	        }
+686	    }
+687	    ports.harness.create_session(plan.port)
+688	}
+~~~~
+
+**E130: `docs/adr/ADR-0003.md:116-119`** — ADR 0003 "Not decided here", the Addressing line (118 since #851 added a header line).
+
+Command: `sed -n '116,119p' docs/adr/ADR-0003.md | awk -v s=116 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+116	## Not decided here
+117	
+118	- **Addressing** — `SESSION`/`TARGET` expand under ADR 0005 (`<label>/<session>`).
+119	- **Wire** — the `--json` document shapes follow ADR 0004 (protocol v2).
+~~~~
+
+**E131: `docs/adr/ADR-0014.md:24-30`** — ADR 0014 Consequences, with the bullet "without it changing how they address the session".
+
+Command: `sed -n '24,30p' docs/adr/ADR-0014.md | awk -v s=24 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+24	## Consequences
+25	
+26	- The body's config schema gains `mode`, `endpoint`, and `session_id` fields, meaningful only under attach; `command` is ignored (never used as a spawn fallback) when `mode = "attach"`.
+27	- Session-manager teardown branches on mode: spawn tears down its ACP child; attach drops only its own control channel and returns, leaving the harness process running exactly as it found it.
+28	- Single-instance locking on `holler body run` still applies per body process; two bodies attaching the *same* `session_id` concurrently is undefined and the second one's lock attempt fails, same as today.
+29	- `roster`/`status` surface `mode` and the harness session id so an operator can tell attach apart from spawn without it changing how they address the session.
+30	- Discovering an attachable session automatically (rather than an operator pasting `endpoint` + `session_id`) is explicitly out of scope for v1 attach and remains a follow-on.
+~~~~
+
+**E132: `crates/holler-proto/tests/codec_test.rs:82-87`** — `every_method_round_trips` panics `no canonical frame` for a catalog row without an arm.
+
+Command: `sed -n '82,87p' crates/holler-proto/tests/codec_test.rs | awk -v s=82 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+82	        "admin/answer" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/answer","params":{{"session":"io/alpha","choice":"0"}}}}"#),
+83	        "admin/wait" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/wait","params":{{"sessions":"io/alpha","prefix":null,"until":null,"after":null,"timeout_ms":600000}}}}"#),
+84	        "admin/query" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/query","params":{{"target":null,"method":"query/status","params":null}}}}"#),
+85	        _ => panic!("no canonical frame for {method:?}"),
+86	    }
+87	}
+~~~~
+
+**E133: `crates/holler-body/tests/http_attach_driver_test/fake_server.rs:32-36`** — The fake OpenCode server's state: `exists_v1` and `exists_v2`, no stall mode.
+
+Command: `sed -n '32,36p' crates/holler-body/tests/http_attach_driver_test/fake_server.rs | awk -v s=32 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+32	pub struct FakeState {
+33	    pub exists_v1: bool,
+34	    pub exists_v2: bool,
+35	    pub questions: Vec<Value>,
+36	    pub permissions: Vec<Value>,
+~~~~
+
+**E134: `crates/holler-body/tests/http_attach_driver_test/fake_server.rs:276-292`** — The fake's existence check answers at once, one verdict for every id.
+
+Command: `sed -n '276,292p' crates/holler-body/tests/http_attach_driver_test/fake_server.rs | awk -v s=276 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+276	    let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+277	    state.requests.push(RecordedRequest {
+278	        method: method.to_string(),
+279	        path: path.to_string(),
+280	        body: body.to_string(),
+281	    });
+282	
+283	    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+284	
+285	    match (method, segments.as_slice()) {
+286	        ("GET", ["session", id]) if !id.is_empty() => {
+287	            if state.exists_v1 {
+288	                ok_json("{}")
+289	            } else {
+290	                not_found()
+291	            }
+292	        }
+~~~~
+
+**E135: `crates/holler-pane-testkit/Cargo.toml:12-24`** — `holler-pane-testkit`'s manifest: it depends only on `holler-pane` and `serde_json`.
+
+Command: `sed -n '12,24p' crates/holler-pane-testkit/Cargo.toml | awk -v s=12 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+12	# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+13	# otherwise).
+14	[dependencies]
+15	# The ports the fakes implement and the suites drive (`PaneStore`, `Pane`, `PaneError`,
+16	# `next_generation`); for every fake and suite in this crate.
+17	holler-pane = { path = "../holler-pane" }
+18	# Parses the verbs' `--format=json` output for `envelope.rs` (`check_envelope`,
+19	# `check_ndjson`); the testkit cannot use the CLI's own `Envelope` type.
+20	serde_json = { workspace = true }
+21	
+22	# Workspace lints (issue #149).
+23	[lints]
+24	workspace = true
+~~~~
+
+**E136: `crates/holler-proto/src/vocab.rs:122-149`** — `RoutableName::parse`: `label/session` or a bare session; `_` is refused.
+
+Command: `sed -n '122,149p' crates/holler-proto/src/vocab.rs | awk -v s=122 '{printf "%d\t%s\n", s+NR-1, $0}'`
+
+~~~~text
+122	impl RoutableName {
+123	    /// Parse a wire string into a `RoutableName`.
+124	    ///
+125	    /// Succeeds iff the string is one or more `/`-separated segments, each
+126	    /// 1–32 chars, each matching the segment grammar (lowercase letters and
+127	    /// digits; `-` only between word chars; no leading/trailing `-`).
+128	    pub fn parse(s: &str) -> Result<Self, NameError> {
+129	        if s.is_empty() {
+130	            return Err(NameError::Empty);
+131	        }
+132	        let bytes = s.as_bytes();
+133	        let mut start = 0usize;
+134	        for (i, &b) in bytes.iter().enumerate() {
+135	            if b == b'/' {
+136	                if i == start {
+137	                    return Err(NameError::EmptySegment);
+138	                }
+139	                check_segment(&bytes[start..i])?;
+140	                start = i + 1;
+141	            }
+142	        }
+143	        if start == bytes.len() {
+144	            // Trailing `/`.
+145	            return Err(NameError::EmptySegment);
+146	        }
+147	        check_segment(&bytes[start..])?;
+148	        Ok(Self(s.to_owned()))
+149	    }
+~~~~
