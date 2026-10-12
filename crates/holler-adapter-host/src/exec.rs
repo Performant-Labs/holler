@@ -1,24 +1,38 @@
 //! Running one child process under a deadline (Decision 2 of #641), and the one `kill`
 //! call every signal of the adapter goes through (Decision 4).
 //!
-//! A child gets a null stdin. Its stdout and stderr are drained on two threads, so a
-//! child that writes more than a pipe holds cannot block, and its exit is polled with
-//! `try_wait` until the deadline. On the deadline the child is killed and reaped, and the
-//! call is [`Failed::Expired`]: a hung call is reported, never waited on. A child that
-//! exits while something it started still holds its pipes is `Expired` too once the
-//! deadline passes, so no call outlives its bound.
+//! A child is run by the shared bounded runner, [`holler_pane::bounded`] (#696), as this
+//! adapter always ran it: a null stdin, stdout and stderr both kept whole (no cap), each read
+//! on a thread of its own so a child that writes more than a pipe holds cannot block, the
+//! child left in the adapter's process group, and its exit polled every 2 ms until the
+//! deadline. On the deadline the child is killed and reaped, and the call is
+//! [`Failed::Expired`]: a hung call is reported, never waited on. A child that exits while
+//! something it started still holds its pipes is `Expired` too once the deadline passes, so
+//! no call outlives its bound. This module only maps the runner's answer to the adapter's
+//! own [`Ran`] and texts.
 
-use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::thread;
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
+
+use holler_pane::bounded::{self, Capture, KillScope, Over, RunError, Spec};
 
 use crate::tmux::Pid;
 
-/// How long a running child sleeps between two polls of its exit.
-const POLL: Duration = Duration::from_millis(2);
+/// How the adapter runs tmux and `kill`: both outputs kept whole, the child alone killed on
+/// the deadline, and its exit polled every 2 ms.
+const RUN: Spec = Spec {
+    stdout: WHOLE,
+    stderr: WHOLE,
+    kill: KillScope::Child,
+    poll: Duration::from_millis(2),
+};
+
+/// An output kept whole: a cap no output reaches, so nothing is ever cut.
+const WHOLE: Capture = Capture::Keep {
+    cap: usize::MAX,
+    over: Over::Truncate,
+};
 
 /// A child that ran to its exit: its status and what it printed, decoded lossily.
 pub(crate) struct Ran {
@@ -49,120 +63,30 @@ pub(crate) enum Failed {
     Unavailable(String),
 }
 
-/// Which pipe a drained output came from.
-#[derive(Clone, Copy)]
-enum Stream {
-    Out,
-    Err,
-}
-
 /// Run `command`, whose program and arguments are set, to its exit or to `deadline`.
 /// Nothing is spawned once `deadline` has passed.
 pub(crate) fn run(command: &mut Command, deadline: Instant) -> Result<Ran, Failed> {
     let program = Path::new(command.get_program()).display().to_string();
-    if Instant::now() >= deadline {
-        return Err(Failed::Expired);
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|e| Failed::Unavailable(format!("{program}: {e}")))?;
-    let (tx, rx) = mpsc::channel();
-    let drained = drain(child.stdout.take(), Stream::Out, &tx)
-        .and_then(|()| drain(child.stderr.take(), Stream::Err, &tx));
-    drop(tx);
-    if let Err(e) = drained {
-        reap(&mut child);
-        return Err(Failed::Unavailable(format!(
-            "{program}: no thread to read its output: {e}"
-        )));
-    }
-    let status = wait(&mut child, deadline, &program)?;
-    let (stdout, stderr) = collect(&rx, deadline, &program)?;
+    let ran = bounded::run(command, &RUN, deadline).map_err(|e| failed(&program, e))?;
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     Ok(Ran {
-        status,
-        stdout,
-        stderr,
+        status: ran.status,
+        stdout: text(&ran.stdout),
+        stderr: text(&ran.stderr),
     })
 }
 
-/// Read `pipe` to its end on a thread of its own and send what it held, tagged
-/// `stream`. A missing pipe sends an empty output at once.
-fn drain(
-    pipe: Option<impl Read + Send + 'static>,
-    stream: Stream,
-    tx: &Sender<(Stream, Vec<u8>)>,
-) -> std::io::Result<()> {
-    let tx = tx.clone();
-    let Some(mut pipe) = pipe else {
-        // The receiver is alive: `run` holds it until both outputs are in.
-        let _ = tx.send((stream, Vec::new()));
-        return Ok(());
+/// The adapter's [`Failed`] for the runner's `error`, naming `program` and none of its
+/// arguments.
+fn failed(program: &str, error: RunError) -> Failed {
+    let what = match error {
+        RunError::Expired => return Failed::Expired,
+        RunError::Spawn(e) | RunError::WaitFailed(e) => format!("{program}: {e}"),
+        RunError::ReaderFailed(e) => format!("{program}: no thread to read its output: {e}"),
+        // `Overflow` cannot happen: no output is capped.
+        RunError::OutputLost | RunError::Overflow => format!("{program}: its output was lost"),
     };
-    thread::Builder::new()
-        .name("holler-host-drain".to_owned())
-        .spawn(move || {
-            let mut bytes = Vec::new();
-            // A read error ends the drain with what was read; the exit status decides.
-            let _ = pipe.read_to_end(&mut bytes);
-            // The receiver is gone only when `run` gave up at the deadline.
-            let _ = tx.send((stream, bytes));
-        })
-        .map(drop)
-}
-
-/// Poll `child` until it exits or `deadline` passes; on the deadline kill and reap it.
-fn wait(child: &mut Child, deadline: Instant, program: &str) -> Result<ExitStatus, Failed> {
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
-            Ok(None) => {}
-            Err(e) => {
-                reap(child);
-                return Err(Failed::Unavailable(format!("{program}: {e}")));
-            }
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            reap(child);
-            return Err(Failed::Expired);
-        }
-        thread::sleep(POLL.min(deadline.saturating_duration_since(now)));
-    }
-}
-
-/// Kill `child` and wait for it, so no zombie is left. Either may fail only when the
-/// child is already gone.
-fn reap(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-/// Both outputs, each once its pipe closed, by `deadline`.
-fn collect(
-    rx: &Receiver<(Stream, Vec<u8>)>,
-    deadline: Instant,
-    program: &str,
-) -> Result<(String, String), Failed> {
-    let (mut out, mut err) = (None, None);
-    while out.is_none() || err.is_none() {
-        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok((Stream::Out, bytes)) => out = Some(bytes),
-            Ok((Stream::Err, bytes)) => err = Some(bytes),
-            Err(RecvTimeoutError::Timeout) => return Err(Failed::Expired),
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(Failed::Unavailable(format!(
-                    "{program}: its output was lost"
-                )))
-            }
-        }
-    }
-    let text =
-        |bytes: Option<Vec<u8>>| String::from_utf8_lossy(&bytes.unwrap_or_default()).into_owned();
-    Ok((text(out), text(err)))
+    Failed::Unavailable(what)
 }
 
 /// A signal of the adapter: `TERM` and `KILL` stop a process group, and `0` asks

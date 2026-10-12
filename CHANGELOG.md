@@ -8,6 +8,11 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
+  `holler-pane` (`holler_pane::bounded`) instead of four private copies
+  ([#696](https://github.com/Performant-Labs/holler/issues/696), epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)). Nothing a user sees changes: each keeps its own output
+  caps, stderr handling, kill reach, poll and error texts. [ADR 0021](docs/adr/ADR-0021.md) section 5 records it.
 - Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
   Code process, recorded by its pid and with no port, and the pane verbs drive it
