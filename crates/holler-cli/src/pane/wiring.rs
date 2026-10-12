@@ -81,11 +81,11 @@ use holler_adapter_opencode::{
 };
 use holler_pane::ports::{LoginStatus, SessionChoice};
 use holler_pane::{
-    Actor, Argv, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPane, HerdrPort,
-    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneEvent, PaneId, PaneName,
-    PaneObservation, PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry,
-    ProfileName, ProfileScope, ProfileStore, ResolvedScope, ServeSpec, SpecEdit, SystemProber,
-    Watch,
+    Actor, AgentView, Argv, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPane,
+    HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneEvent, PaneId,
+    PaneName, PaneObservation, PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent,
+    ProfileLogEntry, ProfileName, ProfileScope, ProfileStore, ResolvedScope, ServeSpec, SpecEdit,
+    SystemProber, Watch,
 };
 
 use self::bind::{
@@ -364,6 +364,10 @@ impl HostPort for Unwired {
     fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
         Err(PaneError::NotImplemented)
     }
+
+    fn attached_clients(&self, _name: &PaneName) -> Result<u32, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
 }
 
 impl HarnessPort for Unwired {
@@ -437,6 +441,15 @@ impl HarnessPort for Unwired {
     }
 
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    fn agent_view(
+        &self,
+        _at: &HarnessEndpoint,
+        _session: &str,
+        _max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
         Err(PaneError::NotImplemented)
     }
 }

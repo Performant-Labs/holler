@@ -56,16 +56,22 @@
 //! or a command line, and reads nothing of the process itself (I7). A dead pane is left out,
 //! as `ps` leaves it out.
 //!
+//! **What `attached_clients` reads (#647 part 2).** The same `list-panes` listing of the
+//! session, asking tmux for `#{session_attached}`: the number of clients attached to the
+//! session, which tmux prints on every pane's line. The listing must be that one count on each
+//! line, or the answer is `unavailable` naming the call and quoting none of tmux's output. A
+//! count only: the adapter never asks for a client's name, tty or process (I7).
+//!
 //! **Errors.** Each column is a method; `op` of a `timeout` is `host.<method>`.
 //!
-//! | What happened | `ensure_session` | `run` | `stop_owned` | `ps` | `foreground_commands` |
-//! |---|---|---|---|---|---|
-//! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` | `pane-not-found` |
-//! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids | its live panes' command names |
-//! | an empty argv, or an `argv[0]` containing `=` | | `usage` | | | |
-//! | `cwd` is not an absolute path to an existing directory | | `usage` | | | |
-//! | the bound ran out | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` |
-//! | a binary is missing, or tmux or `kill` failed otherwise | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
+//! | What happened | `ensure_session` | `run` | `stop_owned` | `ps` | `foreground_commands` | `attached_clients` |
+//! |---|---|---|---|---|---|---|
+//! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` | `pane-not-found` | `pane-not-found` |
+//! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids | its live panes' command names | its client count |
+//! | an empty argv, or an `argv[0]` containing `=` | | `usage` | | | | |
+//! | `cwd` is not an absolute path to an existing directory | | `usage` | | | | |
+//! | the bound ran out | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` |
+//! | a binary is missing, or tmux or `kill` failed otherwise | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
 //!
 //! `run` checks the session before the argv, as the test kit's fake does, and the argv
 //! before `cwd`, which the fake does not check. A `usage` never echoes an argv element or
@@ -148,6 +154,7 @@ const OP_RUN: &str = "host.run";
 const OP_STOP_OWNED: &str = "host.stop_owned";
 const OP_PS: &str = "host.ps";
 const OP_FOREGROUND_COMMANDS: &str = "host.foreground_commands";
+const OP_ATTACHED_CLIENTS: &str = "host.attached_clients";
 
 /// The fixed `what` of each refusal of tmux's output; none quotes it.
 const BAD_NEW_WINDOW: &str =
@@ -156,6 +163,8 @@ const BAD_PANE_LIST: &str =
     "tmux list-panes printed a pane that is not a pid in 2..=2147483647 and a dead flag";
 const BAD_COMMAND_LIST: &str =
     "tmux list-panes printed a pane that is not a dead flag and a command name";
+const BAD_ATTACHED_LIST: &str =
+    "tmux list-panes did not print the session's attached-client count on each pane's line";
 
 /// Which tmux server the adapter talks to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,6 +421,19 @@ impl HostPort for TmuxHost {
             Reply::Refused(refusal, what) => Err(refused(name, refusal, what)),
         }
     }
+
+    /// The number of clients attached to the session (#647 part 2): one `list-panes`, the
+    /// listing `ps` makes, asking for `#{session_attached}`, read as strictly as `ps`'s and
+    /// failing as `ps` fails.
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        let call = Call::start(OP_ATTACHED_CLIENTS, self.timeout);
+        match self.run_tmux(&tmux::attached_listing(name), call)? {
+            Reply::Done(stdout) => {
+                tmux::parse_attached(&stdout).ok_or_else(|| unavailable(BAD_ATTACHED_LIST))
+            }
+            Reply::Refused(refusal, what) => Err(refused(name, refusal, what)),
+        }
+    }
 }
 
 /// One port call: the `op` its `Timeout` names, and the one deadline every subprocess it
@@ -458,8 +480,8 @@ enum Reply {
     Refused(Refusal, String),
 }
 
-/// The error of a refused call of `run`, `ps` or `foreground_commands` (Decision 8): a
-/// missing session is `pane-not-found`, anything else `unavailable`.
+/// The error of a refused call of `run`, `ps`, `foreground_commands` or `attached_clients`
+/// (Decision 8): a missing session is `pane-not-found`, anything else `unavailable`.
 fn refused(name: &PaneName, refusal: Refusal, what: String) -> PaneError {
     if refusal.is_missing() {
         PaneError::PaneNotFound {

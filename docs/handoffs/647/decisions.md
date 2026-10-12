@@ -59,3 +59,33 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
     - `pane_claude` (43) and `profile_verbs` (118) passed.
   - `bash scripts/lint.sh`: exit 0.
   - The privacy grep of the added lines: clean.
+
+## F (Phase 5, implementation) — 2026-10-12T11:06-06:00
+- **Decided:**
+  - Built exactly the API T's RED names (`handoff-F.md`, "What was done"), with no test written or edited.
+  - A's warns, applied:
+    - W-1: two shared readers, `prompt::messages` (quotes no body) and `server::agent_list`; the default-agent rule became `server::as_default`, which `usable` and `agents.rs` share, with `usable`'s messages unchanged;
+    - W-2: `with_agent` is applied after `with_fix`, `Finding` gets no field, and the module doc admits a parsed `AgentKey` in the joined form;
+    - W-3: a profile member's message names `--profile P`, and so does the guide's row;
+    - W-4: both Claude implementations call `at.process()?` before the empty view;
+    - W-5: `src/ports/agent_view.rs`;
+    - W-7: the bound is stated, and the `limit` was measured and not used;
+    - W-8: the rule is in `reconcile/observe/agent.rs`, with `RECENT_TURNS` beside it.
+  - `can_dispatch` counts a newer rule of permission `task` or `*` that allows or asks for another pattern as reopening. ADR-0021 section 12's parenthetical was sharpened to say so: the change can only remove findings.
+  - Strict shape checks in `agent_view`: a message without `info.role`, or an agent without a string `name`/`mode`, is `unavailable`.
+  - `TurnAgent` is `#[non_exhaustive]`. The fake's turns are keyed by data directory and session, and its dispatchers by port.
+- **Assumed:**
+  - The fleet's OpenCode is 1.19.0, the version whose `info.agent`, rule list, `native`, `mode` and `hidden` the opt-in test proved today.
+  - No live config writes a `task` rule whose permission is a wildcard other than `*`: such a rule is read as another permission.
+- **Hedged:**
+  - The whole message list is read on every pass for each OpenCode pane without an agent. 1.19.0's `limit` counts every message, so it cannot bound "the last three user turns" without paging. Paging is a follow-up if the live fleet makes the read heavy.
+  - W-3's question, whether the remedy itself should carry `--profile`, stays the operator's.
+  - W-2's fold of the two remedy mechanisms belongs to whichever of #839 and this story merges second.
+- **Evidence:**
+  - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2687 passed, 0 failed, 39 ignored.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean. `bash scripts/lint.sh`: exit 0. `cargo doc` of the touched crates: no warning.
+  - Opt-in runs: real OpenCode 14/14, `ac647` included; real tmux 9/9, the conformance suite's case 11 included.
+  - A scratch crate showed `E0639` for every struct literal of `AgentView` and `TurnAgent`.
+  - The W7 mutation check: every constant wrapper failed its pinning tests, and `bind.rs` was restored byte-identical (sha256).
+  - The `limit` measurement on a scratch 1.19.0 server at 11:03 MDT.
+  - The privacy grep of the added lines: clean.

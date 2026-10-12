@@ -13,7 +13,9 @@
 //! and part 3: the pane's OpenCode agent (`Pane.opencode_agent`, #700), which
 //! `serve_command` applies and `verify_serving` checks on the running server, and the prompt
 //! seam of #645, `send_prompt` and `session_activity`. Nothing wires the adapter in yet
-//! (#649).
+//! (#649). #647 part 2 adds the read `agent_view` (`agents.rs`): the agents of a session's
+//! recent user turns and the agents that can dispatch, from `GET /session/:id/message` and
+//! `GET /agent`.
 //!
 //! **Blocking**, as the port is: every method is synchronous (call it from `spawn_blocking`
 //! or a thread in async code) and returns within [`Timeouts::call`] (I5, 10 s by default).
@@ -135,11 +137,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use holler_pane::ports::Activity;
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 use serde_json::{json, Value};
 
 use crate::http::{HttpError, Reply};
 
+mod agents;
 mod attach;
 mod exec;
 pub mod http;
@@ -163,6 +168,7 @@ const OP_SELECT_SESSION: &str = "harness.select_session";
 const OP_SHOWN_SESSION: &str = "harness.shown_session";
 const OP_SEND_PROMPT: &str = "harness.send_prompt";
 const OP_SESSION_ACTIVITY: &str = "harness.session_activity";
+const OP_AGENT_VIEW: &str = "harness.agent_view";
 
 /// How often a switch, an attach or an abort is checked, within [`Timeouts::settle`], for
 /// having been seen: `abort` asks `GET /session/status` whether the session is still running
@@ -423,6 +429,15 @@ impl HarnessPort for OpenCodeHarness {
 
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         prompt::session_activity(self, at.port()?, session)
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        agents::agent_view(self, at.port()?, session, max_turns)
     }
 }
 

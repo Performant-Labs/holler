@@ -602,6 +602,8 @@ The finding kinds:
 | `pane-waiting` | A Claude Code pane whose process waits on a person: a permission prompt or a question. | none |
 | `claude-login-missing` | Claude Code's processes do not use the subscription login; about no pane, asked once per pass when a Claude Code pane is in scope. | none |
 | `profile-drift` | A pane's record differs from its profile's spec on at least one field; the message names the fields, not the values. | none |
+| `unattached` | The pane's tmux session exists and no tmux client is attached to it, so no Herdr pane shows it. A client attached in any terminal counts; no Holler verb attaches one. | none |
+| `agent-cannot-dispatch` | An OpenCode pane whose record names no agent, whose last three turns all ran as an agent that cannot dispatch a subagent, while the project ships an orchestrator. For a pane in a profile, add `--profile` with its profile. With several orchestrators it names none and lists them. | `holler pane relaunch PANE --agent=KEY` |
 
 **`--fix` repairs only `shown-driven-mismatch`.** It selects the session of record in the pane's TUI, so the TUI shows
 the session the record already names, and observes the TUI again. It never changes which session is the session of
@@ -612,7 +614,8 @@ bracket then says `skipped`).
 **A Claude Code pane** (section 2) is observed through its process: `server-down` when the process no longer runs (with
 no `server-wedged`, and no mismatch reported beside it), `shown-driven-mismatch` when the process holds another session
 than the session of record (a person's `/clear` or `/resume` moves it), and `pane-waiting` while it waits on a person. It
-has no server list, so `session-of-record-missing`, `tui-foreign-session` and `stray-session` never fire for it. It has
+has no server list and no server's agents, so `session-of-record-missing`, `tui-foreign-session`, `stray-session` and
+`agent-cannot-dispatch` never fire for it. It has
 no TUI to select a session in, so `--fix` repairs its mismatch by relaunching the process on the session of record, and
 only while the process is idle: a pane that works or waits is `not-fixable`, its line names `holler pane relaunch PANE`,
 and nothing is restarted.
@@ -621,10 +624,34 @@ and nothing is restarted.
 Code pane, and only whether the login is the subscription one is read. No Holler verb sets a login, so it names no
 command: log Claude Code in by hand, on the machine the panes run on.
 
-`--fix` does not repair any other kind: each of those names the command to run instead, and seven name none. A
+`--fix` does not repair any other kind: each of those names the command to run instead, but eight name none, and
+`agent-cannot-dispatch` names one only when the project ships exactly one orchestrator. A
 `shown-driven-mismatch` is also `not-fixable` when its server is not healthy or does not have the session of record; its
 line then carries no bracket, and the command it names is `holler pane relaunch PANE`. The bracket is `fixable` (a run
 without `--fix` would repair it), `skipped`, `fixed` or `fix failed: CODE`.
+
+**`unattached`** is raised for a pane whose tmux session exists and has no tmux client attached to it, whatever the
+pane's hold, role or harness: nothing shows the pane (a Claude Code pane's session needs a client in a Herdr pane as
+much as an OpenCode pane's does). Its limit: tmux counts every client, so a client attached in any terminal, not only in
+the Herdr pane the record names, hides the finding. Which Herdr pane shows a session is not observed, because Herdr
+reports a pane's process only as whole command lines, which Holler never reads (ADR-0021 section 12). A missing session
+is `tmux-session-missing` instead, and a count that cannot be read is `observe-failed` naming `host.attached_clients`.
+No Holler verb attaches a tmux client to a Herdr pane (`launch` and `relaunch` start the TUI inside the tmux session,
+and `launch` refuses a registered pane), so it names no command: attach a client to the session in its Herdr pane
+yourself. A detached session, a scratch one say, is reported by design.
+
+**`agent-cannot-dispatch`** is raised for an OpenCode pane when all of these hold: its record names no agent (a pane
+whose record names one, `build` included, chose it and is never reported); its server is healthy and lists the session
+of record; each of the last three user turns of the session of record ran as an agent that cannot dispatch a subagent
+(its permission rules deny the `task` permission for every subagent); and the project ships an orchestrator, an agent
+the server lists that is the project's own (not one OpenCode ships), usable as a pane's default agent, and able to
+dispatch. The command it names relaunches the pane with that agent, the key joined to `--agent` with `=` because a key
+may start with `-`. With several such agents it names none, and its message lists up to three for you to pass one. A
+pane in a profile also needs `--profile` with its profile on that relaunch: without it the relaunch changes the record
+and not the profile's spec, so the next pass reports `profile-drift` and a `profile apply` would put the old agent
+back. `--fix` never changes a pane's agent. The pass reads the session of record's whole message list and the server's
+agents for each OpenCode pane whose record names no agent; a read that fails, or a reply too large or too slow for the
+call's bound, is `observe-failed` naming `harness.agent_view`, and nothing is concluded.
 
 **Exit codes.** A pass that completes exits 0, with or without findings: findings are kinds in the report, not errors.
 A script reads `data.findings`. The verb fails only when it cannot run the pass: `usage` (2) for a bad pane or profile
@@ -1005,4 +1032,5 @@ Deferred, so not documented here as existing; none of them is available:
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);
-- recreating the Herdr workspace from the stored profiles (#666).
+- recreating the Herdr workspace from the stored profiles (#666);
+- a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet).

@@ -23,7 +23,8 @@
 //!   stored command an array, a stored environment a list of names and a stored
 //!   agent key a plain token.
 //! - [`ports`] — [`PaneStore`], [`HerdrPort`], [`HostPort`], [`HarnessPort`] (and the
-//!   [`ServeSpec`] its server runs with), [`Prober`] and the [`Ports`] bundle a verb holds.
+//!   [`ServeSpec`] its server runs with, and the [`AgentView`] it reports), [`Prober`] and the
+//!   [`Ports`] bundle a verb holds.
 //! - [`probe`] — [`ProbeResult`] and the [`run_probe`] stub.
 //! - `profile_snapshot`, `profile_diff`, `tx_apply`, `tx_launch`, `tx_switch`,
 //!   `reconcile`, `findings`, `import` — empty stubs, declared here so that no two
@@ -33,8 +34,9 @@
 //! through the epic's amend-first rule. `HerdrPort` stays provisional until the spike
 //! #636 reports; `HarnessPort` is final (the spike #635 confirmed it, and #642 built it),
 //! amended since by #645 (the prompt seam), #802 (`serve_command` and `verify_serving`,
-//! with `HostPort::run`'s directory) and #831 (a second harness, Claude Code: every call
-//! keyed by a `HarnessEndpoint`, and the methods of a single-process harness).
+//! with `HostPort::run`'s directory), #831 (a second harness, Claude Code: every call
+//! keyed by a `HarnessEndpoint`, and the methods of a single-process harness) and #647
+//! part 2 (the required reads `HarnessPort::agent_view` and `HostPort::attached_clients`).
 //!
 //! **Serde policy.** The stored records and the params structs refuse unknown fields:
 //! a record read, changed and written back by a peer that does not know a field would
@@ -70,8 +72,9 @@ pub use generation::next_generation;
 pub use grid::GridPos;
 pub use pane::{HerdrPane, Pane, PaneEvent, PaneId, PaneName};
 pub use ports::{
-    Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPort, HerdrSnapshot, HerdrSpec,
-    HostPort, Key, PaneObservation, PaneStore, Ports, Prober, ServeSpec, SystemProber, Watch,
+    AgentView, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPort, HerdrSnapshot,
+    HerdrSpec, HostPort, Key, PaneObservation, PaneStore, Ports, Prober, ServeSpec, SystemProber,
+    TurnAgent, Watch,
 };
 pub use probe::{run_probe, ProbeResult};
 pub use profile::{

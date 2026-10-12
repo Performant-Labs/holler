@@ -1,21 +1,27 @@
 //! The findings of a reconcile pass and `holler pane doctor` (#647): what a pass found, the
 //! one table of what each kind tells the operator to run, and the one sanitizer for the
-//! untrusted text a finding quotes. #665 added the `ProfileDrift` kind, last.
+//! untrusted text a finding quotes. #647 part 2 added the `Unattached` and
+//! `AgentCannotDispatch` kinds, last.
 //!
-//! - [`FindingKind`]: sixteen kinds, each with a stable kebab-case code that is also its JSON
+//! - [`FindingKind`]: eighteen kinds, each with a stable kebab-case code that is also its JSON
 //!   form ([`FindingKind::code`] is the one source of both). #832 added `unmanaged-stalled`,
-//!   #831 `pane-waiting` and `claude-login-missing`, and #665 `profile-drift`. A finding is a
-//!   report, not an error: its code is never a `RefusalCode`, and two codes
-//!   (`herdr-version-unsupported`, and #665's `profile-drift`) equal closed error codes.
+//!   #831 `pane-waiting` and `claude-login-missing`, #665 `profile-drift`, and #647 part 2
+//!   `unattached` and `agent-cannot-dispatch`. A finding is a report, not an error: its code is
+//!   never a `RefusalCode`, and two codes (`herdr-version-unsupported`, and #665's
+//!   `profile-drift`) equal closed error codes.
 //! - [`Finding`]: one finding, with what it is about (a pane, a position, a Herdr pane, a
 //!   session, harness servers), a one-line message, its remedy and what `--fix` did.
-//! - **Remedies** ([`FindingKind::remedy`]) name only the verb that owns each repair
-//!   (`pane relaunch`, `pane reset`, `pane doctor`), built from constant words and a
-//!   [`PaneName`], whose grammar has no space, shell metacharacter or leading `-`. No remedy
-//!   carries a session id, a Herdr id, a port, a profile or any adapter text, and none is a
-//!   raw OpenCode, Herdr or tmux command: only Holler reaches those (epic #633). A finding no
-//!   Holler verb repairs (a stray session, an unregistered Herdr pane, an unsupported Herdr)
-//!   has no remedy, and its message says why.
+//! - **Remedies** ([`FindingKind::remedy_for`]; [`FindingKind::remedy`] is it with no agent)
+//!   name only the verb that owns each repair (`pane relaunch`, `pane reset`, `pane doctor`),
+//!   built from constant words and a [`PaneName`], whose grammar has no space, shell
+//!   metacharacter or leading `-`. One kind (`agent-cannot-dispatch`, #647 part 2) also names
+//!   the agent to relaunch with: an [`AgentKey`] from the harness's list, which reaches a remedy
+//!   only parsed (ASCII letters, digits, `-` and `_`), joined to its flag as `--agent=KEY`
+//!   because a key may start with `-`. No remedy carries a session id, a Herdr id, a port, a
+//!   profile or any other adapter text, and none is a raw OpenCode, Herdr or tmux command: only
+//!   Holler reaches those (epic #633). A finding no Holler verb repairs (a stray session, an
+//!   unregistered Herdr pane, an unsupported Herdr, a session no client is attached to) has no
+//!   remedy, and its message says why.
 //! - **Untrusted text** (session and Herdr ids, the record's host names, adapter messages)
 //!   reaches a message only through [`quoted`] (one value) or `embedded` (an adapter's
 //!   message), so no control sequence reaches a terminal.
@@ -27,7 +33,7 @@
 use serde::{Serialize, Serializer};
 
 use crate::error::excerpt;
-use crate::{GridPos, HerdrPane, Pane, PaneError, PaneId, PaneName};
+use crate::{AgentKey, GridPos, HerdrPane, Pane, PaneError, PaneId, PaneName};
 
 /// The longest an adapter's message may be inside a finding's message, in characters.
 const EMBED_LIMIT: usize = 200;
@@ -84,6 +90,17 @@ pub enum FindingKind {
     /// `profile_diff`'s table, the comparison `profile show` makes (#665). The message names
     /// the fields and no value. Which side is right is the operator's choice, so no remedy.
     ProfileDrift,
+    /// The pane's tmux session exists and no tmux client is attached to it, so no Herdr pane
+    /// shows it (#647 part 2, ADR-0021 section 12). A client attached in any terminal counts:
+    /// which Herdr pane shows a session is not observable. No Holler verb attaches a client,
+    /// so no remedy, and the message says so. (Not the import's finding about no pane.)
+    Unattached,
+    /// An OpenCode pane whose record names no agent, whose recent turns (the last three of the
+    /// session of record) all ran as an agent that cannot dispatch a subagent, while its server
+    /// lists an agent that can, the project's orchestrator (#647 part 2, ADR-0021 section 12).
+    /// The remedy is the relaunch with that agent when the server lists exactly one; `--fix`
+    /// never changes a pane's agent.
+    AgentCannotDispatch,
 }
 
 impl FindingKind {
@@ -105,6 +122,8 @@ impl FindingKind {
         FindingKind::PaneWaiting,
         FindingKind::ClaudeLoginMissing,
         FindingKind::ProfileDrift,
+        FindingKind::Unattached,
+        FindingKind::AgentCannotDispatch,
     ];
 
     /// The kind's stable kebab-case code, which is also its JSON form. A code is stable
@@ -127,12 +146,23 @@ impl FindingKind {
             FindingKind::PaneWaiting => "pane-waiting",
             FindingKind::ClaudeLoginMissing => "claude-login-missing",
             FindingKind::ProfileDrift => "profile-drift",
+            FindingKind::Unattached => "unattached",
+            FindingKind::AgentCannotDispatch => "agent-cannot-dispatch",
         }
     }
 
     /// The command a finding of this kind tells the operator to run, for the pane `pane`
-    /// (`None` when it is about no pane) once `--fix` left it at `fix`; `None` when no Holler
-    /// verb repairs it. The one table of remedies:
+    /// (`None` when it is about no pane) once `--fix` left it at `fix`:
+    /// [`FindingKind::remedy_for`] with no agent, the form every kind but
+    /// `agent-cannot-dispatch` needs.
+    pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
+        self.remedy_for(pane, fix, None)
+    }
+
+    /// The command a finding of this kind tells the operator to run, for the pane `pane`
+    /// (`None` when it is about no pane) once `--fix` left it at `fix`, and for `agent`, the
+    /// agent it names (#647 part 2; only `agent-cannot-dispatch` reads it); `None` when no
+    /// Holler verb repairs it. The one table of remedies:
     ///
     /// - a read that failed: run the pass again, `holler pane doctor [<pane>]`;
     /// - the pane's process or its harness is gone or wrong: `holler pane relaunch <pane>`;
@@ -141,8 +171,19 @@ impl FindingKind {
     /// - a mismatch: `holler pane doctor <pane> --fix` while a fix can repair it, relaunch when
     ///   it cannot or failed, nothing once it is fixed;
     /// - a pane that waits for a person, and a login that is not the subscription's (#831):
-    ///   none, since only a person answers the one and logs in for the other.
-    pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
+    ///   none, since only a person answers the one and logs in for the other;
+    /// - a tmux session no client is attached to (#647 part 2): none, since no Holler verb
+    ///   attaches one;
+    /// - a pane whose recent turns cannot dispatch while the project ships an orchestrator (#647
+    ///   part 2): `holler pane relaunch <pane> --agent=<agent>` when the caller names the one
+    ///   orchestrator, and none without it (no agent, or several to choose from). The key is
+    ///   joined to the flag with `=`: a key may start with `-`, which would read as a flag.
+    pub fn remedy_for(
+        self,
+        pane: Option<&PaneName>,
+        fix: FixState,
+        agent: Option<&AgentKey>,
+    ) -> Option<String> {
         match self {
             FindingKind::HerdrVersionUnsupported
             | FindingKind::UnregisteredHerdrPane
@@ -150,7 +191,11 @@ impl FindingKind {
             | FindingKind::StraySession
             | FindingKind::PaneWaiting
             | FindingKind::ClaudeLoginMissing
-            | FindingKind::ProfileDrift => None,
+            | FindingKind::ProfileDrift
+            | FindingKind::Unattached => None,
+            FindingKind::AgentCannotDispatch => pane
+                .zip(agent)
+                .map(|(pane, agent)| relaunch_with_agent(pane, agent)),
             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
             FindingKind::HerdrPaneMissing
             | FindingKind::TmuxSessionMissing
@@ -250,11 +295,13 @@ pub struct Finding {
     /// record names (`unregistered-herdr-pane`).
     pub herdr_pane: Option<PaneId>,
     /// The session it is about: the stray, the missing session of record, the foreign one,
-    /// or the one a mismatched TUI shows (`None` there is its home screen).
+    /// the one a mismatched TUI shows (`None` there is its home screen), or the session of
+    /// record whose recent turns cannot dispatch.
     pub session: Option<String>,
     /// The harness servers, by port and sorted, whose state or sessions it reports: every
     /// in-scope server a stray session was listed on, and the pane's own server for a
-    /// wedged or down server, a missing session of record and a foreign session.
+    /// wedged or down server, a missing session of record, a foreign session and turns that
+    /// cannot dispatch.
     pub ports: Vec<u16>,
     /// One line for a person; untrusted values in it are quoted.
     pub message: String,
@@ -326,6 +373,18 @@ impl Finding {
             ..self
         }
     }
+
+    /// The same finding, with the remedy its kind names for `agent` (#647 part 2: the one
+    /// orchestrator of `agent-cannot-dispatch`, from the harness's list), from the one table.
+    /// Set after [`Finding::with_fix`], which computes the remedy with no agent.
+    pub(crate) fn with_agent(self, agent: &AgentKey) -> Self {
+        Self {
+            remedy: self
+                .kind
+                .remedy_for(self.pane.as_ref(), self.fix, Some(agent)),
+            ..self
+        }
+    }
 }
 
 /// The `holler pane doctor` command line for `pane` (every pane when `None`), with `--fix`
@@ -346,6 +405,12 @@ pub fn doctor_command(pane: Option<&PaneName>, fix: bool) -> String {
 /// `holler pane relaunch <pane>`.
 fn relaunch_command(pane: &PaneName) -> String {
     format!("{RELAUNCH} {pane}")
+}
+
+/// `holler pane relaunch <pane> --agent=<agent>`: the key joined to its flag, since a key may
+/// start with `-` (`AgentKey::parse` allows it), which as a separate word would read as a flag.
+fn relaunch_with_agent(pane: &PaneName, agent: &AgentKey) -> String {
+    format!("{RELAUNCH} {pane} --agent={}", agent.as_str())
 }
 
 /// `holler pane reset <pane>`.

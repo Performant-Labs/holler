@@ -39,13 +39,14 @@
 //!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
 //!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
 //!   shapes, so [`Ports`] keeps one harness;
-//! - #647 part 2's (ADR-0021 section 12): the required `HostPort::attached_clients`, the
+//! - #647 part 2's (ADR-0021 section 12): the required [`HostPort::attached_clients`], the
 //!   number of tmux clients attached to a session (`unattached`), and the required
-//!   `HarnessPort::agent_view`, what a harness server says about the agents of a session's
-//!   recent turns and the agents that can dispatch (`agent-cannot-dispatch`). Both are
-//!   read-only and required for #835's reason, so a wrapper that does not forward one does
-//!   not compile.
+//!   [`HarnessPort::agent_view`], what a harness server says about the agents of a session's
+//!   recent turns and the agents that can dispatch (`agent-cannot-dispatch`), as an
+//!   [`AgentView`]. Both are read-only and required for #835's reason, so a wrapper that does
+//!   not forward one does not compile.
 
+mod agent_view;
 mod process;
 mod router;
 
@@ -60,6 +61,7 @@ use crate::pane::{HerdrPane, ModelSpec, Pane, PaneEvent, PaneId, PaneName};
 use crate::probe::{run_probe, ProbeResult};
 use crate::profile::{ProfileScope, ProfileStore};
 
+pub use self::agent_view::{AgentView, TurnAgent};
 use self::process::process_unsupported;
 pub use self::process::{
     HarnessEndpoint, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, INBOUND_HELD,
@@ -430,6 +432,15 @@ pub trait HostPort: Send + Sync {
     /// ([`crate::pane::is_claude_code_command`]), and a Claude Code launch to refuse a session
     /// that already runs one (`process-in-use`, #831).
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError>;
+
+    /// The number of tmux clients attached to the session `name`, as tmux counts them
+    /// (`#{session_attached}`; #647 part 2, ADR-0021 section 12). A fresh session made by
+    /// [`HostPort::ensure_session`] has none; a missing session is `pane-not-found`, as `ps`
+    /// answers. A count only, never a client's name, tty or process (I7).
+    ///
+    /// Reconcile reads it once `ps` answered for a pane: no client at all is `unattached`, a
+    /// session no Herdr pane shows.
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError>;
 }
 
 /// The harness of a pane and its sessions: an OpenCode server and its TUI (the adapter is
@@ -646,6 +657,26 @@ pub trait HarnessPort: Send + Sync {
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         Err(process_unsupported("login_status"))
     }
+
+    /// What the harness at `at` says about the agents of `session`, in one call (#647 part 2,
+    /// ADR-0021 section 12): for each of its last `max_turns` user turns, oldest first, the
+    /// agent the server recorded and whether that agent can dispatch a subagent, and the agents
+    /// it lists that a pane could run as its default, that are not its own and that can dispatch
+    /// (see [`AgentView`]). Read-only.
+    ///
+    /// An implementation that cannot tell answers an empty view, never a guess: a single-process
+    /// harness answers one for a process endpoint (it has no server to list agents or turns), and
+    /// `server-unsupported` for a port, its one conversion. A session the server does not have is
+    /// `session-not-found`; a reply of the wrong shape is `unavailable`.
+    ///
+    /// Required, with no default, for #835's reason: a default would answer silently in place of
+    /// a harness a wrapper did not forward.
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError>;
 }
 
 /// `prompt-unsupported`: the default of [`HarnessPort::send_prompt`], for a harness that
