@@ -24,11 +24,7 @@ pub fn two_dir_rig(sessions: &[(&str, &[&str])]) -> (StateDir, StateDir, Hub, Bo
 /// ping interval and liveness timeout so the admin-loop liveness cases run
 /// in seconds, not minutes).
 pub fn rig_with_env(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)]) -> (StateDir, StateDir, Hub, Body, String, String) {
-    let hub_state = StateDir::new();
-    let body_state = StateDir::new();
-    let hub = Hub::start_with_env(&hub_state, hub_env);
-    let (token_id, secret) = mint_token(&hub_state, "b");
-    join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
+    let (hub_state, body_state, hub, token_id) = joined_rig(hub_env);
     let config = write_sessions_toml(&body_state, sessions);
     let body = Body::start(&body_state, &config);
     for (name, _) in sessions {
@@ -40,6 +36,46 @@ pub fn rig_with_env(sessions: &[(&str, &[&str])], hub_env: &[(&str, &str)]) -> (
     }
     let ws_url = hub.ws_url();
     (hub_state, body_state, hub, body, token_id, ws_url)
+}
+
+/// The first half of [`rig_with_env`]: a hub in one `StateDir` and a body
+/// identity joined from a separate one, with **no body process running**.
+/// Returns `(hub_state, body_state, hub, token_id)`. A test that wants a body
+/// it fully controls (#847: one that sends a single `session/presence` and
+/// then nothing, so the test is the row's only other writer) takes this and
+/// dials `raw_ws::live_socket` itself.
+pub fn joined_rig(hub_env: &[(&str, &str)]) -> (StateDir, StateDir, Hub, String) {
+    let hub_state = StateDir::new();
+    let body_state = StateDir::new();
+    let hub = Hub::start_with_env(&hub_state, hub_env);
+    let (token_id, secret) = mint_token(&hub_state, "b");
+    join(&body_state, &hub_state, &hub.ws_url(), &token_id, &secret);
+    (hub_state, body_state, hub, token_id)
+}
+
+/// The one `session/presence` frame a body (real or hand-rolled) advertises a
+/// single idle `opencode` session with. Shared by the AC 4 tests so the wire
+/// literal exists once.
+pub fn presence_frame(hostname: &str, session: &str) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "session/presence",
+        "params": {
+            "hostname": hostname,
+            "sessions": [{ "name": session, "harness": "opencode", "state": "idle", "mode": "spawn" }],
+        },
+    })
+    .to_string()
+}
+
+/// Block until the wall clock's whole seconds exceed `baseline_secs`. The
+/// hub's roster stamps `last_seen` from the same system clock
+/// (`Clock::System` is `token::now_secs`), so after this returns any hub write
+/// to a row stamped `baseline_secs` is distinguishable from it. A condition
+/// wait on an observable, not a fixed duration (#847).
+pub fn wait_past_second(baseline_secs: u64) {
+    wait_for(STARTUP_WAIT, || ((holler_proto::now_secs() as u64) > baseline_secs).then_some(()))
+        .unwrap_or_else(|| panic!("the wall clock never passed second {baseline_secs}"));
 }
 
 /// Run `holler ARGS...` against `state` and return the raw `Output`.

@@ -8,3 +8,11 @@
   - **W-3:** the presence literal is currently in one place only (`remote_admin_test.rs:175`); extract one helper into `support/remote_admin_rig.rs` (the D3 clause), reused by both tests.
   - **W-4:** `remote_admin_test.rs` is 814 lines; new helpers go in `remote_admin_rig.rs`, and T-green records the final line count.
 - **Ran (read-only):** read the brief, the cited test and rig code, `raw_ws.rs`, `circuit.rs` ping and liveness, `roster.rs` touch and clear, `admin.rs` touch grep, a presence-literal grep across `tests/`, and `git diff origin/main --stat`.
+
+## T-red (Phase 4) - 2026-10-12
+- **Decided:** RED valid. Old test fails 3/3 under `HOLLER_HEARTBEAT_INTERVAL_MS=300`; rewritten test is green 15/15 under it and red 3/3 against the `roster.touch` mutant in `admin::run` (restored, hub diff empty). Detail in `docs/handoffs/847/handoff-T-red.md`.
+  - Applied A's W-1 (boundary wait before the admin calls), W-2 (named `body_ws` kept to the end), W-3 (`presence_frame` helper in `remote_admin_rig.rs`, used by both AC 4 tests).
+  - Observable for the second boundary is the test process's own whole-second clock (`hub status` has no `now` field).
+- **Assumed:** the test process and the hub share `Clock::System` (`token::now_secs`), so crossing a second in the test process means a later hub write stamps a later second.
+- **Hedged:** the brief's claim that the new test stays green with `HOLLER_HEARTBEAT_INTERVAL_MS=300` was false as stated: the hub derives its liveness timeout from that var (3x), tearing down the silent body in 900 ms (6/12 failures). The test now sets `HOLLER_HUB_LIVENESS_TIMEOUT_MS=120000` on its own hub (existing env, no new one).
+- **Evidence:** a pre-existing flake in `remote_say_wait_and_hub_query_json_match_local_after_masking` (1 of 14 on unmodified files, passes alone): follow-up, out of scope (D5).
