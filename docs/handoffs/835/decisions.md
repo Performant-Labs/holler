@@ -427,3 +427,21 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     `holler-pane/src/import/{observe,assess,findings}.rs`, `unmanaged.rs`, `pane.rs`, `reconcile.rs:362-372`,
     `holler-cli/src/pane/import.rs`, ADR-0021 sections 13 and 14 and the closing lists, and `gh issue view 654`.
   - `evidence.md`: three facts in unchanged code (section "F, cycle 2").
+
+## T (Phase 7, GREEN), cycle 2: 2026-10-11T19:40-06:00 (MDT)
+
+- **Decided:** PASS (`docs/handoffs/835/handoff-T-green.md`, which replaces cycle 1's BLOCK at `25ff495`).
+  - CI's test step on `4604693` (the merge with `origin/main` `bda1069` plus F's text): 154 groups, 2398 passed,
+    0 failed. Both cycle-2 RED tests now pass, and nothing else changed.
+  - Clippy, `lint.sh`, `changelog-check.sh`, `docs_cli_test`, `wire_selftest`, `cargo machete`, rustdoc with
+    `-D warnings` and `git diff --check` are clean. F's reported results match.
+  - Cycle 1's blocking issues 1 (the guide) and 2 (#840's sentences, the #832 reuse claims) are resolved.
+  - No test was repaired. F listed none.
+- **Assumed:** `origin/main` is still `bda1069` at 19:40 MDT (`git fetch`), so the branch tree is the PR's merge ref.
+- **Hedged:** the guide is 817 lines, past #652's soft 800, and no check enforces it. Left to S.
+- **Evidence:**
+  - a temporary rename of `harness-unreadable` and `--adopt-claude-code` in the guide made both doc tests fail, naming
+    exactly that text; the file was restored and checked with `sha256sum -c`;
+  - the guide's claims were read against `import/observe.rs:177-187` (the only `ObserveFailed` producers) and
+    `pane/import.rs` `Input::read` (the four `usage` causes);
+  - `grep` finds no "#831 and #832" or "#831 and #835" left in `crates` or ADR-0021.
