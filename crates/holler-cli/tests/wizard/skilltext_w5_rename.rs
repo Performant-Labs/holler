@@ -34,21 +34,34 @@ fn directory_and_frontmatter_are_renamed() {
     assert_eq!(skill.lines().nth(1), Some("name: herdr-setup"));
 }
 
-/// Tracked files that may still name the old install path, and only on a line that is the
-/// rename note (it contains `~/.claude/skills/<old name>`).
-fn scan_hits(needle: &str) -> Vec<String> {
-    let listing = Command::new("git")
-        .args(["ls-files", "-z"])
-        .current_dir(root())
-        .output()
-        .unwrap();
+/// Every tracked path, relative to `root`, as `git ls-files -z` lists it.
+fn tracked_files(root: &Path) -> Vec<String> {
+    let listing = Command::new("git").args(["ls-files", "-z"]).current_dir(root).output().unwrap();
     assert!(listing.status.success());
+    String::from_utf8(listing.stdout)
+        .unwrap()
+        .split('\0')
+        .filter(|rel| !rel.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// #848: pipeline handoffs (briefs, journals) under `docs/handoffs/` quote history verbatim and
+/// are removed before a PR is pushed. Mirrors `docs_cli_test::is_cli_doc` (#462): `starts_with`
+/// compares whole components, so `docs/research/handoffs-notes.md` is still scanned.
+fn is_pipeline_scratch(rel: &str) -> bool {
+    Path::new(rel).starts_with("docs/handoffs")
+}
+
+/// Lines of the files `rels` (relative to `root`) that contain `needle`, as `path:line: text`.
+/// Skips this file itself and pipeline handoffs.
+fn scan_files(root: &Path, rels: &[String], needle: &str) -> Vec<String> {
     let mut hits = Vec::new();
-    for rel in String::from_utf8(listing.stdout).unwrap().split('\0') {
-        if rel.is_empty() || rel.ends_with("skilltext_w5_rename.rs") {
+    for rel in rels {
+        if rel.ends_with("skilltext_w5_rename.rs") || is_pipeline_scratch(rel) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(root().join(rel)) else {
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
             continue; // deleted in the working tree, or not UTF-8
         };
         for (i, line) in text.lines().enumerate() {
@@ -58,6 +71,12 @@ fn scan_hits(needle: &str) -> Vec<String> {
         }
     }
     hits
+}
+
+/// Tracked files that may still name the old install path, and only on a line that is the
+/// rename note (it contains `~/.claude/skills/<old name>`).
+fn scan_hits(needle: &str) -> Vec<String> {
+    scan_files(&root(), &tracked_files(&root()), needle)
 }
 
 #[test]
@@ -76,6 +95,29 @@ fn no_old_command_or_directory_outside_the_rename_note() {
             .collect();
         assert!(bad.is_empty(), "old name `{needle}` remains:\n{}", bad.join("\n"));
     }
+}
+
+/// #848: pipeline handoffs (briefs, journals) quote history verbatim, so the scan skips
+/// `docs/handoffs/` at any depth (as `docs_cli_test` does, #462) and nothing else.
+#[test]
+fn rename_scan_skips_pipeline_handoffs_only() {
+    let old = format!("{}-{}", "setup", "wizard");
+    let needle = format!("agent-skills/{old}");
+    let tmp = tempfile::tempdir().unwrap();
+    let files = [
+        "docs/handoffs/848-brief.md",
+        "docs/handoffs/848/handoff-A.md",
+        "docs/research/handoffs-notes.md",
+    ];
+    for rel in files {
+        let path = tmp.path().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("quotes {needle}/SKILL.md\n")).unwrap();
+    }
+    let rels: Vec<String> = files.iter().map(|f| (*f).to_owned()).collect();
+    let hits = scan_files(tmp.path(), &rels, &needle);
+    assert_eq!(hits.len(), 1, "only the non-handoffs file is a hit, got: {hits:?}");
+    assert!(hits[0].starts_with("docs/research/handoffs-notes.md:1:"), "got: {hits:?}");
 }
 
 #[test]
