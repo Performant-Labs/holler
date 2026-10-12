@@ -16,3 +16,9 @@
 - **Assumed:** the test process and the hub share `Clock::System` (`token::now_secs`), so crossing a second in the test process means a later hub write stamps a later second.
 - **Hedged:** the brief's claim that the new test stays green with `HOLLER_HEARTBEAT_INTERVAL_MS=300` was false as stated: the hub derives its liveness timeout from that var (3x), tearing down the silent body in 900 ms (6/12 failures). The test now sets `HOLLER_HUB_LIVENESS_TIMEOUT_MS=120000` on its own hub (existing env, no new one).
 - **Evidence:** a pre-existing flake in `remote_say_wait_and_hub_query_json_match_local_after_masking` (1 of 14 on unmodified files, passes alone): follow-up, out of scope (D5).
+
+## F (Phase 5/6) - 2026-10-12
+- **Decided:** no production change. The story is test-only (brief "Production: none", AC 5), and T-red's rewritten test is already GREEN on the unmodified hub. Detail in `docs/handoffs/847/handoff-F.md`.
+- **Assumed:** a test-only flake fix needs no `CHANGELOG.md` entry, because AC 5 limits the diff to the test files and `docs/handoffs/`. Flagged for O/S.
+- **Hedged:** none.
+- **Evidence:** target test ok (1.32 s) and ok with `HOLLER_HEARTBEAT_INTERVAL_MS=300` (0.90 s); `remote_admin_test` 21/21; clippy on `remote_admin_test` + `remote_admin_liveness_test` with `-D warnings` clean; `git diff origin/main --stat -- crates/` shows only the two test files.
