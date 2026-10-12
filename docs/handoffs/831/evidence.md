@@ -124,3 +124,20 @@ and not the repo. One entry per fact; each excerpt is copied, not paraphrased. T
   >         return Some(PathBuf::from(dir));
   >     }
   > ```
+
+## T, phase 7
+
+- **Fact:** the exit codes the `pane_claude` tests assert (3 for each plan refusal such as `port-policy-unsupported`,
+  `process-in-use`, `claude-login-env-refused`, `harness-change-refused`; 2 for a bad `--harness`) come from the error
+  class alone, in unchanged code: usage 2, refusal 3, failure 1.
+  **Source:** `crates/holler-pane/src/error.rs:239-245`
+  **Verbatim excerpt:**
+  > ```rust
+  >     pub const fn exit_code(self) -> i32 {
+  >         match self {
+  >             ErrorClass::Usage => 2,
+  >             ErrorClass::Refusal => 3,
+  >             ErrorClass::Failure => 1,
+  >         }
+  >     }
+  > ```

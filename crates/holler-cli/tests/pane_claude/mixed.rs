@@ -239,6 +239,7 @@ fn the_acceptance_scenario_on_the_fakes() {
 #[ignore = "blocked by #839 (the hub joins a body's harness session to Pane.session_of_record) and #850 (a body driver for a Claude Code pane): holler say --pane reaches no pane of either harness until both land"]
 fn say_delivers_a_message_to_each_pane_of_the_scenario() {
     let rig = applied();
+    let mut addresses = Vec::new();
     for pane in [OPENCODE, CLAUDE] {
         let address = rig
             .with_ports(|ports| resolve_pane_target(ports, pane, None))
@@ -247,10 +248,11 @@ fn say_delivers_a_message_to_each_pane_of_the_scenario() {
             Some(address.as_str()),
             rig.record(pane).session_of_record.as_deref()
         );
-        panic!(
-            "`holler say --pane {pane}` would send to the hub address {address:?}, which no body \
-             advertises until #839 (and, for the Claude pane, #850): replace this line with the \
-             real delivery through the hub, then assert the message reached the pane"
-        );
+        addresses.push((pane, address));
     }
+    panic!(
+        "`holler say --pane` would send to the hub addresses {addresses:?}, which no body \
+         advertises until #839 (and, for the Claude pane, #850): replace this line with the \
+         real delivery through the hub, then assert the message reached each pane"
+    );
 }

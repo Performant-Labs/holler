@@ -153,3 +153,32 @@ brief, the research note's "Decisions").
     - #835's branch diff.
   - `git fetch` at the end: `origin/main` is `d6ae539`, and #835 is not merged.
   - Evidence of unchanged code: `docs/handoffs/831/evidence.md`.
+
+## T, verify GREEN: 2026-10-11T21:10-06:00 (MDT)
+
+- **Decided:** GREEN, with no blocking issue (`docs/handoffs/831/handoff-T-green.md`). PASS.
+  - I repaired the two tests F flagged, both test-only:
+    - `findings_test.rs`: `CODES` gains `pane-waiting` and `claude-login-missing`;
+    - `pane_claude/mixed.rs`: the ignored `say` test's `panic!` moved after the loop (`clippy::never_loop`).
+  - No production code was changed.
+- **Assumed:**
+  - `findings_test`'s list is a stable-codes pin from `main` (#832) that the contract's append (item 13) must extend.
+    It is not a regression in F's code.
+  - Whether to run the opt-in real Claude Code test is the operator's or S's decision. It needs the real login and a
+    model turn.
+- **Hedged:**
+  - The mutation spot-check covers six pins (W1, W2, W4, W11, the frame, and the W9 default), not every test.
+  - My first W1 and W2 mutants did not compile. I replaced them with compiling mutants and re-ran both, so no "kill"
+    rests on a compile error.
+- **Evidence:**
+  - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2488 passed,
+    0 failed, 34 ignored.
+  - Exit 0 for each of:
+    - `cargo clippy --workspace --all-targets -- -D warnings`;
+    - `scripts/lint.sh`, `scripts/changelog-check.sh` and `cargo machete`;
+    - `docs_cli_test`, `wire_selftest` and `cargo test -p holler-proto`;
+    - `scripts/test-hooks.sh` and `scripts/tests/pane-restart-test.sh`.
+  - The six mutants were each killed by their pinning test (the table in `handoff-T-green.md`).
+  - Assertion counts are equal between `d6ae539` and HEAD in eight migrated test files.
+  - `FakeHarnesses` wraps `holler_pane::HarnessRouter` (`harnesses.rs:22`).
+  - `evidence.md` gained one T entry (`error.rs:239-245`).

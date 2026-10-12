@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #647
-//! The finding vocabulary of reconcile and `holler pane doctor` (#647 AC 25): twelve kinds
+//! The finding vocabulary of reconcile and `holler pane doctor` (#647 AC 25): fifteen kinds
 //! with stable kebab-case codes, each equal to the kind's JSON form. A code is stable once
-//! merged (ADR-0021 section 9), so the list is pinned in order; #665 appends
+//! merged (ADR-0021 section 9), so the list is pinned in order; #832 appended
+//! `unmanaged-stalled`, #831 `pane-waiting` and `claude-login-missing`, and #665 appends
 //! `profile-drift` and edits this list.
 
 use std::collections::BTreeSet;
@@ -9,7 +10,7 @@ use std::collections::BTreeSet;
 use holler_pane::error::is_valid_code;
 use holler_pane::findings::FindingKind;
 
-const CODES: [&str; 13] = [
+const CODES: [&str; 15] = [
     "herdr-version-unsupported",
     "observe-failed",
     "unregistered-herdr-pane",
@@ -23,6 +24,8 @@ const CODES: [&str; 13] = [
     "shown-driven-mismatch",
     "stray-session",
     "unmanaged-stalled",
+    "pane-waiting",
+    "claude-login-missing",
 ];
 
 #[test]
