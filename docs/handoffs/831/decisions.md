@@ -58,3 +58,35 @@ brief, the research note's "Decisions").
     - `#[ignore` conventions.
   - Checked: `holler-cli/Cargo.toml` (the test kit is under `[dev-dependencies]`), `scripts/lint.sh` (warns at 600 and fails at 900, test files included), and `.aftersight/pipeline.config.json` (paths).
   - `git fetch`: `origin/main` is `bda1069`, and #840 and #849 merged after the base. `wc -l` of the hot files on the branch and on `origin/main`.
+
+## T, author RED: 2026-10-11T19:10-06:00 (MDT)
+
+- **Decided:** RED is valid (`docs/handoffs/831/handoff-T-red.md`). It is compile-level for the contract, as #802's round 1 was, plus one assertion-level RED: the CLI surface fixture's two `--harness` lines.
+  - **The suite:** 96 new tests in 11 new test files, 2 of them ignored (the opt-in real-binary test and the `say` step). Four existing test files were also changed: `rework_test.rs`, `pane_verbs/main.rs`, `pane_integration/bind.rs` and the CLI surface fixture.
+  - **New targets:** `pane_claude` is a new holler-cli `[[test]]`, so `pane_verbs` and `profile_verbs` compile again once the endpoint step lands alone.
+  - **What it pins:**
+    - A's W1, W2, W3, W4, W11 and W12 as asked, and W5, W9, W10 and W13 as A suggested.
+    - The operator's abort decision: interrupt is a relaunch on the session of record, `abort` is `abort-unsupported`, and nothing is typed.
+    - The acceptance scenario on the fakes, with its `say` step `#[ignore]` naming #839 and #850.
+  - **The contract's names** are fixed in handoff-T-red, as #808's T did. Among them: `HarnessEndpoint`, `SessionChoice::{Fresh, Keep, Resume}` (W1's choice), `LoginStatus`, `PROCESS_UNSUPPORTED`, `Shape` and `AbortStyle`, `HarnessInfo::endpoint -> Result`, `ServeSpec::{with_model, with_cwd}`, `FakeClaude`, `FakeHarnesses`, `conformance::claude` (12 cases, one mutant each), `ClaudeHarness::with_seams`, the three raw-I/O seams, `interrupt_pane` and `PaneInterrupt`, `answer_pane_target`, and `SpecValues.harness`.
+- **Assumed:**
+  - The mechanical endpoint migration of the existing tests is F's endpoint step: about 280 call sites, plus the `HarnessInfo { port }` literals. A's note 3 and the brief say "the whole existing suite stays green with no assertion edited". T migrated only the three files it edited for other reasons: `pane_verbs/main.rs`, `pane_integration/bind.rs` and `rework_test.rs`.
+  - The `claude agents --json` fixture shape (a JSON array of the spike's entries) and the hook's `$PPID` or stdin `session_id` are as the spike describes. The opt-in real test is the guard.
+  - #835's `HostPort::foreground_commands` and `FakeHost`'s basename naming land before F, or F builds them to #835's committed API, per the brief.
+- **Hedged:**
+  - **The crate skeleton.** T wrote `crates/holler-adapter-claude/Cargo.toml`, with test dev-dependencies only, and an empty `src/lib.rs`. Without them, the workspace's `crates/*` glob fails every build. They are the bare minimum, and F owns both.
+  - **Not authored:**
+    - Item 17 (adoption) needs #835 on `main`. T authors it at a re-entry when F reaches it.
+    - `harness-dialog-open` has no fake state in item 15. It is left as an advisory.
+    - The adapter's `inbound-held` window is pinned on the fake only.
+    - The roster and the watchdog: neither reads the registry on `main`. S judges that line.
+  - `reset_first_reaches_the_new_process` depends on #828 not having moved `--first` yet. If #828 lands first, the test goes back to T.
+  - No trial implementation proves assertion-level RED beyond the fixture. T-green spot-checks that the key pins fail with their behaviour removed.
+- **Evidence:**
+  - Read: the brief; ADR-0021 section 15; handoff-A; the spike note (sections 1 to 6, the recommended design and the test kit); #835's diff on its branch (`pane.rs`, `ports.rs`, `host.rs`).
+  - Code read: `ports.rs`, `pane.rs`, `tx_launch.rs` (head), `tx_switch.rs` (checks), `reconcile.rs` and `findings.rs`; the test kit's `harness.rs`, `conformance/{mod,harness}.rs` and `fixture.rs`; `pane/{args,launch,list,doctor,close,park}.rs`; `say_cmd.rs` and `interrupt_cmd.rs`; the rigs `launch/rig.rs`, `doctor/rig.rs`, `apply/rig.rs` and `list.rs`; `pane_integration/bind.rs`; `verb_harness`; `rework_test.rs`.
+  - Ran:
+    - `cargo test -p holler-cli --test cli_surface_test`: 1 failed, the 2 lines.
+    - `--no-run` of every new or changed target: only contract items unresolved.
+    - `scripts/lint.sh`: exit 0.
+    - `rustfmt --check` on the new files.

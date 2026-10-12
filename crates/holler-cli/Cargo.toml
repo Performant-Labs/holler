@@ -491,6 +491,14 @@ path = "tests/pane_verbs/main.rs"
 name = "profile_verbs"
 path = "tests/profile_verbs/main.rs"
 
+# #831: a Claude Code pane under the pane and profile verbs, over the test kit's
+# fakes with `FakeHarnesses` as the harness port. Its own target, so pane_verbs
+# and profile_verbs build without the Claude harness while the endpoint change
+# lands first.
+[[test]]
+name = "pane_claude"
+path = "tests/pane_claude/main.rs"
+
 # Process-level tests of the whole pane/profile surface: the real `holler`
 # binary, every stub verb, `--format`/`--json`, usage errors, which flag parses
 # where, the legacy verbs' `--pane`/`--profile` refusal, and the ADR 0003 and

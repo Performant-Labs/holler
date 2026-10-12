@@ -1,0 +1,31 @@
+[package]
+name = "holler-adapter-claude"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Claude Code adapter: implements holler_pane::HarnessPort for an interactive Claude Code process in a pane's tmux session"
+
+[lib]
+name = "holler_adapter_claude"
+path = "src/lib.rs"
+
+# Declare only what is consumed (issue #155 §7 — `cargo machete` fails CI
+# otherwise). #831 phase T (RED) wrote only this skeleton so the workspace loads:
+# phase F declares the crate's own [dependencies] (holler-pane and what the
+# adapter's seams need) with the code that consumes them.
+[dependencies]
+
+[dev-dependencies]
+# The port, the endpoint and the session choice the tests call (`HarnessPort`,
+# `HarnessEndpoint`, `SessionChoice`, `LoginStatus`).
+holler-pane = { path = "../holler-pane" }
+# The Claude Code conformance suite the opt-in real test runs (`real_claude_test.rs`).
+holler-pane-testkit = { path = "../holler-pane-testkit" }
+# The `agents --json` and `auth status` documents the hermetic tests feed the seams.
+serde_json = { workspace = true }
+# Scratch configuration, socket and tmux directories (hermetic and real tests).
+tempfile = { workspace = true }
+
+# Workspace lints (issue #149).
+[lints]
+workspace = true
