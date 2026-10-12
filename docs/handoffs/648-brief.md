@@ -52,13 +52,17 @@ Extend `holler roster` with the pane's place in the registry, so a mismatch betw
    - *Clarified at the brief gate (round 3):* in that last test, `harness`, `herdr` and `host` are the only ports a call to which fails the test. They are the test kit's `FakeHarness`, `FakeHerdr` and `FakeHost` (scope item 7 allows only #638's fakes), and after the run the test asserts that each one's call log, which records every call made through the port, failed ones included, is empty (`faults().calls()`, E15). Every other port is a working test-kit fake: `pane_store` is a `FakePaneStore` seeded with the fixture's records and `scope` a `FakeProfileScope` over that store and a `FakeProfileStore`, and the same test asserts that the new columns show those records' values, so a roster that skips the store fails it too.
    - *Clarified at the brief gate (round 3), pinning the decision that DRIVEN is `last_observed.driven`:* the fixture has a pane whose `session_of_record` and `last_observed.driven` are both set and differ, and a pane whose `session_of_record` and `last_observed.shown` are set and differ while its `last_observed.driven` is `None`. The first pane's DRIVEN cell is its `last_observed.driven`, never its `session_of_record`. The second pane's DRIVEN cell is `-`, as `pane list` prints a `None` (E17), and the summary line does not name it: the pair rule decides a mismatch, not `shown_differs` (E11).
    - *Clarified at the brief gate (round 3), the tests of the decision "What the roster shows before #649 wires the real store":* two tests run the hub rows of acceptance 1's fixture against a `FakePaneStore` whose `list` fails, set through its fault switch (`Fault::Fail`, or `fail_next` with `PaneStoreOp::List`; E15). They are separate from acceptance 1's golden test, whose store holds the fixture's records and answers. In text mode: (i) when `list` answers `not-implemented`, stdout is the fixture's hub rows with `-` in each of the six new columns and no summary line (a golden file), stderr has no `note:` line (the decision gives the note to a different store error), and the exit code is 0; (ii) when `list` answers `unavailable`, stdout is the same, the exit code is 0, and stderr has exactly one line, `note: pane registry unavailable (unavailable)`, the decision's `note: pane registry unavailable (<code>)` with `<code>` the error's stable code (`PaneCode::Unavailable => "unavailable"`, `crates/holler-pane/src/error.rs:120`). Under `--json` and `--format=json` both tests also exit 0, since neither store error is a roster failure.
+   - *Clarified at the brief gate (round 6), how the test changes a record between the two roster calls:* through the test kit's own `FakePaneStore`, as scope item 7 requires. The test seeds one store with the fixture's records (`FakePaneStore::seeded`), runs the roster, rewrites one record's `last_observed` with `FakePaneStore::concurrent_put`, and runs the roster again over the same store. `concurrent_put` is another writer's put: it stores the record unconditionally, at the stored generation + 1, and bypasses the fault switch and the call log. It takes `&self`, so the test can call it while the roster's `Ports` borrows the store. The fake's `list` reads the records the store holds when it is called, so the second call sees the rewrite. E20 quotes the three (`crates/holler-pane-testkit/src/pane_store.rs:90-99`, `:113-118`, `:182-185`) and a verb test that already sets a record's `last_observed.driven` this way before it runs the verb (`crates/holler-cli/tests/pane_verbs/relaunch.rs:437-450`).
+   - *Clarified at the brief gate (round 6), what the three call logs record (the round 3 note above is unchanged):* `FakeHarness`, `FakeHerdr` and `FakeHost` each call their fault switch's `enter` first in every port method they implement, and `enter` records the call before it answers any fault, so `faults().calls()` lists every call of those methods, failed ones included. They implement all seven methods of `HerdrPort`, all four of `HostPort` and eight of the ten of `HarnessPort`. The other two, `send_prompt` and `session_activity`, have default bodies in the trait, which `FakeHarness` keeps (no file of the test kit defines either): `send_prompt`'s answers the refusal `prompt-unsupported`, `session_activity`'s answers `Ok(Activity::Idle)`, and neither reaches a fault switch. So the three empty logs show that the roster called none of the other nineteen methods, and show nothing about those two. How the test also shows that the roster calls neither is not decided here: a `HarnessPort` the test writes itself would not be one of #638's fakes (scope item 7). E15 (round 6) quotes the ops, the accessors, `enter` and the two defaults.
 8. **Pane registry unavailable.** With a `PaneStore` whose `list` answers `not-implemented` (the real binary until #649), the roster prints the hub's rows exactly as today with `-` in every new column, no summary line, nothing on stderr, exit 0, in text and in `--json`; with a store whose `list` answers `unavailable` it prints the same stdout and exactly one stderr line `note: pane registry unavailable (unavailable)`, exit 0. (`(code)` is the `PaneError`'s stable code string; a `timeout` gives `(timeout)`.)
    - *Clarified at the brief gate (round 5), every other store error (this criterion and the decision "What the roster shows before #649 wires the real store" are unchanged):* `PaneStore::list` has no closed set of errors. Its doc is "Every pane.", and the trait's says only that every method returns within I5's bound or with `PaneError::Timeout`, and that a stale write is `generation-conflict`, which `list`, a read, does not make (E19). The decision sorts a failed `list` into two kinds: `not-implemented`, and "a second, different store error", which it illustrates with `timeout` and `unavailable`. Read as written, the second kind is every store error other than `not-implemented`, and the decision "Exit codes" agrees: it gives the roster no exit-1 path of its own, and a store error that ended the roster would be one, since `timeout`, `unavailable` and `store-corrupt` are each `ErrorClass::Failure`, exit 1 (`class_of`, E6). So every code `list` answers other than `not-implemented` (`timeout`, `unavailable`, `store-corrupt` or any other) gives what this criterion gives for `unavailable`, with its own code in the note: the hub's rows with `-` in each of the six new columns and `null` in each new JSON key (acceptance 10), no summary line and `data.mismatches` `[]` (no row is joined to a pane), exactly one stderr line `note: pane registry unavailable (<code>)`, `<code>` being that error's stable code (E19), and exit 0. One more test pins it, besides the decision's two (acceptance 7, round 3): test (ii) run again with `list` answering `timeout` and then `store-corrupt`, set through the same fault switch (E15), whose stderr lines are `note: pane registry unavailable (timeout)` and `note: pane registry unavailable (store-corrupt)`; each exits 0 in text mode, and under `--json` and `--format=json` as well.
 9. **One mismatch, and the summary line is unconditional `pane(s)`.** A fixture with exactly one mismatched pane prints `1 pane(s) show a different session than the hub drives: <name>` as its first line (golden); the line never uses another plural form.
 10. **Join and `--profile` over hub rows.** A hub row is joined to a pane record by its label: the part of `Row.name` before the first `/` equals the pane's name; every row of that label carries the pane's columns, and the pane is named once in the summary. A row with no matching pane keeps `-` in the new columns (text) and `null` in the new JSON keys. With `--profile P`, only rows joined to a pane of P are listed; rows with no pane record are dropped (a test with both).
    - *Clarified at the brief gate (round 5), the join key (this criterion and the decision "Where every new column comes from" are both unchanged; this states how they read together):* the join compares two names and nothing else: a pane's name, and the part of `Row.name` before its first `/`. That part is the label of a row named `<label>/<session>` (the label grammar has no `/`, E18) and the whole name of a row with no label (`qualified_name`, E18). This criterion, added with the round 4 decisions, states the join key, so the agent's name that the decision matches with the pane's name is that part of the row's name, not the whole `Row.name`. A labelled row is therefore joined to the pane named like its label, never to a pane named like the session after its `/`; a row with no label is joined to the pane named like its whole name; and a pane's `session_of_record` plays no part in the join. The round 4 note under scope item 1 says that a row's whole `name` equals a pane's name only for a row with no label: that is a fact about the whole name, not the join, and both stand. For example, with the hub rows `alpha`, `hj-c1r2/build` and `hj-c1r2/review` and one pane record, `hj-c1r2`: the rows `hj-c1r2/build` and `hj-c1r2/review` both carry that pane's six cells, `alpha` carries `-` in each (and `null` in each new JSON key), and when the pane's SHOWN and DRIVEN are both known and differ, the text output's first line is `1 pane(s) show a different session than the hub drives: hj-c1r2` and `data.mismatches` is `["hj-c1r2"]`. The pane is counted and named once, however many rows carry it.
+   - *Added at the brief gate (round 6), a test of the join for a row with no label (this criterion and the decision "Where every new column comes from" are unchanged):* the example above joins two labelled rows to a pane and leaves the one row with no label, `alpha`, with none, so no test yet fails a join that never joins a row with no label. The test of this criterion therefore also has a fixture with a hub row with no label, `hj-c3r1`, and a pane record of the same name, `hj-c3r1`: that row carries the pane's six cells in text and its values in the six new JSON keys (acceptance 3). For a name with no `/`, the part before its first `/` is the whole name, so this is the case the round 5 note above states as "a row with no label is joined to the pane named like its whole name".
 11. **Exit codes, one test per class and format.** 0 for a success fixture; 1 for an unreachable hub or a control error, exactly as today (text: the same stderr line as today; `--format=json`: the failure envelope); 2 for a usage error such as `--format=xml` (clap's own text and exit 2 in both formats: usage errors of `roster` are not enveloped, unchanged); 3 for an unknown `--profile` (text: the one-line `error:` form on stderr; `--format=json`: the failure envelope with code `profile-not-found`).
    - *Clarified at the brief gate (round 5), a failed hub call beside the pane store (this criterion is unchanged):* when the hub call fails (no live hub, or another control error), the result is this criterion's exit 1 "exactly as today", whatever the pane store answers: in text, today's one stderr line and nothing else, so no `note:` line of acceptance 8 is added; under `--format=json`, the failure envelope. No store error can change that exit code, since none is a roster failure (acceptance 8, round 5). The order in which the roster reads the hub and the pane store is the implementation's, provided this holds.
+   - *Added at the brief gate (round 6), the test of the note above (the order stays the implementation's):* with no live hub, the roster runs twice in text and twice under `--format=json`: once over a `FakePaneStore` seeded with acceptance 1's records, and once over one whose `list` fails with `unavailable`, the store error that adds acceptance 8's `note:` line. All four runs exit 1, and in each format the two runs print the same stdout and the same stderr: in text, an empty stdout and today's one stderr line, with no `note:` line; under `--format=json`, the failure envelope on stdout. Whichever the roster reads first, a result that depends on the store fails this test.
 
 ## Blast radius
 
@@ -87,9 +91,9 @@ The reviewers cannot see the repo. The brief quotes, with file and line: #670's 
 - **The `--profile` refusal output** goes through the same shared helper every refusing verb uses (`output.rs`): text mode prints the one-line `error:` form on stderr, `--format=json` prints the failure envelope; nothing else is printed.
 - **`roster_cmd::run`'s new signature** is chosen by the story and stated in the brief: it receives the resolved format choice (with #670's `json_explicit` bit) and a `Ports`; `main.rs`'s `run_roster` builds the `Ports` the way `run_with_stdio` does for the pane verbs.
 
-## Evidence (brief gate, rounds 1 to 5)
+## Evidence (brief gate, rounds 1 to 6)
 
-Added at the brief gate, with every line above whose italic label says "at the brief gate", to answer the outside review; the rest of this brief is the issue's text. Round 2 added E12, E13 and the lines labelled "round 2"; round 3 added E14 to E17 and the lines labelled "round 3"; round 4 added E18 and the lines labelled "round 4"; round 5 added E19 and the lines labelled "round 5". Every excerpt is verbatim from this worktree at its base, `92fbc6e` (`origin/main`); once an item names a file, a bare `:N` is a line of that file. (The worktree's base is now `3c139dd`, which differs from `92fbc6e` only in files no excerpt comes from; rounds 3 to 5 read their excerpts there.) The "E-list in the evidence" that the first decision above cites is this list: `pane list` reads the registry through `ports.pane_store.list()` in E8 (`rows_in_scope`) and turns a record into its cells in E3 (`PaneRow::from`) and E17. The six quotes the section above asks for are E4 (#670's roster helper and its refusal), E5 (the format resolver's "explicit json" bit), E8 (`ProfileScope`), E7 (`check_envelope`), E1 (the `render_table` header) and E2 (the hub's roster row type).
+Added at the brief gate, with every line above whose italic label says "at the brief gate", to answer the outside review; the rest of this brief is the issue's text. Round 2 added E12, E13 and the lines labelled "round 2"; round 3 added E14 to E17 and the lines labelled "round 3"; round 4 added E18 and the lines labelled "round 4"; round 5 added E19 and the lines labelled "round 5"; round 6 added E20 and the lines labelled "round 6". Every excerpt is verbatim from this worktree at its base, `92fbc6e` (`origin/main`); once an item names a file, a bare `:N` is a line of that file. (The worktree's base is now `3c139dd`, which differs from `92fbc6e` only in files no excerpt comes from; rounds 3 to 6 read their excerpts there.) The "E-list in the evidence" that the first decision above cites is this list: `pane list` reads the registry through `ports.pane_store.list()` in E8 (`rows_in_scope`) and turns a record into its cells in E3 (`PaneRow::from`) and E17. The six quotes the section above asks for are E4 (#670's roster helper and its refusal), E5 (the format resolver's "explicit json" bit), E8 (`ProfileScope`), E7 (`check_envelope`), E1 (the `render_table` header) and E2 (the hub's roster row type).
 
 - **E1, the roster today** (`crates/holler-cli/src/roster_cmd.rs`). `run` reads the hub's roster once per call and sets the exit code (`:39-59`):
 
@@ -543,6 +547,19 @@ Added at the brief gate, with every line above whose italic label says "at the b
       // its legacy `--json` shape and prints the envelope only for the former).
       #[arg(long, global = true, value_enum)]
       pub format: Option<Format>,
+  ```
+
+  *Added at the brief gate (round 6), the flag's values:* the flag's type, `Format` (`crates/holler-cli/src/output.rs:40-47`), has two variants and derives clap's `ValueEnum`, so `text` and `json` are the only values `--format` takes. `--format=xml` is therefore refused by clap's parse itself (`Cli::try_parse()` in `parse_or_exit`, E14). `format_or_exit` (E6), which takes the parsed `Cli`, never runs, and under `roster` the failed parse ends in `error.exit()`: clap's own message on stderr, with exit 2 (E14).
+
+  ```rust
+  /// The output format: the global `--format`, and what `--json` means.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+  pub enum Format {
+      /// Human-readable text (the default).
+      Text,
+      /// One JSON envelope per result.
+      Json,
+  }
   ```
 
   The resolver and its "explicit json" bit (`crates/holler-cli/src/output.rs:49-82`):
@@ -1245,6 +1262,101 @@ Added at the brief gate, with every line above whose italic label says "at the b
   }
   ```
 
+  *Added at the brief gate (round 6), the rest of what `emit` and `emit_error` run (`crates/holler-cli/src/output.rs`):* `Sink` (`:184-189`); the two functions `emit` calls, `emit_text` and `emit_json`; and what those call: `write_envelope`, `write_line` and `settle` (`:266-334`, whole), `exit_code` (`:336-340`, in E6) and `one_line` (`:342-350`). Each takes only a `Sink` or one of its writers, the result (any `T: Serialize` in `emit` and `emit_json`, or an `ErrorBody`), the text closure, an exit code or a string. None takes a `VerbCtx` (E13) or a `Ports`, and none reads which verb is running: the exit code comes from the error's code alone, through `holler_pane::error::class_of` (E6). The doc of `Envelope` (`:150`, in E6) names the `pane` and `profile` verbs, but the type is generic over its data.
+
+  ```rust
+  /// The two writers a verb prints to: the real `main` builds it over stdout and stderr, a test
+  /// over buffers.
+  pub struct Sink<'a> {
+      pub out: &'a mut dyn Write,
+      pub err: &'a mut dyn Write,
+  }
+  ```
+
+  ```rust
+  fn emit_text<T>(
+      sink: &mut Sink<'_>,
+      result: Result<T, ErrorBody>,
+      text: impl FnOnce(&T) -> String,
+  ) -> i32 {
+      match result {
+          Ok(data) => {
+              let rendered = text(&data);
+              let written = if rendered.is_empty() {
+                  Ok(())
+              } else {
+                  write_line(sink.out, &rendered)
+              };
+              settle(written, 0)
+          }
+          Err(error) => {
+              let written = write_line(sink.err, &format!("error: {}", error.message));
+              settle(written, exit_code(&error))
+          }
+      }
+  }
+
+  fn emit_json<T: Serialize>(sink: &mut Sink<'_>, result: Result<T, ErrorBody>) -> i32 {
+      match result {
+          Ok(data) => settle(write_envelope(sink, &Envelope::success(data)), 0),
+          Err(error) => {
+              let code = exit_code(&error);
+              let error = ErrorBody {
+                  message: one_line(&error.message),
+                  ..error
+              };
+              settle(write_envelope(sink, &Envelope::<()>::failure(error)), code)
+          }
+      }
+  }
+
+  /// Write one envelope as one compact line. Data that cannot be encoded is reported on `err` and
+  /// fails the write, so no half-written envelope reaches `out`.
+  fn write_envelope<T: Serialize>(sink: &mut Sink<'_>, envelope: &Envelope<T>) -> io::Result<()> {
+      match serde_json::to_string(envelope) {
+          Ok(line) => write_line(sink.out, &line),
+          Err(cause) => {
+              write_line(
+                  sink.err,
+                  &format!("error: cannot encode the result: {cause}"),
+              )?;
+              Err(io::Error::other(cause))
+          }
+      }
+  }
+
+  /// Write `line` and end it with a newline (unless it has one), then flush.
+  fn write_line(to: &mut dyn Write, line: &str) -> io::Result<()> {
+      to.write_all(line.as_bytes())?;
+      if !line.ends_with('\n') {
+          to.write_all(b"\n")?;
+      }
+      to.flush()
+  }
+
+  /// The exit code of a verb that wrote `written`: `code`, except that output nobody received
+  /// cannot be a success.
+  fn settle(written: io::Result<()>, code: i32) -> i32 {
+      if written.is_err() && code == 0 {
+          1
+      } else {
+          code
+      }
+  }
+  ```
+
+  ```rust
+  /// `message` on one line, as the envelope requires: each line break becomes a space.
+  fn one_line(message: &str) -> String {
+      message
+          .lines()
+          .map(str::trim)
+          .filter(|line| !line.is_empty())
+          .collect::<Vec<_>>()
+          .join(" ")
+  }
+  ```
+
   The one reader of `ENVELOPE_NAMESPACES` (`output.rs:352-369`). A search of `crates/holler-cli/src` finds the constant only at its declaration (`:38`) and here, and `envelope_namespace` called only at `crates/holler-cli/src/main.rs:148`:
 
   ```rust
@@ -1359,6 +1471,128 @@ Added at the brief gate, with every line above whose italic label says "at the b
   ```
 
   The stable codes of the two store errors the tests use are `PaneCode::NotImplemented => "not-implemented",` (`crates/holler-pane/src/error.rs:100`) and `PaneCode::Unavailable => "unavailable",` (`:120`), both in `PaneCode::as_str` (`:97-123`).
+
+  *Added at the brief gate (round 6), what the call logs of `FakeHarness`, `FakeHerdr` and `FakeHost` record (acceptance 7, round 6):* the switch's `enter` (`crates/holler-pane-testkit/src/fault.rs:90-103`) records the call before it sleeps or answers a fault, and each of the three fakes calls it first in every port method it implements. `impl HarnessPort for FakeHarness` (`crates/holler-pane-testkit/src/harness.rs:281-355`) begins each of its eight methods with `self.faults.enter(HarnessOp::…)?;` (`:283`, `:288`, `:293`, `:300`, `:309`, `:320`, `:337`, `:352`), `impl HerdrPort for FakeHerdr` (`herdr.rs:245`) each of its seven (`:247`, `:260`, `:271`, `:289`, `:294`, `:303`, `:314`), and `impl HostPort for FakeHost` (`host.rs:169`) each of its four (`:171`, `:183`, `:188`, `:196`). `HerdrPort` and `HostPort` have no other methods, and neither has a default body (`crates/holler-pane/src/ports.rs:129-154`, `:162-174`). `HarnessPort` (`ports.rs:183-230`) has ten: the eight above, and `send_prompt` and `session_activity`, whose bodies are the trait's defaults (`ports.rs:208-229`, below). No file of the test kit defines either, so `FakeHarness` keeps the defaults, which reach no fault switch and so no call log. Below: `enter`, the three op enums (`harness.rs:30-42`, `herdr.rs:53-63`, `host.rs:26-33`), the three accessors (`harness.rs:177-181`, `herdr.rs:209-213`, `host.rs:104-108`), the first two methods of `FakeHarness` as an example of the pattern (`harness.rs:281-290`), and the two defaults.
+
+  ```rust
+      /// What a fake calls first in every port method. It records the call, sleeps for
+      /// the delay (without holding the lock, so other calls proceed), and then answers
+      /// the standing fault if there is one, or else the oldest error queued for `op`.
+      pub(crate) fn enter(&self, op: Op) -> Result<(), PaneError> {
+          let delay = {
+              let mut state = self.lock();
+              state.calls.push(op);
+              state.delay
+          };
+          if let Some(delay) = delay {
+              thread::sleep(delay);
+          }
+          self.lock().take_fault(op)
+      }
+  ```
+
+  ```rust
+  /// A method of the `HarnessPort` port, as a fault targets it and the call log records
+  /// it.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub enum HarnessOp {
+      Serve,
+      Health,
+      CreateSession,
+      ListSessions,
+      Abort,
+      AttachTui,
+      SelectSession,
+      ShownSession,
+  }
+  ```
+
+  ```rust
+  /// A method of the `HerdrPort`, as a fault targets it and the call log records it.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub enum HerdrOp {
+      EnsurePane,
+      SendText,
+      SendKeys,
+      Read,
+      Close,
+      Snapshot,
+      Version,
+  }
+  ```
+
+  ```rust
+  /// A method of the `HostPort` port, as a fault targets it and the call log records it.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub enum HostOp {
+      EnsureSession,
+      Run,
+      StopOwned,
+      Ps,
+  }
+  ```
+
+  ```rust
+      /// The fault switch of every port method and the log of the calls made through
+      /// the port.
+      pub fn faults(&self) -> &FaultSwitch<HarnessOp> {
+          &self.faults
+      }
+  ```
+
+  ```rust
+      /// The fault switch of every port method and the log of the calls made through the
+      /// port.
+      pub fn faults(&self) -> &FaultSwitch<HerdrOp> {
+          &self.faults
+      }
+  ```
+
+  ```rust
+      /// The fault switch of every port method and the log of the calls made through
+      /// the port.
+      pub fn faults(&self) -> &FaultSwitch<HostOp> {
+          &self.faults
+      }
+  ```
+
+  ```rust
+  impl HarnessPort for FakeHarness {
+      fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
+          self.faults.enter(HarnessOp::Serve)?;
+          self.lock().serve(name, port)
+      }
+
+      fn health(&self, port: u16) -> Result<bool, PaneError> {
+          self.faults.enter(HarnessOp::Health)?;
+          Ok(self.lock().state(port) == Some(ServerState::Running))
+      }
+  ```
+
+  ```rust
+      /// Queue `text` as a prompt to `session` on the server at `port`, through the
+      /// harness API, never by typing into a TUI (I4). `pane reset --first` calls it (#645).
+      ///
+      /// The default refuses with [`PROMPT_UNSUPPORTED`]: an impl that does not send
+      /// prompts says so as a stable refusal, which the real adapter replaces (#642).
+      fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+          let _ = (port, session, text);
+          Err(PaneError::Refused {
+              code: PROMPT_UNSUPPORTED,
+              message: "this harness does not queue a prompt".to_owned(),
+          })
+      }
+
+      /// What `session` on the server at `port` is doing now (#645: `pane reset` refuses a
+      /// conversation that is not [`Activity::Idle`]).
+      ///
+      /// The default answers [`Activity::Idle`], so an impl that does not report activity
+      /// refuses nothing.
+      fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
+          let _ = (port, session);
+          Ok(Activity::Idle)
+      }
+  ```
 - **E16, the order of the hub's rows (added at the brief gate, round 3).** `crates/holler-hub/src/roster.rs:521-526`, and `:553` in `rows_matching` (`:536-555`), which builds the `control/roster` reply (E2):
 
   ```rust
@@ -1465,6 +1699,49 @@ Added at the brief gate, with every line above whose italic label says "at the b
       }
   ```
 
+  *Added at the brief gate (round 6), the whole label check:* the rest of `valid_label` (`crates/holler-hub/src/token.rs:413-427`, whole, below) takes as the first character a lowercase ASCII letter or a digit, and after it only lowercase ASCII letters, digits and `-`, so no label it passes holds a `/`. The name vocabulary's own `Label::parse` (`crates/holler-proto/src/vocab.rs:32-45`) refuses a `/` outright, as `SessionName::parse` above does, and the segment grammar that the three name kinds share allows lowercase ASCII letters, digits and `-` only (`vocab.rs:13-15`).
+
+  ```rust
+  /// The label grammar (ADR 0005 §1): `^[a-z0-9][a-z0-9-]{0,31}$`.
+  fn valid_label(label: &str) -> bool {
+      if !(1..=32).contains(&label.len()) {
+          return false;
+      }
+      let mut chars = label.chars();
+      let Some(first) = chars.next() else {
+          return false;
+      };
+      if !(first.is_ascii_alphanumeric() && first.is_ascii_lowercase() || first.is_ascii_digit()) {
+          return false;
+      }
+      chars
+          .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+  }
+  ```
+
+  ```rust
+      /// Parse a wire string into a `Label`.
+      ///
+      /// Succeeds iff the string is a single 1–32-char segment matching the
+      /// grammar (no `/`). A `Label` never contains a `/`.
+      pub fn parse(s: &str) -> Result<Self, NameError> {
+          if s.is_empty() {
+              return Err(NameError::Empty);
+          }
+          if s.contains('/') {
+              return Err(NameError::Slash);
+          }
+          check_segment(s.as_bytes())?;
+          Ok(Self(s.to_owned()))
+      }
+  ```
+
+  ```rust
+  //! Segment grammar (ADR 0005): lowercase ASCII letters and digits only; `-`
+  //! is allowed **between** word chars, but a segment must not start or end
+  //! with one. The 32-char per-segment limit (docs §3) is enforced here.
+  ```
+
   The code that relates a pane record, or a bare session name, to a hub session today. None of it compares a row's `name` with a pane's name. The hub's prompt gate matches a pane's `session_of_record` with the bare session name being prompted (`crates/holler-hub/src/circuit/dispatch.rs:105-111`, `:130-133`):
 
   ```rust
@@ -1531,6 +1808,55 @@ Added at the brief gate, with every line above whose italic label says "at the b
   ```
 
   The stable codes of the two store errors that acceptance 8 (round 5) adds a test for, in `PaneCode::as_str` (`crates/holler-pane/src/error.rs:97-123`; E15 gives the other two): `PaneCode::Timeout => "timeout",` (`:116`) and `PaneCode::StoreCorrupt => "store-corrupt",` (`:119`). Like `not-implemented` and `unavailable`, both are `ErrorClass::Failure` in `class_of` (`:266-303`, in E6). The test kit's `Fault::Fail` takes any `PaneError`: "Every call fails with this error (e.g. `store-corrupt` or `unavailable`)" (`crates/holler-pane-testkit/src/fault.rs:33-34`, in E15).
+- **E20, changing a record between two roster calls (added at the brief gate, round 6).** `FakePaneStore`'s seeding, its other writer's put and its `list` (`crates/holler-pane-testkit/src/pane_store.rs:90-99`, `:113-118`, `:182-185`). `concurrent_put` takes `&self`, so a test that has lent the store to the roster's `Ports` (whose `pane_store` is a `&dyn PaneStore`, E8) can still write to it between two calls; `list` reads the records the store holds when it is called.
+
+  ```rust
+      /// A store holding `panes`, each created at expected generation 0 and so stored
+      /// at 1, in order. Seeding bypasses the faults and the call log. Two seeds with one
+      /// name are `generation-conflict`, as a second create would be.
+      pub fn seeded(panes: impl IntoIterator<Item = Pane>) -> Result<Self, PaneError> {
+          let store = Self::new();
+          for pane in panes {
+              store.put(&pane, Writer::Port(0))?;
+          }
+          Ok(store)
+      }
+  ```
+
+  ```rust
+      /// Another writer stores `pane` unconditionally, at the stored generation + 1 (or
+      /// at 1 for a new record), without the membership rule, and publishes its event.
+      /// It bypasses the faults and the call log. Returns the stored record.
+      pub fn concurrent_put(&self, pane: &Pane) -> Result<Pane, PaneError> {
+          self.put(pane, Writer::Other)
+      }
+  ```
+
+  ```rust
+      fn list(&self) -> Result<Vec<Pane>, PaneError> {
+          self.faults.enter(PaneStoreOp::List)?;
+          Ok(self.feed.read(|log| log.records().cloned().collect()))
+      }
+  ```
+
+  A verb test that already sets a record's `last_observed.driven` with `concurrent_put` before it runs the verb (`crates/holler-cli/tests/pane_verbs/relaunch.rs:437-450`):
+
+  ```rust
+  /// AC 20 (decision 22): the DRIVEN another writer stored is kept by a relaunch.
+  #[test]
+  fn relaunch_keeps_the_stored_driven() {
+      let rig = Rig::new();
+      let mut theirs = rig.live(false);
+      theirs.last_observed.driven = Some("ses_driven_by_hub".to_owned());
+      rig.fakes.panes.concurrent_put(&theirs).unwrap();
+      let run = rig.run(RELAUNCH, Format::Json);
+      data_of(&run);
+      let driven = rig.record(PANE).unwrap().last_observed.driven;
+      assert_eq!(driven.as_deref(), Some("ses_driven_by_hub"));
+      rig.assert_matches(&run, PANE);
+      rig.assert_no_keystroke();
+  }
+  ```
 
 ## Pipeline
 
