@@ -1,0 +1,69 @@
+# Decision journal: #667 `holler profile apply` on scratch Herdr, tmux and OpenCode
+
+## A (Phase 3, up-front plan review): 2026-10-11T19:46-06:00 (MDT)
+- **Decided:** PASS on `docs/handoffs/667-brief.md` at `bc965ae` (sha256 `ed09f85f35d2a8c4...`), with no block and nine warns, five of them binding. The detail is in `handoff-A.md`.
+  - **The objects and the layer are right.**
+    - The scenario drives the real binary through a real hub, so the private `Wiring::from_env` stays the one assembly of the ports.
+    - It reuses #649's scratch set whole.
+    - It moves #649's private helpers into `impl Scratch` once. This is a spec'd refactor-to-extend, not drift.
+    - No production code, manifest, ADR or wire format changes.
+  - **W-1 (binding on T and F):**
+    - T-red writes all the test code and shows each pin failing against the broken variant the Acceptance names (A12 to A14). A compile failure from missing helpers is not a valid RED under `tester.md`.
+    - F runs, since the script has no skip. It owns the CHANGELOG entry and the deletion of section 12's bullet, as #652's F did, and reports `archChanged: false`.
+    - T-green checks GREEN, runs the opted-in run twice, and runs A16.
+  - **W-2 (binding on T):** the `--herdr-session` guard also refuses the `--herdr-session=VALUE` spelling, and A13 gains those cases.
+  - **W-3 (binding on T):** both tests are sequences of step functions. clippy's `too_many_lines` (100) and `cognitive_complexity` (15) are denied workspace-wide, and no allow is added for either.
+  - **W-4 (binding on T):**
+    - Any further helper of `scenario.rs` that #667 needs (e.g. `delete_strays`) moves into `impl Scratch`, never a copy.
+    - No `pane doctor` call runs inside a `Still` window, because doctor writes records by compare-and-swap.
+  - **W-5 (binding on T):** `launch_args` is pure (no `&self`), so A14 can pin it in the default run. Its pin is recommended for `guards.rs`.
+  - **Not binding:**
+    - W-6: `scratch/mod.rs` reaches lint's 600-line warning; use a child module if it does.
+    - W-7: the `Applied` reader types steps with production's `Action` and `Outcome`.
+    - W-8: #839 rebases over two changed calls in `reset_with_a_first_message`.
+    - W-9: record on #667 that the brief supersedes the issue's harness, dependency and blast-radius text.
+    - A nit.
+- **Assumed:**
+  - The step table's runtime claims are T's to prove in the opted-in run. I read the code paths and ran nothing against a real Herdr, tmux or OpenCode. The claims include:
+    - doctor finds no stray session after apply's relaunches;
+    - `owned_pids` is empty after a server is killed;
+    - every create and relaunch fits launch's 10 s budget.
+  - `curl` and `sh` are on the binary's `PATH` (`/usr/bin:/bin`) on the operator's machine.
+  - Every other in-flight story keeps to the blast radius its branch shows today.
+- **Hedged:**
+  - **W-1 is a pipeline finding, not code drift.** I made it binding because this automated run has no O to decide the brief's Question 2. This handoff is what T and F read next.
+  - **W-2 is a warn, not a block.** The adapter refuses a session other than its configured one (E75), so the gap is one layer of two.
+  - **W-6's estimate** of 140 to 150 added lines is mine, not measured.
+  - **T-red's verdict is T's own self-report** (`T_RED_VERDICT_SCHEMA`: PASS/BLOCK). So a RED shown against broken variants is accepted by the script. I did not run the script.
+- **Evidence:**
+  - **Read in full:**
+    - the brief (all 2793 lines);
+    - `pane_integration/{main,scenario,guards}.rs` and `scratch/mod.rs`;
+    - the issue #667 body (`gh issue view 667`).
+  - **Read in part:**
+    - `real_opencode/rig.rs` (header and `fn` list);
+    - `tx_launch.rs` (120-230, 440-475);
+    - `tx_apply.rs` (94-205);
+    - `profile_scope.rs` (1-40, 92-240);
+    - `reconcile.rs` (1-54);
+    - `pane/launch.rs` (1-140);
+    - `profile_verbs/apply/rig.rs` (480-640);
+    - `pane_verbs/process/main.rs` (40-80);
+    - ADR-0021 (1020-1036);
+    - `docs/testing.md` (439-449);
+    - `tester.md` (15-60);
+    - `coding-pipeline.workflow.mjs` (215-250, 575-620, 2415-2470, 2600-2660, 5620-5680);
+    - `scripts/lint.sh` (40-62);
+    - `clippy.toml`;
+    - `Cargo.toml` `[workspace.lints]`;
+    - `ci.yml` (348).
+  - **Searches:**
+    - `crate::`, `super::` and `mod` declarations in the three included rigs: none;
+    - `infer_long_args` in `holler-cli/src`: none;
+    - section 12 pins in `docs_pane_control_test.rs`: none;
+    - `profile-secret-refused`: environment values only;
+    - `/global/health`: `server.rs:34`;
+    - `allow(clippy::too_many_lines|cognitive_complexity)` in tests: none.
+  - **Compiled** a model of the doubly nested `#[path]` include, with a child module of `scratch/`, in the scratchpad (rustc 1.98.1). Both targets build and pass.
+  - **In flight:** `git fetch`; `git worktree list`; per-branch `git diff --name-only <merge-base> <branch>` over `pane_integration/`, `profile_apply_scenario/` and `Cargo.toml`. No branch touches the files #667 edits.
+  - **Precedent:** `docs/handoffs/652/decisions.md:120-124` (F wrote the guide and its CHANGELOG entry).
