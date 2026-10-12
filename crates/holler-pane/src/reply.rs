@@ -189,7 +189,7 @@ pub struct ProfileLogParams {
     pub name: ProfileName,
 }
 
-/// Params of `profile/rename` (PROPOSED, #665).
+/// Params of `profile/rename` (#665).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileRenameParams {

@@ -1,13 +1,12 @@
 //! The findings of a reconcile pass and `holler pane doctor` (#647): what a pass found, the
 //! one table of what each kind tells the operator to run, and the one sanitizer for the
-//! untrusted text a finding quotes. #665 adds only the `ProfileDrift` kind after #647 has
-//! merged.
+//! untrusted text a finding quotes. #665 added the `ProfileDrift` kind, last.
 //!
-//! - [`FindingKind`]: fifteen kinds, each with a stable kebab-case code that is also its JSON
+//! - [`FindingKind`]: sixteen kinds, each with a stable kebab-case code that is also its JSON
 //!   form ([`FindingKind::code`] is the one source of both). #832 added `unmanaged-stalled`,
-//!   and #831 `pane-waiting` and `claude-login-missing`. A finding is a report, not an error:
-//!   its code is never a `RefusalCode`, and two codes (`herdr-version-unsupported`, and #665's
-//!   `profile-drift`) equal closed error codes.
+//!   #831 `pane-waiting` and `claude-login-missing`, and #665 `profile-drift`. A finding is a
+//!   report, not an error: its code is never a `RefusalCode`, and two codes
+//!   (`herdr-version-unsupported`, and #665's `profile-drift`) equal closed error codes.
 //! - [`Finding`]: one finding, with what it is about (a pane, a position, a Herdr pane, a
 //!   session, harness servers), a one-line message, its remedy and what `--fix` did.
 //! - **Remedies** ([`FindingKind::remedy`]) name only the verb that owns each repair
@@ -81,6 +80,10 @@ pub enum FindingKind {
     /// per pass that holds such a pane. The message names the login, never a command that
     /// reads one, and no Holler verb sets a login (I7).
     ClaudeLoginMissing,
+    /// The pane's record differs from its profile's spec on at least one field of
+    /// `profile_diff`'s table, the comparison `profile show` makes (#665). The message names
+    /// the fields and no value. Which side is right is the operator's choice, so no remedy.
+    ProfileDrift,
 }
 
 impl FindingKind {
@@ -101,6 +104,7 @@ impl FindingKind {
         FindingKind::UnmanagedStalled,
         FindingKind::PaneWaiting,
         FindingKind::ClaudeLoginMissing,
+        FindingKind::ProfileDrift,
     ];
 
     /// The kind's stable kebab-case code, which is also its JSON form. A code is stable
@@ -122,6 +126,7 @@ impl FindingKind {
             FindingKind::UnmanagedStalled => "unmanaged-stalled",
             FindingKind::PaneWaiting => "pane-waiting",
             FindingKind::ClaudeLoginMissing => "claude-login-missing",
+            FindingKind::ProfileDrift => "profile-drift",
         }
     }
 
@@ -144,7 +149,8 @@ impl FindingKind {
             | FindingKind::UnmanagedStalled
             | FindingKind::StraySession
             | FindingKind::PaneWaiting
-            | FindingKind::ClaudeLoginMissing => None,
+            | FindingKind::ClaudeLoginMissing
+            | FindingKind::ProfileDrift => None,
             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
             FindingKind::HerdrPaneMissing
             | FindingKind::TmuxSessionMissing

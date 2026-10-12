@@ -16,8 +16,9 @@ use holler_pane_testkit::conformance::profile_store::{
 };
 use holler_pane_testkit::profile_store::FakeProfileStore;
 
-/// The 23 case ids of the brief's table, in order.
-const DOCUMENTED_CASES: [&str; 23] = [
+/// The 28 case ids of the brief's table, in order (#665 replaced `rename-is-not-implemented`
+/// with the six `rename-*` cases at the end).
+const DOCUMENTED_CASES: [&str; 28] = [
     "get-missing-is-none",
     "list-empty",
     "create-at-zero-stored-at-one",
@@ -34,13 +35,18 @@ const DOCUMENTED_CASES: [&str; 23] = [
     "recreate-after-delete-starts-at-one",
     "log-is-append-only-and-oldest-first",
     "log-of-never-created-is-profile-not-found",
-    "rename-is-not-implemented",
     "env-is-names-only",
     "watch-from-zero-yields-current-state",
     "watch-follows-each-change",
     "watch-resumes-without-gap-or-repeat",
     "watch-idle-is-ok-none-and-stays-usable",
     "failed-write-changes-nothing",
+    "rename-moves-the-record",
+    "rename-logs-renamed-and-closes-the-old-log",
+    "rename-onto-a-deleted-name-continues-its-log",
+    "rename-of-one-slug-is-one-put",
+    "rename-feed-is-deletion-then-put",
+    "rename-refusals-change-nothing",
 ];
 
 #[test]
@@ -73,6 +79,13 @@ enum Break {
     ForgetsLogOnDelete,
     /// `watch(since)` resumes one change early.
     RepeatsOnResume,
+    /// `rename` is a create of the new name and a delete of the old (#665): a new record at
+    /// generation 1 with a `created` entry, its `created` and log restarted.
+    RenameAsCreateAndDelete,
+    /// `rename` renames whatever the stored generation is (#665).
+    RenameSkipsCas,
+    /// `rename` onto a name another live profile holds deletes that profile first (#665).
+    RenameOverwritesTaken,
 }
 
 struct Mutant {
@@ -169,7 +182,40 @@ impl ProfileStore for Mutant {
         expected_generation: u64,
         actor: &Actor,
     ) -> Result<Profile, PaneError> {
-        self.inner.rename(from, to, expected_generation, actor)
+        match self.broken {
+            Break::RenameAsCreateAndDelete => {
+                let stored = self
+                    .inner
+                    .get(from)?
+                    .ok_or_else(|| PaneError::ProfileNotFound {
+                        what: from.to_string(),
+                    })?;
+                let created = self.inner.cas_put(
+                    &Profile {
+                        name: to.clone(),
+                        slug: to.slug(),
+                        ..stored
+                    },
+                    0,
+                    actor,
+                )?;
+                self.inner.delete(from, expected_generation, actor)?;
+                Ok(created)
+            }
+            Break::RenameSkipsCas => {
+                let current = self.inner.get(from)?.map_or(0, |stored| stored.generation);
+                self.inner.rename(from, to, current, actor)
+            }
+            Break::RenameOverwritesTaken => {
+                if let Some(taken) = self.inner.get(to)? {
+                    if taken.slug != from.slug() {
+                        self.inner.concurrent_delete(to, actor)?;
+                    }
+                }
+                self.inner.rename(from, to, expected_generation, actor)
+            }
+            _ => self.inner.rename(from, to, expected_generation, actor),
+        }
     }
 }
 
@@ -235,5 +281,27 @@ fn a_store_that_repeats_on_resume_fails() {
     assert_suite_fails_on(
         Break::RepeatsOnResume,
         "watch-resumes-without-gap-or-repeat",
+    );
+}
+
+#[test]
+fn a_rename_that_is_a_create_and_a_delete_fails() {
+    assert_suite_fails_on(Break::RenameAsCreateAndDelete, "rename-moves-the-record");
+    assert_suite_fails_on(
+        Break::RenameAsCreateAndDelete,
+        "rename-logs-renamed-and-closes-the-old-log",
+    );
+}
+
+#[test]
+fn a_rename_that_skips_the_generation_check_fails() {
+    assert_suite_fails_on(Break::RenameSkipsCas, "rename-refusals-change-nothing");
+}
+
+#[test]
+fn a_rename_that_overwrites_a_taken_name_fails() {
+    assert_suite_fails_on(
+        Break::RenameOverwritesTaken,
+        "rename-refusals-change-nothing",
     );
 }

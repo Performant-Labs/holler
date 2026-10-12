@@ -146,8 +146,7 @@ session**, and a mismatch is not answered the same way by every verb:
 ## 3. The verbs
 
 `holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`
-and `import`. `holler profile` has `create`, `delete`, `list`, `show` and `apply`, and three verbs that are PROPOSED and
-not built (`rename`, `export` and `import` under `profile`, #665), at the end of this section.
+and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
 
 Each verb's `--help` is the full reference for its flags; this section names the flags that change what it does.
 Two flag groups are shared:
@@ -429,13 +428,74 @@ run or change the exit code; a `failed` step stops the run and exits 1. Its own 
 `orchestrator-not-relaunched` and `spec-not-launchable`. It exits 2 (`usage`) when the plan has a create and no
 `--herdr-session`, 3 for `profile-not-found`, 1 for a failed step, and 0 otherwise.
 
-### The PROPOSED profile verbs
+### `holler profile rename OLD NEW`
 
-`holler profile rename`, `holler profile export` and `holler profile import` are PROPOSED (#665) and not built: each
-answers `not-implemented`.
-- `holler profile rename` (PROPOSED) would change a profile's name and every member's `profile` in one transaction.
-- `holler profile export` (PROPOSED) would write a profile's specs to a file, named by a planned output flag.
-- `holler profile import` (PROPOSED) would read a profile's specs from a file, refusing an env value and an existing name.
+Rename a profile. The hub changes the profile's name and every member pane's `profile` in one transaction: the panes
+stay attached and nothing live is touched (no pane is detached, relaunched or switched), and each member's record
+moves one generation. The profile keeps its specs. Its change log is filed by its name: the old name's log ends with
+the rename, and the new name's log gets one entry saying who renamed it and from what (after the log of a profile
+deleted earlier under the new name, if there was one). A new name that differs only in spelling is a rename too. If a
+rename is interrupted between its two writes, running the same command again completes it.
+
+```bash
+holler profile rename fleet fleet-2
+```
+
+Ends with `profile-not-found` or `profile-exists` (3), `usage` (2) for a new name equal to the old one, or
+`generation-conflict` (1) when the profile changed after it was read: run it again.
+
+### `holler profile export NAME`
+
+Write a profile to a file as one JSON document of its specs, with `--out FILE` (mode 0600, replacing a file there),
+or print the document without it. The file holds names and non-secret values only: an environment variable by its
+name, never its value, and no generation, timestamp or log. A position is written `r2c1`. `holler profile import FILE`
+reads it back.
+
+```bash
+holler profile export fleet --out fleet.json
+```
+
+Ends with `profile-not-found` (3), `usage` (2) when FILE's directory does not exist or FILE is a directory, or
+`unavailable` (1) when FILE cannot be written.
+
+### `holler profile import FILE`
+
+Create a profile from a file `export` wrote, named as the file says or as `--name NAME` says. The profile is created
+**detached**: no pane joins it, and a spec may name a pane that belongs to another profile or has no record;
+`holler profile apply NAME` is what makes its panes match it. A position may be written `r2c1`, `c1r2` or `2,1`. A
+file that carries an environment value (`NAME=value`) is refused without echoing it, and no refusal quotes what a spec
+holds: a bad position or member is named by the spec's number. The document:
+
+```json
+{
+  "format": "holler-profile",
+  "version": 1,
+  "name": "Fleet",
+  "panes": [
+    {
+      "pane": "demo-c1r1",
+      "herdr": {"workspace": "main", "grid": "r1c1"},
+      "host": {"cwd": "/srv/demo"},
+      "harness": {"kind": "opencode", "port_policy": "fixed:8095"},
+      "model": {"provider": "demo-provider", "model_id": "demo-model", "effort": "medium"},
+      "role": "agent",
+      "env": ["DEMO_API_KEY"],
+      "context": {"soft": 100000, "hard": 150000},
+      "command": ["opencode", "serve"],
+      "check": ["curl", "-s", "http://127.0.0.1:8095/v1/models"],
+      "expect": ["demo-model"]
+    }
+  ]
+}
+```
+
+```bash
+holler profile import fleet.json --name fleet-copy
+```
+
+Ends with `profile-exists`, `profile-secret-refused`, `command-not-argv`, `env-name-invalid`, `grid-ambiguous` or
+`grid-out-of-range` (3), `usage` (2) when FILE does not exist, is not a regular file, is over 1 MiB or is not a
+profile document, or `unavailable` (1) when FILE cannot be read.
 
 ## 4. Reading the table
 
@@ -529,6 +589,7 @@ The finding kinds:
 | `unmanaged-stalled` | An unmanaged pane whose screen has not changed for the threshold or longer. Whole-fleet passes with `--unmanaged-stalled-after SECONDS` only. | none |
 | `pane-waiting` | A Claude Code pane whose process waits on a person: a permission prompt or a question. | none |
 | `claude-login-missing` | Claude Code's processes do not use the subscription login; about no pane, asked once per pass when a Claude Code pane is in scope. | none |
+| `profile-drift` | A pane's record differs from its profile's spec on at least one field; the message names the fields, not the values. | none |
 
 **`--fix` repairs only `shown-driven-mismatch`.** It selects the session of record in the pane's TUI, so the TUI shows
 the session the record already names, and observes the TUI again. It never changes which session is the session of
@@ -548,7 +609,7 @@ and nothing is restarted.
 Code pane, and only whether the login is the subscription one is read. No Holler verb sets a login, so it names no
 command: log Claude Code in by hand, on the machine the panes run on.
 
-`--fix` does not repair any other kind: each of those names the command to run instead, and four name none. A
+`--fix` does not repair any other kind: each of those names the command to run instead, and seven name none. A
 `shown-driven-mismatch` is also `not-fixable` when its server is not healthy or does not have the session of record; its
 line then carries no bracket, and the command it names is `holler pane relaunch PANE`. The bracket is `fixable` (a run
 without `--fix` would repair it), `skipped`, `fixed` or `fix failed: CODE`.
@@ -578,7 +639,14 @@ the threshold. There is no default threshold: without the flag nothing is report
 is never stalled, and Herdr 0.8.2 reports no time of the last screen change, so **this kind cannot fire against real
 Herdr yet** (ADR-0021 section 14).
 
-`profile-drift` (a live pane that differs from its spec) is PROPOSED (#665): it is a code of the closed list and not yet a doctor kind.
+**`profile-drift`** is raised for a pane whose record differs from its profile's spec on any field
+`holler profile show NAME` compares, and it is the same comparison, so `show` and `doctor` agree. A spec with no pane
+and a pane with no spec are not drift. A pass reports one `profile-drift` finding per drifted pane, naming every
+differing field and no value, and it reports the same finding again in every later pass for as long as the difference
+stands (a pass keeps no memory, above): that is what "once per episode" means here. No Holler verb picks a side for
+you: `holler profile show NAME` lists the values, and `holler pane relaunch PANE` changes the pane (and, with
+`--profile`, its spec with it). When a pass cannot read the profiles it says `observe-failed`, naming
+`profile_store.list`, and concludes nothing about drift.
 
 ## 6. Profiles
 
@@ -594,6 +662,9 @@ the records whose `profile` names it.
 - `list` and `show` read only. `show` prints the specs, the live panes and, per pane, every field that differs from its
   spec.
 - `apply` converges the live panes on the profile, as the reference below says.
+- `rename` changes the profile's name and every member's `profile` in one transaction, touching nothing live (section 3).
+- `export` writes the profile's specs to a file, names and non-secret values only (section 3).
+- `import` creates a detached profile from such a file, refusing an environment value and a taken name (section 3).
 - A spec-editing verb with `--profile P` (`pane launch`, `pane relaunch`, `pane close`) edits P's spec for the pane and the
   live pane in one transaction: a failed run puts P's specs back (I8).
 
@@ -650,7 +721,8 @@ Positions are 1-based and written row first. Text prints `r2c1` (row 2, column 1
 Input accepts `r<row>c<col>`, `c<col>r<row>` (labelled, either order) and a bare `<row>,<col>`, which is always row
 first, never column first. Upper case and surrounding whitespace are accepted. Two refusals: `grid-ambiguous` for text
 that cannot be read one way (interior whitespace, a missing half, a repeated label, unlabelled digits, anything
-unreadable), and `grid-out-of-range` for a zero, a number above 65535, or a cell outside the workspace.
+unreadable), and `grid-out-of-range` for a zero, a number above 65535, or a cell outside the workspace. A profile file
+(`holler profile import FILE`) takes a position in any of these forms; `holler profile export NAME` writes `rRcC`.
 
 **Pane names such as `hj-c1r2` predate this standard and list the column first, so `hj-c1r2` sits at `r2c1`.** No pane is
 renamed, and a name is never read as a position: a pane's position comes from Herdr's snapshot. The name itself is
@@ -749,7 +821,7 @@ change.
 | `session-not-found` | refusal (3) | The named harness session does not exist. |
 | `store-corrupt` | failure (1) | Stored state cannot be read back; the store fails closed. |
 | `unavailable` | failure (1) | The hub, Herdr or a harness cannot be reached, or the live state is not there after the act. |
-| `profile-drift` | failure (1) | PROPOSED (#665): a doctor finding listed in the closed set; never an error today. |
+| `profile-drift` | failure (1) | A doctor finding (section 5); never an error a verb returns. |
 
 **Open codes.** The list above is the closed set. A verb or an adapter owns further codes, which are not in that list and
 are always a refusal, exit 3: among them `agent-unusable` and `agent-key-invalid` (section 2), `orchestrator-not-relaunched`
@@ -889,5 +961,4 @@ Deferred, so not documented here as existing; none of them is available:
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);
-- recreating the Herdr workspace from the stored profiles (#666);
-- the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).
+- recreating the Herdr workspace from the stored profiles (#666).

@@ -90,7 +90,7 @@ impl ProfileStore for MemProfileStore {
     fn log(&self, _name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError> {
         Ok(Vec::new())
     }
-    /// `rename` is PROPOSED (#665): the double answers `not-implemented`.
+    /// `rename` (#665): this double answers `not-implemented`; the conformance suite pins the real one.
     fn rename(
         &self,
         _from: &ProfileName,
@@ -314,7 +314,7 @@ fn exercise_stores() {
     let mut watch = panes.watch(Cursor(0)).unwrap();
     assert!(watch.next().is_none());
 
-    // ProfileStore (rename is PROPOSED: the double says not-implemented)
+    // ProfileStore (rename, #665: this double says not-implemented; the conformance suite pins it)
     let profiles = MemProfileStore { profile: profile() };
     let actor = Actor::parse("test").unwrap();
     let name = profile_name("Some Profile");

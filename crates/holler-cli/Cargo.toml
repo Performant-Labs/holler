@@ -413,7 +413,10 @@ clap = { workspace = true }
 serde = { workspace = true }
 # stub-acp bin (serializes its ACP frames) and the body-join e2e test's
 # `#[cfg(test)]` unit test (decodes the credential/status documents it inspects).
-serde_json = { workspace = true }
+# preserve_order: `holler profile export` (#665) writes each spec's members in the spec's
+# own order, through a `serde_json::Value`; declared here rather than relied on through
+# feature unification (agent-client-protocol, under holler-body, also turns it on).
+serde_json = { workspace = true, features = ["preserve_order"] } # for holler-cli: profile export's key order (#665)
 holler-proto = { path = "../holler-proto" }
 # #670: the pane/profile verbs take every error code, guard and port type from
 # the holler-pane crate (`Ports`, `PaneError`, `GridPos`, `Argv`, `EnvVarName`).
