@@ -199,3 +199,61 @@ Append-only; every phase adds its own entry.
     - personal infrastructure names in the diff: none.
   - **Commands:** `git diff --stat` (nothing in `holler-hub`, `holler-pane`, `holler-proto`, the test kit or
     `docs/protocol`); `bash scripts/lint.sh` exit 0; `git check-ignore` (the handoff is tracked).
+
+## S (spec audit): 2026-10-11T21:06-06:00
+
+- **Decided:** PASS. The detail is in `handoff-S.md`.
+  - **Every criterion is met.** Each of acceptance 1 to 14 and the seven scope items has a test that failed before the
+    change (T-red) and passes at `f7f2bcf`. Only handoffs changed after that commit, so GREEN holds at HEAD `9216165`.
+  - **The decisions are implemented as stated.** R1 to R10 and the issue's "Decisions" are all honoured.
+  - **The deviations are recorded, not silent:**
+    - W-3's ADR 0003 carve-outs and the matching help text;
+    - the CHANGELOG's "MINOR under ADR 0003" wording;
+    - the profile-name check before the hub call;
+    - the empty `--profile` line;
+    - W-8's three ADR-0021 sentences.
+  - **A's W-12 question** (do the columns fill in production?): this matches the issue's decision, a join by name, made
+    precise by AC 10 as the label. Where a deployment labels bodies another way, the rows join no pane. That is a known
+    limitation for R7's and #839's follow-up, not a defect of F's.
+  - **Nine advisories, none blocking:**
+    - (1) the production fill of the join;
+    - (2) ADR 0003 has no `Clarified by: #648` header line;
+    - (3) the PR's AI disclosure, its squash subject, and the merge of `d6ae539`, which a trial merge shows has no
+      conflict;
+    - (4) the refreshed brief had no outside brief gate;
+    - (5) the empty `--profile` line is unpinned;
+    - (6) `WIDTHS` is not tied to the column arrays;
+    - (7) AC 12's process test checks named keys, which AC 3 covers in full;
+    - (8) four follow-ups for O to file;
+    - (9) cosmetic copies and rustfmt.
+- **Assumed:**
+  - T-green's recorded Tier 1 and Tier 2 output stands: the workspace suite, clippy, lint, changelog-check, machete and
+    the seven mutations. I did not re-run them.
+  - The brief-gate result files in `docs/handoffs/` (gitignored) are the gate rounds of this story. Their times, all
+    before the refresh commit, are what advisory 4 rests on.
+- **Hedged:**
+  - **Advisory 1** rests on code and docs, not on the operator's live fleet, which a story may not touch. Whether
+    deployed rows join depends on how their bodies are labelled.
+  - **The privacy grep's one hit is not a finding.** It is the issue commenter's public GitHub handle in the brief's
+    issue-thread heading, already public on the issue and with a precedent on main (`642-brief.md`).
+- **Evidence:**
+  - **Read in full:**
+    - the issue, through `gh issue view 648`;
+    - the brief's refresh, scope, acceptance, blast radius, decisions, clash and pipeline sections;
+    - every handoff in `docs/handoffs/648/` and the diff gate's result;
+    - `git diff origin/main...HEAD`: `roster_cmd.rs` in full, the `main.rs`, `cli.rs` and `Cargo.toml` hunks, every new
+      and changed test, the four goldens (`cat -A`), the guide, ADR 0003, ADR-0021 and CHANGELOG.
+  - **Also read:** `output.rs` (`emit`, `emit_error`, `write_line`, `settle`); `pane/list.rs` (`PaneRow`, `cells`,
+    `COLUMNS`, `text_value`); `ControlError`'s `Display`; `wiring.rs`'s module doc; the test kit's `check_envelope`;
+    `import.rs`'s doc; ADR-0021 section 11; the setup wizard's label rule; `scripts/pane-restart`'s roster name;
+    `CONTRIBUTING.md`; ADR 0003's header and `docs/adr/README.md`.
+  - **Checked mechanically:**
+    - the guide paragraph against R9's text (equal, ignoring line wrapping);
+    - `wc -l` on every touched `.rs` file (the largest is `cli.rs` at 784);
+    - the new `#[allow]`s;
+    - `git diff --stat f7f2bcf HEAD` (handoffs only);
+    - `git merge-tree --write-tree HEAD origin/main` (no conflict);
+    - a privacy grep of every added line;
+    - consumers of roster output in `scripts/`, `agent-skills/` and `plugins/` (none parses its columns);
+    - that `docs_cli_test` skips `docs/handoffs/`;
+    - that CI and `lint.sh` run no rustfmt.
