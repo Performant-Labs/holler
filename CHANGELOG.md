@@ -613,6 +613,14 @@ fills this file in at release time.
   rolled back. A script that needs the steps as data runs `--dry-run` first, which still exits 0 and prints the plan.
   The test kit's split-only fake Herdr now follows the adapter's rule, and a test checks the two against each other.
   [ADR 0021](docs/adr/ADR-0021.md) records both decisions (32 and 33).
+- `holler pane switch` sent right after `holler pane relaunch` of an OpenCode pane no longer ends `timeout` while the
+  relaunched TUI is still starting (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#845](https://github.com/Performant-Labs/holler/issues/845)). Such a TUI already shows its session, so the relaunch
+  returns, and answers `true` to a select request before it takes one. The OpenCode adapter's `select_session` now sends
+  the request again after each 100 ms check of the pane whose title does not show the session yet, within the same
+  bounds (`settle`, 5 s), so `switch`, `reset` and doctor's `--fix` succeed once the TUI takes it. A TUI that never shows
+  the session still ends `timeout` at the same bound, and a dead or missing TUI `unavailable` with no further request.
+  The opt-in pane-integration scenario no longer retries its switch. [ADR 0021](docs/adr/ADR-0021.md) records the rule.
 
 ## [0.4.0] - 2026-09-29
 
