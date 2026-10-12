@@ -97,6 +97,11 @@ fn print_hold_result(result: &holler_cli::hold_cmd::HoldResult) -> i32 {
 }
 
 fn main() {
+    // Issue #851: the hub and body crates build the `version` field of every status document,
+    // and only this binary knows the commit, so the string `--version` prints is installed for
+    // them before any command runs.
+    holler_proto::build_info::install(holler_cli::VERSION);
+
     // Install the rustls crypto provider before any I/O: a `wss://` (TLS)
     // WebSocket needs a process-global provider set up ahead of the first
     // connection, and the body's `join` runs on a throwaway runtime later in

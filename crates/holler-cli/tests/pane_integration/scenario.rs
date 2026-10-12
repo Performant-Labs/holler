@@ -20,26 +20,14 @@ use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
 use holler_pane::{AgentKey, GridPos, HarnessPort, HostPort, PaneName, ServeSpec};
 use holler_pane_testkit::envelope::check_envelope;
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use crate::scratch::rig::{free_port, no_model_can_be_reached, raw, refused, signal_group};
+use crate::scratch::rig::{free_port, no_model_can_be_reached, raw, refused};
 use crate::scratch::{alive, Scratch};
 use crate::support::wait_for;
 
 const C1: &str = "hlr649-c1r1";
 const C2: &str = "hlr649-c2r1";
-
-/// `pane get <pane>`'s record.
-fn record(scratch: &Scratch, pane: &str) -> Value {
-    scratch.json(&["pane", "get", pane], 0).data()["pane"].clone()
-}
-
-fn session_of_record(scratch: &Scratch, pane: &str) -> String {
-    record(scratch, pane)["session_of_record"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{pane} has a session of record"))
-        .to_owned()
-}
 
 /// Delete every session on `port` that is no pane's session of record: a reset or a switch
 /// leaves the previous one on the server as a stray, which doctor reports. The sessions are
@@ -78,43 +66,6 @@ fn switch_once_the_tui_takes_it(scratch: &Scratch, pane: &str, target: &str) {
     }
 }
 
-/// `pane doctor`'s finding kinds per pane (a finding about no pane is under `-`).
-fn findings(scratch: &Scratch) -> Vec<(String, String)> {
-    let data = scratch.json(&["pane", "doctor"], 0).data();
-    data["findings"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|f| {
-            let pane = f["pane"].as_str().unwrap_or("-").to_owned();
-            (pane, f["kind"].as_str().unwrap_or_default().to_owned())
-        })
-        .collect()
-}
-
-/// The private tmux server's environment is the rig's isolated pairs and nothing else (bar
-/// the `PWD` tmux adds, the scratch directory), so nothing of the operator's reached any
-/// OpenCode the scenario started (W-1).
-fn assert_tmux_env_is_scratch(scratch: &Scratch) {
-    let allowed: BTreeSet<String> = crate::scratch::tmux_server_env(
-        &scratch.settings.opencode,
-        &scratch.settings.oc_root,
-    )
-    .into_iter()
-    .map(|(name, _)| name)
-    .collect();
-    let base = scratch.settings.base.display().to_string();
-    for line in scratch.tmux_global_env() {
-        let (name, value) = line.trim_start_matches('-').split_once('=').unwrap_or((&line, ""));
-        if name == "PWD" {
-            assert_eq!(value, base, "tmux's own PWD is the scratch directory");
-            continue;
-        }
-        assert!(allowed.contains(name), "the tmux server carries {name}, which the test never set");
-    }
-}
-
 /// Scenario steps 1 to 8 in the order the acceptance lists them, then the repairs of D21 and
 /// the end state: two launches; a relaunch of one; a reset of one with a first message; a
 /// switch of one; a park of one; a killed server found by `doctor`; a session deleted under a
@@ -127,7 +78,7 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
         return;
     };
     let (p1, p2) = (free_port(), free_port());
-    assert_tmux_env_is_scratch(&scratch);
+    scratch.assert_tmux_env_is_scratch();
 
     // 1. Two launches. Each resolves `attach_tui`'s pane before its record exists (D8): the
     // launch exits 0 only if the resolver answered.
@@ -138,10 +89,10 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
     scratch.assert_no_credential_leaked();
 
     // 2. A relaunch of one: the same port, its session of record kept.
-    let kept = session_of_record(&scratch, C1);
+    let kept = scratch.session_of_record(C1);
     scratch.json(&["pane", "relaunch", C1], 0);
     no_model_can_be_reached(p1);
-    assert_eq!(session_of_record(&scratch, C1), kept, "relaunch keeps the session");
+    assert_eq!(scratch.session_of_record(C1), kept, "relaunch keeps the session");
 
     // 3. A reset of one, with a first message.
     reset_with_a_first_message(&scratch, p2);
@@ -149,7 +100,7 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
     // 4. A switch of one, to a session its server already has, made through the port.
     let target = scratch.harness().create_session(p1).expect("create_session");
     switch_once_the_tui_takes_it(&scratch, C1, &target);
-    let switched = record(&scratch, C1);
+    let switched = scratch.record(C1);
     assert_eq!(switched["session_of_record"], target.as_str());
     assert_eq!(switched["last_observed"]["shown"], target.as_str(), "SHOWN against the record");
 
@@ -169,12 +120,12 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
     scratch.json(&["pane", "unpark", C2], 0);
     scratch.json(&["pane", "relaunch", C2], 0);
     no_model_can_be_reached(p2);
-    let keep: BTreeSet<String> = [C1, C2].into_iter().map(|p| session_of_record(&scratch, p)).collect();
+    let keep: BTreeSet<String> = [C1, C2].into_iter().map(|p| scratch.session_of_record(p)).collect();
     for port in [p1, p2] {
         delete_strays(&scratch, port, &keep);
     }
 
-    assert_end_state(&scratch);
+    scratch.assert_end_state(&[C1, C2], &["hlr649"]);
 
     // Each `watch` line is an envelope too.
     let watch = scratch.holler(&["pane", "watch", "--until-idle", "--format=json"]);
@@ -183,7 +134,7 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
         check_envelope(&format!("{line}\n"), 0)
             .unwrap_or_else(|fault| panic!("a watch line is not an envelope: {fault}: {line}"));
     }
-    assert_tmux_env_is_scratch(&scratch);
+    scratch.assert_tmux_env_is_scratch();
     scratch.assert_no_credential_leaked();
 }
 
@@ -191,9 +142,9 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
 /// dead-end provider is retried until the turn is aborted, so the session reads `Busy`, as D12
 /// expects; no model is reached.
 fn reset_with_a_first_message(scratch: &Scratch, p2: u16) {
-    let before = session_of_record(scratch, C2);
+    let before = scratch.session_of_record(C2);
     scratch.json(&["pane", "reset", C2, "--first", "hlr649 first message"], 0);
-    let after = record(scratch, C2);
+    let after = scratch.record(C2);
     let fresh = after["session_of_record"].as_str().unwrap().to_owned();
     assert_ne!(fresh, before, "a fresh session");
     assert_eq!(after["last_observed"]["shown"], fresh.as_str(), "SHOWN follows");
@@ -209,18 +160,11 @@ fn reset_with_a_first_message(scratch: &Scratch, p2: u16) {
 /// session of record after the switch, `target`, deleted under its TUI (raw HTTP: no port
 /// deletes a session). `doctor` finds both.
 fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
-    let tagged = scratch.owned_pids(C2);
-    let live = scratch.host.ps(&PaneName::parse(C2).unwrap()).expect("ps");
-    let server: Vec<u32> = tagged.into_iter().filter(|pid| live.contains(pid)).collect();
-    assert!(!server.is_empty(), "the server of {C2} runs under its tmux session");
-    for pid in &server {
-        signal_group(*pid, "KILL");
-    }
-    assert!(wait_for(Duration::from_secs(10), || refused(p2).then_some(())).is_some());
+    scratch.kill_server(C2, p2);
 
     raw(p1, "DELETE", &format!("/session/{target}"), None);
 
-    let found = findings(scratch);
+    let found = scratch.findings();
     assert!(
         found.contains(&(C2.to_owned(), "server-down".to_owned())),
         "doctor finds C2's server down: {found:?}"
@@ -229,48 +173,6 @@ fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
         found.iter().any(|(pane, _)| pane == C1),
         "doctor reports C1's deleted session: {found:?}"
     );
-}
-
-/// The end state after the repairs: `doctor` reports no finding, `pane list` equals Herdr's
-/// snapshot for the scratch panes of the scenario's workspace, and none of them is in the
-/// unmanaged table.
-fn assert_end_state(scratch: &Scratch) {
-    let report = scratch.json(&["pane", "doctor"], 0).data();
-    assert_eq!(report["findings"], json!([]), "doctor reports no finding: {report}");
-    let observed: BTreeSet<(String, String)> = scratch
-        .herdr_snapshot()
-        .into_iter()
-        .filter(|p| p.workspace == "hlr649")
-        .map(|p| (p.pane_id.as_str().to_owned(), json!(p.grid).to_string()))
-        .collect();
-    let recorded: BTreeSet<(String, String)> = [C1, C2]
-        .into_iter()
-        .map(|pane| {
-            let herdr = record(scratch, pane)["herdr"].clone();
-            (herdr["pane_id"].as_str().unwrap().to_owned(), herdr["grid"].to_string())
-        })
-        .collect();
-    assert_eq!(recorded, observed, "pane list equals Herdr's snapshot for the scratch panes");
-
-    // #832's unmanaged table, read through the real wiring (D33): Herdr is readable, and no
-    // pane a record names is listed as unmanaged.
-    let list = scratch.json(&["pane", "list"], 0).data();
-    assert!(
-        list.get("unmanaged_unavailable").is_none(),
-        "Herdr is read: {list}"
-    );
-    let unmanaged: BTreeSet<String> = list["unmanaged"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|pane| pane["pane_id"].as_str().unwrap().to_owned())
-        .collect();
-    for (pane_id, _) in &recorded {
-        assert!(
-            !unmanaged.contains(pane_id),
-            "{pane_id} has a record, so is not unmanaged: {list}"
-        );
-    }
 }
 
 /// The profile scenario. Create from current; edit through `launch --profile`; `close
@@ -340,7 +242,7 @@ fn the_two_grid_spellings_land_at_row_2_column_1_in_herdrs_snapshot() {
     scratch.launch("hlr649-h1", "hlr649h", "2,1", free_port(), &[]);
     let snapshot = scratch.herdr_snapshot();
     for (pane, workspace) in [("hlr649-g1", "hlr649g"), ("hlr649-h1", "hlr649h")] {
-        let id = record(&scratch, pane)["herdr"]["pane_id"].as_str().unwrap().to_owned();
+        let id = scratch.record(pane)["herdr"]["pane_id"].as_str().unwrap().to_owned();
         let seen = snapshot
             .iter()
             .find(|p| p.pane_id.as_str() == id)

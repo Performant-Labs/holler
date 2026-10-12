@@ -76,30 +76,50 @@ fn body_status_local_without_run() {
     assert_eq!(doc["protocol"].as_u64(), Some(3));
 }
 
-/// `query/status` documents carry the running binary's version (issue
-/// #319) — `env!("CARGO_PKG_VERSION")`, not hardcoded — on both roles: the
-/// body's local answer and the hub's local answer.
+/// What `holler --version` prints after `holler `: the version and the commit,
+/// e.g. `0.4.0 (bda1069)` (issue #851).
+fn binary_version(state: &StateDir) -> String {
+    let (code, stdout, stderr) = run(state, &["--version"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let version = stdout.strip_prefix("holler ").and_then(|v| v.strip_suffix('\n'));
+    let version = version.unwrap_or_else(|| panic!("--version: {stdout:?}")).to_string();
+    let with_commit = format!("{} (", env!("CARGO_PKG_VERSION"));
+    assert!(version.starts_with(&with_commit) && version.ends_with(')'), "--version: {stdout:?}");
+    version
+}
+
+/// Every `version` field a verb prints carries the running binary's version
+/// (issue #319) and, since #851, the same string `--version` prints, commit
+/// included: `body query status`, `body caps`, `hub query status`, and the live
+/// hub's `hub status` (both `--json` and the human first line). The key is
+/// unchanged and no field is added.
 #[test]
 fn status_docs_carry_version() {
     let state = StateDir::new();
+    let want = binary_version(&state);
     let (code, stdout, stderr) = run(&state, &["--json", "body", "query", "status"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("body query status --json is valid JSON");
-    assert_eq!(
-        doc["version"].as_str(),
-        Some(env!("CARGO_PKG_VERSION")),
-        "body query status must carry the running version: {doc}"
-    );
+    assert_eq!(doc["version"].as_str(), Some(want.as_str()), "body query status: {doc}");
+    let (code, stdout, stderr) = run(&state, &["--json", "body", "caps"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("body caps --json is valid JSON");
+    assert_eq!(doc["status"]["version"].as_str(), Some(want.as_str()), "body caps: {doc}");
 
     let hub = Hub::start(&state);
     let (code, stdout, stderr) = run(&state, &["--json", "hub", "query", "status"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     let doc: Value = serde_json::from_str(&stdout).expect("hub query status --json is valid JSON");
-    assert_eq!(
-        doc["version"].as_str(),
-        Some(env!("CARGO_PKG_VERSION")),
-        "hub query status must carry the running version: {doc}"
-    );
+    assert_eq!(doc["version"].as_str(), Some(want.as_str()), "hub query status: {doc}");
+    let (code, stdout, stderr) = run(&state, &["--json", "hub", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let doc: Value = serde_json::from_str(&stdout).expect("hub status --json is valid JSON");
+    assert_eq!(doc["version"].as_str(), Some(want.as_str()), "live hub status: {doc}");
+    let (code, stdout, stderr) = run(&state, &["hub", "status"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let first = stdout.lines().next().unwrap_or_default();
+    let want_line = format!("hub {want} (protocol {})", holler_proto::PROTOCOL_VERSION);
+    assert_eq!(first, want_line, "hub status: {stdout:?}");
     hub.stop(Duration::from_secs(5));
 }
 

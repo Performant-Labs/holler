@@ -21,6 +21,8 @@
 //! - [`vocab`] — the name kinds (`Label`, `SessionName`, `RoutableName`; ADR
 //!   0005) and the feature / harness id vocabulary.
 //! - [`version`] — the single protocol version constant (ADR 0003).
+//! - [`build_info`] — the running build's version string, the workspace version and the
+//!   commit it was built from (issue #851), installed once by the binary's `main`.
 //! - [`log`] — debug logging for both roles (story #144): the
 //!   `--debug`/`HOLLER_DEBUG` and `--log-format`/`HOLLER_LOG_FORMAT` dials,
 //!   severity, components, secret redaction, and the stderr banner.
@@ -31,6 +33,7 @@
 
 pub mod a2a;
 pub mod atomic_file;
+pub mod build_info;
 pub mod clock;
 pub mod docs;
 pub mod envelope;

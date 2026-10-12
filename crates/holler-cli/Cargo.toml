@@ -64,6 +64,11 @@ path = "tests/bound_token_lifetime_test.rs"
 name = "cli_invocation_test"
 path = "tests/cli_invocation_test.rs"
 
+# Issue #851: the commit resolver shared with build.rs through #[path].
+[[test]]
+name = "build_version_test"
+path = "tests/build_version_test.rs"
+
 [[test]]
 name = "logging_test"
 path = "tests/logging_test.rs"
