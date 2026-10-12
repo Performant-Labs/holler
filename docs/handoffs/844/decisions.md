@@ -16,3 +16,9 @@
 - **Assumed:** the test's three locale cases cover `LANG=C`, `LC_ALL=C` and none; `LC_CTYPE` is removed in each so an ambient value cannot hide the failure.
 - **Hedged:** the opt-in #649 scenario was not run (needs real OpenCode); the `-u` patch used to prove GREEN is reachable was reverted.
 - **Evidence:** `cargo test -p holler-adapter-opencode --no-fail-fast` failures above; with a temporary `.arg("-u")` the whole package passed; `cargo test -p holler-cli --test pane_integration` 71 passed.
+
+## F (implement) — 2026-10-12
+- **Decided:** `.arg("-u")` in `tui::tmux_command`, after the socket flag and before the call's arguments; doc comment and a module-doc "UTF-8 output" rule; CHANGELOG bullet under `### Bug Fixes`; one sentence in ADR-0021 item 1 of "`HarnessPort` as built (#642)". `lib.rs:234` (`env -u`) untouched.
+- **Assumed:** `-u` is accepted by every supported tmux (present since tmux 1.x, per the brief's risk list).
+- **Hedged:** A's warn 1 (document why the real-tmux test is not `#[ignore]`) left to T/docs; `docs/testing.md` not edited, as it is not in the brief's Files.
+- **Evidence:** `cargo test -p holler-adapter-opencode` all green incl. `utf8_locale_test` (ran, not skipped) and `ac11c`; clippy `-D warnings` and `cargo doc` clean; `pane_integration` 71 passed / 4 ignored; `changelog-check` ok; `lint.sh` exit 0.
