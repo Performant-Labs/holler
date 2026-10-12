@@ -863,3 +863,60 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     restored after;
   - `git diff --quiet origin/main HEAD` holds for `wired.rs`, `ports_test.rs`, `claude_code_rule_test.rs` and
     `unmanaged.rs`.
+
+## A, anti-duplication gate (third pass, after F cycle 5, the merge of `origin/main` after #857): 2026-10-12T05:25-06:00 (MDT)
+
+- **Decided:** PASS, 0 `block` and 2 `warn` (`docs/handoffs/835/handoff-A-dup.md`, which replaces the second pass's at
+  `2156b5f`).
+  - **The scope.** This cycle's diff is `git show --remerge-diff 59d8d59`: F's resolutions beyond git's automatic merge of
+    `cea1c17` and `b76f4d2`. I also read the whole PR, `git diff origin/main...HEAD`. `6787d99` changed only handoffs.
+  - **No parallel path.** #857 put this story's port method, constant, rule, fake, case 10 and forwards on `main`. After
+    the merge, the PR extends those objects and carries no second copy. The 16 files that left the PR's diff each equal
+    `main`'s. Every line the branch had added in them is on `main`, except three that took `main`'s wording by S's table.
+  - **S's silent duplicates are resolved:**
+    - one `CLAUDE_CODE_COMMAND` and one `is_claude_code_command`;
+    - the ADR decisions run 1 to 31, each number once;
+    - one "Deferred" adoption entry.
+  - **No duplicated text.** None of the PR's non-test files has a long line twice where `main`'s copy has it once.
+  - **Warn 1 (new, about records).** The merge made one of this story's runtime messages false: `assess.rs:104-105`, "which
+    Holler cannot drive yet". `main` drives Claude Code since #857. It is the same claim S's item 2 covers, and it is
+    shown to the operator in the cutover's dry run. No test pins it.
+  - **Warn 2 (carried, test-only).** `run_with_host` copies `run_with_store`, and `text_row` twins `text_line`.
+- **Assumed:**
+  - `origin/main` is still `b76f4d2` (`git fetch` at 05:21 MDT) and is an ancestor of `HEAD`, so it is the PR's base.
+  - T-green's GREEN on `59d8d59` holds for `6787d99`, because that commit changed only handoffs. I ran no build or test.
+- **Hedged:**
+  - **W1 is a `warn`, not a `block`.** It is not a parallel path. It is a records defect of the kind S rules on, and fixing it
+    means changing one string.
+  - **`read_tmux` and `main`'s `refuse_in_use` both combine `foreground_commands` with the predicate.** This is not a
+    finding. The two treat errors differently, and a shared helper would hold one `.any(...)` line. R2-7 is met, because
+    neither one compares a command name with `"claude"` itself.
+  - **ADR-0021 `:1023`, "which #831 can reuse", is left as optional.** It is still true; #831's launch now uses the
+    predicate.
+- **Evidence:**
+  - **Git:**
+    - `git fetch`; the merge base is `b76f4d2`; `59d8d59` has two parents;
+    - `git merge-tree --write-tree HEAD origin/main` is clean (`9fd0f25`);
+    - `git diff --stat 59d8d59 6787d99`: handoffs only;
+    - the file lists of `git diff --name-only d6ae539 f1d1bd0` and of `origin/main HEAD`: 16 files left, none came in;
+    - `git diff --quiet origin/main HEAD` holds for each of the 16;
+    - the branch's added lines in those files, checked against `main`'s copies: only three are not there, and each took
+      `main`'s wording;
+    - `git diff f1d1bd0 HEAD` of the import files: only `main`'s `HarnessEndpoint` and `Some(port)` lines, plus F's prose.
+  - **Read:**
+    - the full remerge diff, and the PR's diff of every code and docs file;
+    - ADR-0021: sections 2 (`:92-124`), 13 (`:982-1059`), 14 (`:1061-1116`), 15 items 2 and 17, "Deferred" and the
+      decisions;
+    - the guide: sections 1, 2, 3, 10 and 12;
+    - `pane.rs:170-246`, `unmanaged.rs:60-90`, `tx_launch/process.rs:1-110`;
+    - `import/observe.rs` in full, `import/assess.rs:50-139`, `import/harness.rs` in full;
+    - the brief (round 5), `handoff-A.md` pass 4, `handoff-S.md` cycle 3, `handoff-F.md` cycle 5, `handoff-T-green.md`
+      cycle 4, and this journal from the second A-dup on.
+  - **grep:**
+    - `CLAUDE_CODE_COMMAND`, `is_claude_code_command` and `"claude"` in `crates/`: one definition of each, two callers;
+    - every `impl HostPort` (12) and `impl HerdrPort` (11), with their `foreground_commands` and `observe_pane`;
+    - `compile_fail` on `main`: no `E0046` doctest;
+    - decisions cited by number;
+    - "cannot drive", "until that story lands" and their variants in the PR's added lines (W1);
+    - personal names in the added lines: none.
+  - **Sizes:** `wc -l` of every `.rs` file in the PR's diff: the largest is `ports.rs`, at 621.
