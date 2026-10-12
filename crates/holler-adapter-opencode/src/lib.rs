@@ -141,7 +141,6 @@ use serde_json::{json, Value};
 use crate::http::{HttpError, Reply};
 
 mod attach;
-mod exec;
 pub mod http;
 mod prompt;
 mod server;
