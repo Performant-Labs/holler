@@ -394,7 +394,7 @@ fn sample_pane_is_valid_and_deterministic() {
     assert_eq!(first.generation, 0);
     assert_eq!(first.profile, None);
     assert_eq!(first.session_of_record, None);
-    assert_eq!(first.harness.port, 48100);
+    assert_eq!(first.harness.port, Some(48100));
     assert_eq!(first.herdr.grid.to_string(), "r1c1");
 
     assert_ne!(first, sample_pane("demo-c2r1").unwrap());

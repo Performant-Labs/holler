@@ -38,8 +38,13 @@
 //!   each asks `GET /session/:id` first; a 404 (or a 400, for a malformed id) means no such
 //!   session, and nothing is sent or changed after it. A session id enters a URL path
 //!   percent-encoded, so no id can change the request line.
-//! - `health` is never an error: it is `false` when the server is down, frozen, or answers
-//!   anything but `{"healthy": true}`.
+//! - `health` is never an error for a server: it is `false` when the server is down, frozen, or
+//!   answers anything but `{"healthy": true}`.
+//! - **Every call is keyed by an endpoint** (#831): the adapter reaches a server on the
+//!   endpoint's port (`HarnessEndpoint::port`, the one conversion), and an endpoint that names a
+//!   single process is the refusal `process-unsupported`, before anything is sent. The four
+//!   process methods keep their `process-unsupported` defaults: the router of the wiring never
+//!   sends them here.
 //! - A tmux call that fails because the pane's tmux session, its pane or the tmux server is
 //!   missing reads as no TUI. Any other failure is `unavailable` with tmux's first stderr
 //!   line. A message never echoes an argument the adapter passed, a directory, an
@@ -130,7 +135,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use holler_pane::ports::Activity;
-use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use serde_json::{json, Value};
 
 use crate::http::{HttpError, Reply};
@@ -341,17 +346,18 @@ impl HarnessPort for OpenCodeHarness {
     /// applies none, so the server keeps its own default, and the engine's health wait has
     /// just seen the server answer. A spec with an agent is checked on the running server,
     /// `agent-unusable` when it does not run that agent (#642 part 3, `server::verify_serving`).
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        server::verify_serving(self, port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        server::verify_serving(self, at.port()?, spec)
     }
 
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        let port = at.port()?;
         let timeouts = &self.config.timeouts;
         Ok(server::healthy(port, timeouts.health.min(timeouts.call)))
     }
 
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        let call = self.call(port, OP_CREATE_SESSION);
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        let call = self.call(at.port()?, OP_CREATE_SESSION);
         let id = create(&call)?;
         if let Err(error) = retitle(&call, &id) {
             // Best effort, within what is left of the call: no untitled session is left
@@ -362,8 +368,8 @@ impl HarnessPort for OpenCodeHarness {
         Ok(id)
     }
 
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        let call = self.call(port, OP_LIST_SESSIONS);
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        let call = self.call(at.port()?, OP_LIST_SESSIONS);
         let reply = call.send(LIST, LIST.label, None)?;
         json_of(&reply)
             .as_ref()
@@ -371,8 +377,8 @@ impl HarnessPort for OpenCodeHarness {
             .ok_or_else(|| call.unexpected(LIST, &reply, "a list of sessions"))
     }
 
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        let call = self.call(port, OP_ABORT);
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        let call = self.call(at.port()?, OP_ABORT);
         let path = session_path(session);
         known(&call, &path, session)?;
         let reply = call.send(ABORT, &format!("{path}/abort"), None)?;
@@ -382,24 +388,41 @@ impl HarnessPort for OpenCodeHarness {
         settled(&call, session, self.config.timeouts.settle)
     }
 
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        attach::attach_tui(self, pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        attach::attach_tui(self, pane, at.port()?, session)
     }
 
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         attach::select_session(self, pane, session)
     }
 
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
+    /// The TUI's title is read through tmux, never the server (fact 3), so the endpoint is
+    /// checked to be a server's and is not otherwise used.
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        at.port()?;
         attach::shown_session(self, pane)
     }
 
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-        prompt::send_prompt(self, port, session, text)
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        prompt::send_prompt(self, at.port()?, session, text)
     }
 
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        prompt::session_activity(self, port, session)
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        prompt::session_activity(self, at.port()?, session)
     }
 }
 

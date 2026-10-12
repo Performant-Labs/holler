@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 use holler_cli::output::Format;
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::tx_launch::{self, TxFailure, TxOptions};
-use holler_pane::{HarnessPort, HostPort, PaneError, PaneId, ProbeResult, ServeSpec};
+use holler_pane::{
+    HarnessEndpoint, HarnessPort, HostPort, PaneError, PaneId, ProbeResult, ServeSpec,
+};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
@@ -382,7 +384,12 @@ fn the_health_wait_asks_nothing_once_its_deadline_has_passed() {
     let harness = FakeHarness::new();
     let deadline = Instant::now();
     assert_eq!(
-        tx_launch::wait_healthy(&harness, PORT, tx_launch::BOOT_POLL, deadline),
+        tx_launch::wait_healthy(
+            &harness,
+            &HarnessEndpoint::Port(PORT),
+            tx_launch::BOOT_POLL,
+            deadline
+        ),
         Ok(false)
     );
     assert_eq!(
@@ -401,7 +408,12 @@ fn a_deadline_during_the_health_waits_sleep_ends_it_without_another_ask() {
     let harness = FakeHarness::new();
     let deadline = Instant::now() + Duration::from_millis(200);
     assert_eq!(
-        tx_launch::wait_healthy(&harness, PORT, Duration::from_secs(60), deadline),
+        tx_launch::wait_healthy(
+            &harness,
+            &HarnessEndpoint::Port(PORT),
+            Duration::from_secs(60),
+            deadline
+        ),
         Ok(false)
     );
     assert_eq!(
@@ -563,7 +575,7 @@ fn relaunch_stops_the_old_server_and_starts_one_on_the_same_port() {
     let new = rig.fakes.harness.server(PORT).unwrap();
     assert_eq!(new.state, ServerState::Running);
     assert_ne!(new.pid, old.pid, "a new server, the old one gone");
-    assert_eq!(rig.record(PANE).unwrap().harness.port, PORT);
+    assert_eq!(rig.record(PANE).unwrap().harness.port, Some(PORT));
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }

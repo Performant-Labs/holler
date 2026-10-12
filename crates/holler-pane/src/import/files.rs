@@ -97,10 +97,15 @@ pub struct SessionsTable {
 
 impl SessionFiles {
     /// Whether `sessions.toml` marks the pane as not an OpenCode pane: a row whose harness is
-    /// not a [`HarnessKind`], the closed list of the harnesses a record can hold.
+    /// not [`HarnessKind::Opencode`], the one harness the import records. A `claude` row, a
+    /// harness a record can hold since #831, is not an OpenCode pane either: the import never
+    /// records one as OpenCode (plan review W7).
     pub(super) fn not_opencode(&self) -> bool {
         match &self.table {
-            FileState::Present(table) => table.harnesses.iter().any(|h| harness_kind(h).is_none()),
+            FileState::Present(table) => table
+                .harnesses
+                .iter()
+                .any(|h| harness_kind(h) != Some(HarnessKind::Opencode)),
             FileState::Absent | FileState::Unreadable => false,
         }
     }

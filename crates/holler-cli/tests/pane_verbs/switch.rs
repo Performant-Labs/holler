@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 use holler_cli::output::Format;
 use holler_pane::pane::{Health, Hold};
 use holler_pane::ports::Activity;
-use holler_pane::{Argv, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec};
+use holler_pane::{
+    Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec,
+};
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, HarnessOp as H, Quirk, TuiView};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
@@ -504,30 +506,39 @@ impl HarnessPort for WriterInSelect<'_> {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.panes.concurrent_put(self.other)?;
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
 }
 
@@ -781,44 +792,58 @@ impl HarnessPort for SeamHarness<'_> {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
         let then = self
             .panes
             .get(&self.pane)
             .expect("the store answers")
             .and_then(|record| record.session_of_record);
-        self.log.prompt(port, session, text, then);
+        self.log.prompt(at.port().unwrap(), session, text, then);
         match self.prompt.clone() {
             Some(error) => Err(error),
             None => Ok(()),
         }
     }
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        self.log.activity_query(port, session);
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.log.activity_query(at.port().unwrap(), session);
         Ok(self.activity)
     }
 }
@@ -833,12 +858,12 @@ fn seam_defaults_are_permissive() {
     let port = rig.live(P).port;
     let activity = rig
         .harness
-        .session_activity(port, &s2)
+        .session_activity(&HarnessEndpoint::Port(port), &s2)
         .expect("the default answers");
     assert_eq!(activity, Activity::Idle, "the activity default is idle");
     let refused = rig
         .harness
-        .send_prompt(port, &s2, "hello")
+        .send_prompt(&HarnessEndpoint::Port(port), &s2, "hello")
         .expect_err("the prompt default refuses");
     assert_eq!(refused.code().to_string(), "prompt-unsupported");
 }

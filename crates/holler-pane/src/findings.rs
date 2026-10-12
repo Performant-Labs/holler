@@ -2,10 +2,11 @@
 //! one table of what each kind tells the operator to run, and the one sanitizer for the
 //! untrusted text a finding quotes. #665 added the `ProfileDrift` kind, last.
 //!
-//! - [`FindingKind`]: the kinds, each with a stable kebab-case code that is also its JSON
-//!   form ([`FindingKind::code`] is the one source of both). A finding is a report, not an
-//!   error: its code is never a `RefusalCode`, and two codes (`herdr-version-unsupported`,
-//!   and #665's `profile-drift`) equal closed error codes.
+//! - [`FindingKind`]: sixteen kinds, each with a stable kebab-case code that is also its JSON
+//!   form ([`FindingKind::code`] is the one source of both). #832 added `unmanaged-stalled`,
+//!   #831 `pane-waiting` and `claude-login-missing`, and #665 `profile-drift`. A finding is a
+//!   report, not an error: its code is never a `RefusalCode`, and two codes
+//!   (`herdr-version-unsupported`, and #665's `profile-drift`) equal closed error codes.
 //! - [`Finding`]: one finding, with what it is about (a pane, a position, a Herdr pane, a
 //!   session, harness servers), a one-line message, its remedy and what `--fix` did.
 //! - **Remedies** ([`FindingKind::remedy`]) name only the verb that owns each repair
@@ -72,6 +73,13 @@ pub enum FindingKind {
     /// A Herdr pane no record names has shown the same screen for longer than the
     /// operator's threshold (#832). Only a whole-fleet pass with a threshold looks.
     UnmanagedStalled,
+    /// A pane's single process (Claude Code) waits for a person: a permission prompt or a
+    /// question; the message names which (#831). No Holler verb answers one.
+    PaneWaiting,
+    /// The processes of the Claude Code panes do not use the subscription login (#831): once
+    /// per pass that holds such a pane. The message names the login, never a command that
+    /// reads one, and no Holler verb sets a login (I7).
+    ClaudeLoginMissing,
     /// The pane's record differs from its profile's spec on at least one field of
     /// `profile_diff`'s table, the comparison `profile show` makes (#665). The message names
     /// the fields and no value. Which side is right is the operator's choice, so no remedy.
@@ -94,6 +102,8 @@ impl FindingKind {
         FindingKind::ShownDrivenMismatch,
         FindingKind::StraySession,
         FindingKind::UnmanagedStalled,
+        FindingKind::PaneWaiting,
+        FindingKind::ClaudeLoginMissing,
         FindingKind::ProfileDrift,
     ];
 
@@ -114,6 +124,8 @@ impl FindingKind {
             FindingKind::ShownDrivenMismatch => "shown-driven-mismatch",
             FindingKind::StraySession => "stray-session",
             FindingKind::UnmanagedStalled => "unmanaged-stalled",
+            FindingKind::PaneWaiting => "pane-waiting",
+            FindingKind::ClaudeLoginMissing => "claude-login-missing",
             FindingKind::ProfileDrift => "profile-drift",
         }
     }
@@ -127,13 +139,17 @@ impl FindingKind {
     /// - the pane has no usable session of record: `holler pane reset <pane>`, which creates
     ///   one (choosing an existing session is the operator's, never a guess);
     /// - a mismatch: `holler pane doctor <pane> --fix` while a fix can repair it, relaunch when
-    ///   it cannot or failed, nothing once it is fixed.
+    ///   it cannot or failed, nothing once it is fixed;
+    /// - a pane that waits for a person, and a login that is not the subscription's (#831):
+    ///   none, since only a person answers the one and logs in for the other.
     pub fn remedy(self, pane: Option<&PaneName>, fix: FixState) -> Option<String> {
         match self {
             FindingKind::HerdrVersionUnsupported
             | FindingKind::UnregisteredHerdrPane
             | FindingKind::UnmanagedStalled
             | FindingKind::StraySession
+            | FindingKind::PaneWaiting
+            | FindingKind::ClaudeLoginMissing
             | FindingKind::ProfileDrift => None,
             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
             FindingKind::HerdrPaneMissing

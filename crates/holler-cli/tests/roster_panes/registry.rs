@@ -5,7 +5,7 @@
 use holler_cli::pane::list::{PaneRow, COLUMNS};
 use holler_cli::roster_cmd::{Registry, PANE_COLUMNS};
 use holler_cli::say_cmd::resolve_pane_target;
-use holler_pane::pane::{Health, LastObserved};
+use holler_pane::pane::{HarnessInfo, HarnessKind, Health, LastObserved};
 use holler_pane::PaneError;
 use holler_pane_testkit::fault::Fault;
 use serde_json::{json, Value};
@@ -46,6 +46,86 @@ fn the_cells_are_pane_lists_cells_for_the_same_record() {
         };
         assert_eq!(last_six(line), expected, "row {row}: {line}");
     }
+}
+
+/// #831 (ADR-0021 section 15 item 18): a Claude Code pane's record goes through the roster
+/// like any other. Its hub row carries the six cells `pane list` prints for it, in text and in
+/// both JSON forms, with no `note:` line, and the base rows are as they are without it. The
+/// harness kind is not a column, so nothing may filter a record by it.
+#[test]
+fn a_claude_pane_record_fills_its_row_as_pane_list_prints_it() {
+    let mut claude = pane(
+        "demo-c1r2",
+        (3, 1),
+        None,
+        Health::Healthy,
+        (Some("ses-claude"), None),
+    );
+    claude.harness = HarnessInfo {
+        kind: HarnessKind::Claude,
+        port: None,
+        pid: Some(4242),
+        health: Health::Healthy,
+    };
+    claude.session_of_record = Some("ses-claude".to_owned());
+    let mut panes = base_panes();
+    panes.push(claude.clone());
+    let rig = Rig::new(panes);
+    let base = Rig::new(base_panes());
+
+    const ROW: &str = "demo-c1r2/ses-claude";
+    let mut rows = BASE_ROWS.to_vec();
+    rows.insert(2, ROW);
+    let doc = reply(&rows);
+    let base_doc = reply(&BASE_ROWS);
+
+    let text = rig.render(&doc, &[], Mode::Text);
+    assert_eq!((text.code, text.err.as_str()), (0, ""), "{text:?}");
+    let lines = table(&text.out);
+    assert_eq!(lines.len(), rows.len() + 1, "{text:?}");
+    assert_eq!(
+        last_six(lines[3]),
+        pane_list_cells(&claude),
+        "the Claude row: {}",
+        lines[3]
+    );
+    let base_text = base.render(&base_doc, &[], Mode::Text);
+    let without = |ls: Vec<&str>| -> Vec<Vec<String>> {
+        ls.iter()
+            .filter(|l| !l.starts_with(ROW))
+            .map(|l| last_six(l).iter().map(|c| (*c).to_owned()).collect())
+            .collect()
+    };
+    assert_eq!(
+        without(lines),
+        without(table(&base_text.out)),
+        "the base rows are unaffected"
+    );
+
+    let envelope = rig.render(&doc, &[], Mode::Envelope);
+    assert_eq!(
+        (envelope.code, envelope.err.as_str()),
+        (0, ""),
+        "{envelope:?}"
+    );
+    let data = envelope_data(&envelope);
+    let got = data["rows"].as_array().unwrap();
+    assert_eq!(got.len(), rows.len());
+    assert_eq!(got[2]["name"], ROW);
+    let listed = serde_json::to_value(PaneRow::from(&claude)).unwrap();
+    for key in NEW_KEYS {
+        let from = if key == "pane" { "name" } else { key };
+        assert_eq!(got[2][key], listed[from], "`{key}`: {}", got[2]);
+    }
+    assert_eq!(
+        data["mismatches"],
+        json!([]),
+        "SHOWN is the session of record"
+    );
+    let base_data = envelope_data(&base.render(&base_doc, &[], Mode::Envelope));
+    let others: Vec<&Value> = got.iter().filter(|r| r["name"] != ROW).collect();
+    let base_rows: Vec<&Value> = base_data["rows"].as_array().unwrap().iter().collect();
+    assert_eq!(others, base_rows, "the base rows are unaffected");
 }
 
 /// Acceptance 7: the registry is read on each call. A record rewritten by another writer

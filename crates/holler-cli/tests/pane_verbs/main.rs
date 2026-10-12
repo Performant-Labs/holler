@@ -45,19 +45,34 @@ fn unwired_ports_answer_not_implemented() {
     let codes = [
         ports.pane_store.list().err().map(|e| e.code().to_string()),
         ports.herdr.version().err().map(|e| e.code().to_string()),
-        ports.harness.health(1).err().map(|e| e.code().to_string()),
+        ports
+            .harness
+            .health(&holler_pane::HarnessEndpoint::Port(1))
+            .err()
+            .map(|e| e.code().to_string()),
     ];
     for code in codes {
         assert_eq!(code.as_deref(), Some("not-implemented"));
     }
-    // #802: the amended methods are unwired too.
+    // #802: the amended methods are unwired too; and #831's four process methods, whose
+    // defaults would answer `process-unsupported`, not `not-implemented`.
     let name = holler_pane::PaneName::parse("demo-c1r1").unwrap();
     let spec = holler_pane::ServeSpec::default();
     let argv = holler_pane::Argv::new(vec!["true".to_owned()]);
+    let choice = holler_pane::ports::SessionChoice::Fresh("s-1".to_owned());
     let amended = [
         ports.harness.serve_command(&name, 1, &spec).map(drop),
-        ports.harness.verify_serving(1, &spec),
+        ports
+            .harness
+            .verify_serving(&holler_pane::HarnessEndpoint::Port(1), &spec),
         ports.host.run(&name, "/", &argv),
+        ports
+            .harness
+            .process_command(&name, &spec, &choice)
+            .map(drop),
+        ports.harness.new_session_id().map(drop),
+        ports.harness.locate_process(&name, "s-1").map(drop),
+        ports.harness.login_status().map(drop),
     ];
     for answer in amended {
         let code = answer.err().map(|e| e.code().to_string());

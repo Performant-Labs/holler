@@ -13,7 +13,9 @@
 //!   (slice c, #682).
 //! - [`herdr`] — `HerdrPort` (slice d, #683).
 //! - [`host`] and [`harness`] — `HostPort` and `HarnessPort` (slice e, #684).
+//! - [`claude`] — a single-process `HarnessPort`, Claude Code's (#831).
 
+pub mod claude;
 pub mod harness;
 pub mod herdr;
 pub mod host;

@@ -350,13 +350,12 @@ Taken here (reversible; stated so they can be reversed):
    question is the one wait the hub cannot answer.
 4. **Use `agents --json`, hooks and the transcript path; never read `<config dir>/sessions/*.json`.**
 
-**For the operator to confirm** (it changes what "nobody types into a pane" means):
+**Decided by the operator, 2026-10-11 (recorded on #831 and in ADR-0021 section 15):**
 
-- **Is one Esc keypress through `HerdrPort::send_keys` allowed as an in-place interrupt?** It would give `abort` the same
-  meaning for both harnesses and keep the in-flight tool. It is typing into a pane, so I did not run it, and recommend
-  against it: stop-and-relaunch is enough for a first version, and a key that has to reach the right TUI state (a dialog
-  open, a question showing) is the kind of guess that produced the epic's incidents. If it is allowed, `AbortStyle::InPlace`
-  gets a Claude implementation and nothing else above changes.
+- **Is one Esc keypress through `HerdrPort::send_keys` allowed as an in-place interrupt? No.** Abort for a Claude Code pane is
+  stop and relaunch with `--resume <session of record>`: it loses only the turn in flight and keeps the session. An
+  `AbortStyle::InPlace` for Claude Code is not built, and nothing types into a pane (I4). The optional `PreToolUse` hook gate
+  stays a later, separate option. (This note had recommended against the keypress, and asked the operator to confirm.)
 
 ## Not tested
 

@@ -3,15 +3,21 @@
 //! what was observed. A pass runs one chain per pane, each on a thread of its own; the
 //! parent module has the rules and what the record write means.
 //!
-//! A chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
+//! A server's chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
 //! `list_sessions`, `shown_session`, and with `--fix` `select_session` and `shown_session`
-//! again, then one `cas_put`.
+//! again, then one `cas_put`. A single process's chain (#831) is the child module `process`:
+//! at most `ps`, `health`, `shown_session` and `session_activity`, then with `--fix` the
+//! caller's relaunch (a launch engine run, under its own budget) or one `cas_put`.
+
+mod process;
 
 use crate::findings::{quoted, Finding, FindingKind, FixError, FixState};
-use crate::pane::PaneRole;
-use crate::{Pane, PaneError, Ports};
+use crate::pane::{PaneRole, Shape};
+use crate::{HarnessEndpoint, Pane, PaneError, Ports};
 
-use super::{failed_message, shown_differs, ObservedHealth, PaneSummary, ReconcileRequest};
+use super::{
+    failed_message, shown_differs, ObservedHealth, PaneSummary, ReconcileRequest, Relaunch,
+};
 
 /// The calls of a chain, named as `<port>.<method>` in an `observe-failed` message.
 const HOST_PS: &str = "host.ps";
@@ -19,6 +25,9 @@ const HARNESS_HEALTH: &str = "harness.health";
 const HARNESS_LIST_SESSIONS: &str = "harness.list_sessions";
 const HARNESS_SHOWN_SESSION: &str = "harness.shown_session";
 const PANE_STORE_CAS_PUT: &str = "pane_store.cas_put";
+/// The record's harness, when it does not fit its kind (a value built in code: a stored record
+/// that does not fit does not load).
+const PANE_HARNESS: &str = "pane.harness";
 
 /// What one pane's chain found and observed.
 pub(super) struct Checked {
@@ -92,12 +101,32 @@ impl Screen {
     }
 }
 
-/// Run the chain of `pane`: observe, compare, repair, record.
-pub(super) fn check_pane(ports: Ports<'_>, request: &ReconcileRequest<'_>, pane: &Pane) -> Checked {
+/// Run the chain of `pane`: observe, compare, repair, record. A single process's chain is
+/// the child module `process`'s, with `relaunch` as its repair (#831).
+pub(super) fn check_pane(
+    ports: Ports<'_>,
+    request: &ReconcileRequest<'_>,
+    relaunch: Option<Relaunch<'_>>,
+    pane: &Pane,
+) -> Checked {
     let mut findings = Vec::new();
     check_tmux(ports, pane, &mut findings);
-    let server = observe_server(ports, pane, &mut findings);
-    let screen = observe_screen(ports, pane, &mut findings);
+    let at = match pane.harness.endpoint(&pane.name) {
+        Ok(at) => at,
+        Err(error) => {
+            findings.push(observe_failed(pane, PANE_HARNESS, &error));
+            return Checked {
+                findings,
+                summary: summary(pane, None, ObservedHealth::Unknown),
+                listed: None,
+            };
+        }
+    };
+    if pane.harness.kind.shape() == Shape::SingleProcess {
+        return process::check(ports, request, relaunch, pane, &at, findings);
+    }
+    let server = observe_server(ports, pane, &at, &mut findings);
+    let screen = observe_screen(ports, pane, &at, &mut findings);
     check_session_of_record(pane, &server, &mut findings);
     let screen = check_screen(ports, request, pane, &server, screen, &mut findings);
     findings.extend(record(ports, request, pane, &server, &screen));
@@ -148,14 +177,18 @@ fn check_tmux(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) {
 /// The pane's server: its health check, then its list. A healthy server's list is read for
 /// the rules; an unhealthy server's only tells a wedged server (the list times out) from a
 /// down one, and is not trusted further.
-fn observe_server(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) -> Server {
-    let port = pane.harness.port;
-    match ports.harness.health(port) {
+fn observe_server(
+    ports: Ports<'_>,
+    pane: &Pane,
+    at: &HarnessEndpoint,
+    findings: &mut Vec<Finding>,
+) -> Server {
+    match ports.harness.health(at) {
         Err(error) => {
             findings.push(observe_failed(pane, HARNESS_HEALTH, &error));
             Server::Unknown
         }
-        Ok(true) => match ports.harness.list_sessions(port) {
+        Ok(true) => match ports.harness.list_sessions(at) {
             Ok(ids) => Server::Healthy {
                 sessions: Some(ids),
             },
@@ -166,7 +199,7 @@ fn observe_server(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) ->
         },
         Ok(false) => {
             let wedged = matches!(
-                ports.harness.list_sessions(port),
+                ports.harness.list_sessions(at),
                 Err(PaneError::Timeout { .. })
             );
             let (server, kind, state) = if wedged {
@@ -176,16 +209,21 @@ fn observe_server(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) ->
                 let state = "does not pass its health check";
                 (Server::Down, FindingKind::ServerDown, state)
             };
-            let message = format!("the harness server on port {port} {state}");
-            findings.push(Finding::about(kind, pane, message).with_ports(vec![port]));
+            let message = format!("the harness server on {at} {state}");
+            findings.push(Finding::about(kind, pane, message).with_ports(own_ports(pane)));
             server
         }
     }
 }
 
-/// What the TUI in the pane shows.
-fn observe_screen(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) -> Screen {
-    match ports.harness.shown_session(&pane.herdr.pane_id) {
+/// What the pane shows: its TUI's session, or the session its single process holds.
+fn observe_screen(
+    ports: Ports<'_>,
+    pane: &Pane,
+    at: &HarnessEndpoint,
+    findings: &mut Vec<Finding>,
+) -> Screen {
+    match ports.harness.shown_session(&pane.herdr.pane_id, at) {
         Ok(shown) => Screen::Seen(shown),
         Err(error) => {
             findings.push(observe_failed(pane, HARNESS_SHOWN_SESSION, &error));
@@ -207,13 +245,17 @@ fn check_session_of_record(pane: &Pane, server: &Server, findings: &mut Vec<Find
         return;
     };
     if server.sessions().is_some() && !server.has(record) {
-        let port = pane.harness.port;
+        let port = port_text(pane);
         let message = format!(
-            "the harness server on port {port} does not have the session of record {}",
+            "the harness server on {port} does not have the session of record {}",
             quoted(record)
         );
         let finding = Finding::about(FindingKind::SessionOfRecordMissing, pane, message);
-        findings.push(finding.with_session(Some(record)).with_ports(vec![port]));
+        findings.push(
+            finding
+                .with_session(Some(record))
+                .with_ports(own_ports(pane)),
+        );
     }
 }
 
@@ -267,15 +309,28 @@ fn check_screen(
 
 /// `tui-foreign-session` for `pane`, whose TUI shows `session`.
 fn foreign_session(pane: &Pane, session: &str) -> Finding {
-    let port = pane.harness.port;
+    let port = port_text(pane);
     let message = format!(
-        "the TUI shows session {}, which the pane's own server (port {port}) does not have: \
+        "the TUI shows session {}, which the pane's own server ({port}) does not have: \
          a harness the record does not know is in the pane",
         quoted(session)
     );
     Finding::about(FindingKind::TuiForeignSession, pane, message)
         .with_session(Some(session))
-        .with_ports(vec![port])
+        .with_ports(own_ports(pane))
+}
+
+/// The port of `pane`'s server, as a finding lists it: one port, or none for a harness with
+/// none.
+fn own_ports(pane: &Pane) -> Vec<u16> {
+    pane.harness.port.into_iter().collect()
+}
+
+/// `port <port>`, as a message names the pane's server.
+fn port_text(pane: &Pane) -> String {
+    pane.harness
+        .port
+        .map_or_else(|| "no port".to_owned(), |port| format!("port {port}"))
 }
 
 /// What `--fix` did about a mismatch.
@@ -318,7 +373,10 @@ fn repair(
 fn select(ports: Ports<'_>, pane: &Pane, record: &str) -> Repair {
     let pane_id = &pane.herdr.pane_id;
     let selected = ports.harness.select_session(pane_id, record);
-    let after = ports.harness.shown_session(pane_id);
+    let after = pane
+        .harness
+        .endpoint(&pane.name)
+        .and_then(|at| ports.harness.shown_session(pane_id, &at));
     let (state, error) = match (&selected, &after) {
         (Err(error), _) | (Ok(()), Err(error)) => (FixState::Failed, Some(FixError::from(error))),
         (Ok(()), Ok(shown)) if shown.as_deref() == Some(record) => (FixState::Fixed, None),

@@ -8,6 +8,29 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
+  Code process, recorded by its pid and with no port, and the pane verbs drive it
+  ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
+  last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
+  a fresh session id with the seven environment variables that would override its login removed, so the process uses
+  the login Claude Code holds (a spec that names one of them is refused `claude-login-env-refused`, and `holler pane
+  doctor` reports `claude-login-missing` when that login is not the subscription's), accepts cross-session messages and
+  leaves out the question tool, and writes the record only once `claude agents --json` lists the process idle on its
+  session; otherwise it rolls back. Its `--model` and `--effort` are applied. A Claude Code process chooses its session
+  when it starts, so `relaunch`, `switch` (to a conversation of the pane's directory), `reset` (a fresh session),
+  doctor's `--fix` (only while it is idle) and `holler interrupt --pane NAME` (on its session of record: the operator's
+  decision, no keypress) restart it. `switch` and `reset` also refuse a pane waiting on a permission prompt
+  (`session-holds-permission`), an interrupt with text is `interrupt-text-unsupported` and `answer --pane` is
+  `answer-unsupported`. `holler pane doctor` reports two new findings, `pane-waiting` and `claude-login-missing`.
+  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet, and `holler roster`, whose rows are the sessions
+  that bodies serve, has no row for one: both need a body for its session
+  ([#850](https://github.com/Performant-Labs/holler/issues/850), after
+  [#839](https://github.com/Performant-Labs/holler/issues/839)). The new crate `holler-adapter-claude` implements the
+  harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`); every harness call is now keyed by an
+  endpoint, a port or a process; and `HostPort::foreground_commands` with the one Claude Code command rule is built to
+  #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
+  [`docs/pane-control.md`](docs/pane-control.md) documents the Claude Code pane.
 - Profiles can be renamed, exported and imported, and `holler pane doctor` reports a pane that drifted from its
   profile (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
   [#665](https://github.com/Performant-Labs/holler/issues/665)). `holler profile rename OLD NEW` renames a profile and
@@ -38,12 +61,12 @@ fills this file in at release time.
   its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
   `docs/releasing.md` says when the build works the commit out again.
 - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
-  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
-  the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane set up by hand
+  stays outside the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
   envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
   that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
-  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane set up by hand. A docs test pins the guide to the code's own tables. No behaviour changes.
 - The roster shows the pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
   [#648](https://github.com/Performant-Labs/holler/issues/648)): `holler roster` appends the columns PANE, POS, PROFILE,
   HEALTH, SHOWN and DRIVEN after HOLD, read from the pane registry as `holler pane list` prints them (`-` for a session

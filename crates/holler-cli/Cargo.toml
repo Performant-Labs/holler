@@ -421,9 +421,11 @@ holler-proto = { path = "../holler-proto" }
 # #670: the pane/profile verbs take every error code, guard and port type from
 # the holler-pane crate (`Ports`, `PaneError`, `GridPos`, `Argv`, `EnvVarName`).
 holler-pane = { path = "../holler-pane" }
-# #649: `pane/wiring.rs` builds the real ports from the three adapter crates
+# #649: `pane/wiring.rs` builds the real ports from the adapter crates
 # (ADR-0021 section 5: the verbs run CLI-side, so holler-cli depends on the
-# adapters and holler-hub does not).
+# adapters and holler-hub does not). #831 adds the Claude Code adapter, which
+# the wiring routes beside OpenCode's (`HarnessRouter`).
+holler-adapter-claude = { path = "../holler-adapter-claude" }
 holler-adapter-herdr = { path = "../holler-adapter-herdr" }
 holler-adapter-host = { path = "../holler-adapter-host" }
 holler-adapter-opencode = { path = "../holler-adapter-opencode" }
@@ -512,6 +514,14 @@ path = "tests/pane_verbs/main.rs"
 [[test]]
 name = "profile_verbs"
 path = "tests/profile_verbs/main.rs"
+
+# #831: a Claude Code pane under the pane and profile verbs, over the test kit's
+# fakes with `FakeHarnesses` as the harness port. Its own target, so pane_verbs
+# and profile_verbs build without the Claude harness while the endpoint change
+# lands first.
+[[test]]
+name = "pane_claude"
+path = "tests/pane_claude/main.rs"
 
 # Process-level tests of the whole pane/profile surface: the real `holler`
 # binary, every stub verb, `--format`/`--json`, usage errors, which flag parses

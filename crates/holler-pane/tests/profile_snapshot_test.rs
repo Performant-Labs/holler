@@ -36,7 +36,7 @@ fn full_pane() -> Pane {
     p.herdr.workspace = "scratch".to_owned();
     p.herdr.grid = GridPos { row: 2, col: 1 };
     p.host.cwd = "/srv/demo".to_owned();
-    p.harness.port = 48100;
+    p.harness.port = Some(48100);
     p.model = ModelSpec {
         provider: "demo-provider".to_owned(),
         model_id: "demo-model".to_owned(),
@@ -134,7 +134,7 @@ fn fixed_port_policy_is_the_prefix_and_the_port() {
     assert_eq!(fixed_port_policy(48100), "fixed:48100");
     // A record at port 0 is copied as recorded (#644's `port_of_policy` refuses it).
     let mut p = full_pane();
-    p.harness.port = 0;
+    p.harness.port = Some(0);
     assert_eq!(spec_from_pane(&p).harness.port_policy, "fixed:0");
 }
 

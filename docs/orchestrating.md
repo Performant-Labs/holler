@@ -139,8 +139,11 @@ registry's control: its record's model and session of record go stale until `hol
 again, and `holler pane doctor --fix` must not be run on it meanwhile (pane-control.md, section 11). After the sign-off
 the script's OpenCode path is retired, in a later story.
 
-A pane running **Claude Code** is not in the pane registry, so `holler pane` cannot restart it: `scripts/pane-restart`
-is its way, now and after the sign-off, which does not retire this path (issue #784). Such a pane is detected, not named: the script looks for a live Claude Code process whose
+A pane running **Claude Code** that was set up by hand is not in the pane registry, so `holler pane` cannot restart it:
+`scripts/pane-restart` is its way, now and after the sign-off, which does not retire this path (issue #784). A Claude
+Code pane that `holler pane launch PANE --harness claude` started (#831) has a record: restart it with
+`holler pane relaunch PANE`, not with the script, whose new process the record would not name (pane-control.md,
+section 2). Such a pane is detected, not named: the script looks for a live Claude Code process whose
 record in `~/.claude/sessions/<pid>.json` names the pane's tmux session (`hj-c3r1`). Such a pane takes a Claude
 model alias or name and an effort level, and none of the OpenCode options:
 
