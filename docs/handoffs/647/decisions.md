@@ -1,285 +1,273 @@
-# Decision journal: #647 part 2 (`unattached` and `agent-cannot-dispatch`)
+# Decisions — #647 the reconcile engine and `holler pane doctor`
 
-Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief.md`. Part 1's record is in `docs/handoffs/647-part1-record/` until the run's last step moves it back.
-
-## A (Phase 3, up-front plan review) — 2026-10-12T09:47-06:00
-- **Decided:**
-  - PASS, with 0 blocks and 8 warns (`handoff-A.md`).
-  - Kept every preparer decision marked "to be confirmed at the plan check": D1, D2, D4-D11, D13-D15, D17 and D18.
-  - Two of them are kept with conditions:
-    - D2/D15's empty view from Claude Code is answered only for a `Process` endpoint. Both implementations call `at.process()?` first, and `FakeClaude` gets `ClaudeOp::AgentView` (W-4).
-    - D8's `remedy_for` is kept, provided `with_agent` comes after `with_fix`, `Finding` gets no new field, and the module doc's remedy rule is amended (W-2). For a pane in a profile, the message names `--profile` (W-3).
-  - Corrected the Reuse map: `from_messages` is not a shared reader today. Sharing it, as D4 specifies, needs a split in `prompt.rs` that quotes no body (W-1).
-  - Resolved where the new types go: `src/ports/agent_view.rs` (W-5).
-  - Named the second read-only assertion: `pane_verbs/doctor.rs:338-342` (W-6).
-  - Recommended `reconcile/observe/agent.rs` for the rule (W-8).
-  - Asked for a stated bound on the message read (W-7).
+## A (Phase 3, up-front plan review) — 2026-10-09T17:23:37-06:00
+- **Decided:** PASS on docs/handoffs/647-brief.md at a98258a (sha256 0f98bbc7b52e5c78...), with 0 blocks and 7 warns (see
+  handoff-A.md).
+  - The objects and layers are right:
+    - a pure engine and finding types in `holler-pane` (ADR-0021 §5), working only through `Ports`;
+    - a thin verb in its own file;
+    - closed codes only, with exit codes from `class_of`;
+    - scoping through `ProfileScope::resolve`;
+    - record writes only on change (`panes/mod.rs:27-28`).
+    No frozen file is edited, and the only copy of something already on `main` is the clock read (W-3).
+  - W-1 (the most consequential): reconcile becomes the writer of `harness.health` and defines what `last_observed.at` and
+    `shown: None` mean. #643, #645, #646 and #648 read those fields, and #643 reads them differently. The meanings would
+    live only in this brief, because AC 28 forbids any other ADR-0021 edit.
+  - W-2: the SHOWN-vs-record comparison should be one `pub` pure function in `reconcile.rs`, the only unfrozen place the CLI,
+    the hub and the engine can all import.
+  - W-3: use `holler_proto::clock::now_millis()`, not a hand-written `SystemTime::now()` read.
+  - W-4: make the doctor-command builder `pub`, since #644 and #663 build the same command line in flight. On C-8, never
+    print raw OpenCode, Herdr or tmux commands.
+  - W-5: three vocabulary problems:
+    - `FindingKind` keeps two sources (serde derive and `code()`);
+    - `ObservedHealth` spells an observation differently from the finding codes and the record;
+    - `observe-failed` has two meanings.
+    Also, #650's findings have no Forward-compat line.
+  - W-6: test placement and shared test helpers:
+    - AC 25 belongs in `holler-pane/tests/`;
+    - reuse the rig that merges first;
+    - AC 26 should call `try_parse`;
+    - one text-escaping helper.
+  - W-7: two blind spots of the frozen ports to record as risks: a foreign TUI on a shared data directory, and strays that
+    accumulate.
 - **Assumed:**
-  - #839 (F done at `d480424`, not merged) lands its remedy builders as they are on its branch.
-  - The OpenCode 1.19.0 facts in the brief hold. The opt-in real test proves them.
-  - The doctor rig stays the world of the doctor tests, built from `sample_pane`, which has no agent.
+  - The briefs and A handoffs in `.claude/worktrees/{0643-read-verbs,0644-launch-relaunch,0663-profile-scope-probe}` are the
+    current plans of those stories. #644's brief was being amended in its working tree while I read it, so I cite its
+    content rather than its line numbers.
+  - None of these plans is merged. I used them as evidence of what is being planned, not as patterns.
+  - The issue (#647), the epic (#633), ADR-0021, ADR 0003 and the merged code are the authority.
 - **Hedged:**
-  - W-3: whether the remedy itself should carry `--profile` is a change to part 1's rule, so it is the operator's call.
-  - W-7: whether 1.19.0's message route takes a limit was not measured.
-  - W-8: the size estimates for `ports.rs` and `observe.rs` are mine, from counting the planned additions, not from built code.
+  - W-1 is a warn, not a block. The ADR is silent on these meanings rather than contradicting the plan, and the frozen docs
+    are themselves ambiguous: `pane.rs:188` says "When it was observed", `ports.rs:198` says "if it can tell", and the fake
+    says the home screen (`harness.rs:135-136`).
+  - This also differs from #642's B-1. That block was an item the ADR deferred to the story by name, while the brief
+    forbade the edit. Here the only item deferred by name (the hub timer) is handled.
+  - #643's A rated the same `shown: None` question a warn, so the rating is consistent.
+  - W-2, W-4 and W-6(b, d) are forward duplication between unmerged plans. There is no dominant pattern on `main`, so per
+    the role rule they are warns. At Phase 7 I will reject a second rig or text helper if one is on `main` by then.
+  - W-3 is the only finding about an object already on `main`. It stays a warn because the fix is one call and F reads this
+    handoff. #644's A rated the same point a warn.
+  - W-7(a) rests on the documented fake (one shared data directory) and on `shown_session`'s signature, not on a run of the
+    real adapter.
 - **Evidence:**
-  - Read in full: `ports.rs`, `ports/router.rs`, `ports/process.rs`, `reconcile.rs`, `reconcile/observe.rs`, `reconcile/observe/process.rs`, `findings.rs`, the testkit's `host.rs`, `harness.rs` and `harnesses.rs`, and `holler-adapter-opencode/src/{lib.rs,server.rs,prompt.rs}`.
-  - Read in part: `claude.rs`, `holler-adapter-claude/src/lib.rs`, `holler-adapter-host/src/{lib.rs,tmux.rs}`, `holler-cli/src/pane/{relaunch.rs,wiring.rs,wiring/bind.rs}`, `doctor/{rig.rs,read_only.rs,surface.rs}`, `pane_verbs/doctor.rs`, `pane_integration/bind.rs`, and ADR-0021 sections 2, 3, 9, 12 and 15, plus "Deferred" and "Decisions taken".
-  - Commands: `grep -rn 'impl[^{]*HostPort for\|impl[^{]*HarnessPort for'` (every implementation); `git diff 6eff9cc issue-839-implementation -- crates/holler-pane/src/{findings.rs,reconcile/observe.rs,ports.rs,lib.rs}` (#839's overlap); `wc -l` on every file in the Blast radius.
+  - Read in full:
+    - the brief and its two outside-review results (r1, r2);
+    - `holler-pane/src/{lib,ports,pane,error,profile,grid,reply,probe,generation}.rs` and the stubs;
+    - `holler-cli/src/output.rs`, `pane/{mod,args,wiring,doctor,relaunch,reset,switch,list,get,launch,close}.rs`;
+    - `tests/verb_harness/{mod,parse}.rs` and `tests/pane_verbs/main.rs`;
+    - `holler-pane-testkit/src/{lib,fixture}.rs`;
+    - `docs/adr/ADR-0021.md` and `docs/adr/ADR-0003.md`.
+  - Also read:
+    - `holler-hub/src/panes/mod.rs:1-60` and `holler-proto/src/{clock,error}.rs` (excerpts);
+    - the sanitizers in `hub_cmd.rs`, `acp_driver/auth.rs`, `log.rs`, `holds.rs` and `adapter-herdr/src/protocol.rs`;
+    - `holler-pane/tests/{ports_test,error_test}.rs` (headers and the code-table test);
+    - `tests/pane_verbs/process/{docs_rows,stub}.rs` (excerpts);
+    - the test kit's public API and op names;
+    - `scripts/lint.sh` and `clippy.toml`;
+    - `crates/holler-cli/Cargo.toml` and `crates/holler-pane/Cargo.toml`.
+  - Sibling plans: `643-brief.md` (Decisions 10-12) and `643/handoff-A.md`; `644-brief.md` (excerpts) and
+    `644/handoff-A.md`; `663-brief.md` (excerpts); `642/decisions.md` (for the journal format).
+  - Issues read with `gh issue view`: 647, 633 (with comments), 644, 645, 646, 648, 649, 650, 665, 694.
 
-## T (Phase 4, author / RED) — 2026-10-12T10:25-06:00
+## T (Phase 4, author tests / RED) — 2026-10-09T17:34:29-06:00
 - **Decided:**
-  - RED is valid; verdict PASS (`handoff-T-red.md`).
-  - T made the contract commit `45bff85` itself (ADR-0021 plus the `ports.rs` doc bullet, documentation only, verified to build and pass) before any test. The driver commits a phase with one `git add -A`, which would fold the contract into the RED commit and break acceptance 20.
-  - T also made the pure move `3a09f7d` (the two harness doubles of `switch.rs` into `switch/doubles.rs`) as its own commit. The brief gave this move to F, but it moves test files, which are T's (F writes no test), and it had to precede the forwards T adds.
-  - The API names the tests use where the brief left them open:
-    - `AgentView::with_turns` and `with_dispatchers`, the latter sorting and dropping duplicates so the rule lives in one place;
-    - `TurnAgent::new`;
-    - `FakeHost::attach_client` and `detach_clients` returning `Result`, with `pane-not-found` for a missing session;
-    - `FakeHarness::seed_turns(u16, &str, Vec<TurnAgent>)` and `seed_dispatchers(u16, Vec<AgentKey>)`;
-    - `ClaudeOp::AgentView`.
-  - Acceptance 9's "a message without an agent is skipped" conflicts with ADR-0021 section 12 ("`None` when it recorded none"). T pinned the ADR: such a message is a turn with `agent: None` and `can_dispatch: None`. It stays one of "the last `max_turns` user turns", and it stops the rule, which is the conservative reading.
-  - The `compile_fail,E0639` doc tests go on `HarnessPort`'s doc in `ports.rs`, because `agent_view.rs` is F's to create.
-  - Acceptance 13's negatives are each their own test, sharing one helper per group.
-  - The two host-read assertions share `rig::HOST_READS` and `rig::HARNESS_READS` (A's W-6).
+  - **The scaffold.** Following the brief's test plan, T landed only the Decision 10 types and the Decision 11
+    args, so that RED fails on an assertion and not on a compile error: `findings.rs`, `reconcile.rs` (`reconcile()`
+    returns `NotImplemented`) and `doctor.rs` (still the stub `run`).
+  - **The suite.** It is 31 tests in `pane_verbs` (`doctor.rs`, `doctor/read_only.rs`, `doctor/surface.rs`, built on
+    `doctor/rig.rs`) plus one unit test.
+  - **AC 25's placement.** It lives in `crates/holler-pane/tests/findings_test.rs`, per A's W-6(a): it needs no fake,
+    and that is the cheapest sufficient tier.
+  - **AC 26's parser.** It parses through `verb_harness::parse::try_parse`, per A's W-6(c).
+  - **AC 24's order.** It reads the in-flight maximum before it unwraps the result, so its RED shows the invariant
+    (`left: 0`).
+  - **One test outside the numbered ACs:** `record_write_conflict_is_reported_not_retried` (Decision 6, R-6).
+  - **The test files are split** so that each stays under lint's 600-line warning.
 - **Assumed:**
-  - The fixtures cut from a scratch OpenCode 1.19.0 at 10:00 MDT are what the fleet's 1.19.0 serves. The opt-in `ac647_*` real test re-proves this on a live server.
-  - A profile member's message names `--profile` and the profile (A's W-3). The test asserts both appear, not the exact wording.
-  - `unattached`'s message holds D11's two substrings verbatim.
+  - The fakes' documented semantics are the contract (C-2): `list_sessions` answers `timeout` on a frozen server and
+    `unavailable` on a killed one, `shown_session` never reaches the server, and every port shares the `"default"`
+    data directory until `set_data_dir`.
+  - Remedy strings are exactly Decision 3's.
+  - A finding's `session` is pinned only where an AC names it: the shown S2 in AC 1, and the foreign session in AC 3.
+  - Exact-set assertions (for example, AC 2 is exactly `[server-wedged]`) follow from Decision 4: an unhealthy
+    server's list is not trusted.
 - **Hedged:**
-  - The two `E0639` doc tests are not RED: stable rustdoc does not check the code, and the type is missing on `main`. They are guards for `#[non_exhaustive]` after F.
-  - The 12 negatives of `doctor/agent.rs`, and the similar no-finding tests, cannot fail on an assertion before the rule exists. They are RED by compile only. They guard against a rule that fires too eagerly.
-  - The diff gate's evidence appendix is Phase 6's work.
+  - The added `findings_test.rs` is not in the brief's Files list or AC 33. O should amend both, as A's W-6(a)
+    suggests.
+  - `ObservedHealth`'s value spellings and the text summary line are deliberately unpinned, so F can act on A's
+    W-5(b).
+  - The scaffold keeps the serde derive on `FindingKind`, as the brief specifies; A's W-5(a) is F's to take.
 - **Evidence:**
-  - `cargo build --workspace --tests --keep-going` on the real tree: exit 101, only missing-API errors (`E0599`, `E0432`, `E0407`).
-  - `cargo test -p holler-pane --doc`: the two new `E0046` doc tests FAILED with "Test compiled successfully, but it's marked `compile_fail`".
-  - Against a throwaway API shim, restored byte for byte afterwards (`grep -rn SHIM crates/` is empty):
-    - `cargo clippy --workspace --all-targets -- -D warnings` was clean;
-    - every new test failed on its assertion, as listed in `handoff-T-red.md`;
-    - `pane_claude` (43) and `profile_verbs` (118) passed.
-  - `bash scripts/lint.sh`: exit 0.
-  - The privacy grep of the added lines: clean.
+  - RED run: `cargo test -p holler-cli --test pane_verbs doctor` gives 0 passed and 31 failed. The failures:
+    - 21 engine tests: `reconcile must complete the pass and report: not implemented`;
+    - AC 24: `left: 0 right: 4`;
+    - the verb tests: exit `1` where `0` is expected, or `not-implemented` where `unavailable` is expected.
+  - Passing at RED:
+    - `findings_test`: 1 passed;
+    - `cli_surface_test`, `docs_cli_test` and `pane_cli_process`: 3, 3 and 34 passed;
+    - the other 63 `pane_verbs` tests.
+  - Clean at RED: clippy (`-D warnings`), `lint.sh` (exit 0), `rustfmt --check` on the touched files, and gitleaks.
 
-## F (Phase 5, implementation) — 2026-10-12T11:06-06:00
+## F (Phase 6, implement) — 2026-10-09T17:58:06-06:00
 - **Decided:**
-  - Built exactly the API T's RED names (`handoff-F.md`, "What was done"), with no test written or edited.
-  - A's warns, applied:
-    - W-1: two shared readers, `prompt::messages` (quotes no body) and `server::agent_list`; the default-agent rule became `server::as_default`, which `usable` and `agents.rs` share, with `usable`'s messages unchanged;
-    - W-2: `with_agent` is applied after `with_fix`, `Finding` gets no field, and the module doc admits a parsed `AgentKey` in the joined form;
-    - W-3: a profile member's message names `--profile P`, and so does the guide's row;
-    - W-4: both Claude implementations call `at.process()?` before the empty view;
-    - W-5: `src/ports/agent_view.rs`;
-    - W-7: the bound is stated, and the `limit` was measured and not used;
-    - W-8: the rule is in `reconcile/observe/agent.rs`, with `RECENT_TURNS` beside it.
-  - `can_dispatch` counts a newer rule of permission `task` or `*` that allows or asks for another pattern as reopening. ADR-0021 section 12's parenthetical was sharpened to say so: the change can only remove findings.
-  - Strict shape checks in `agent_view`: a message without `info.role`, or an agent without a string `name`/`mode`, is `unavailable`.
-  - `TurnAgent` is `#[non_exhaustive]`. The fake's turns are keyed by data directory and session, and its dispatchers by port.
+  - **The engine.** `reconcile.rs` holds the API, the fan-out and the fleet-level rules; `reconcile/observe.rs` (the
+    brief's named fallback) holds one pane's chain: observe, compare, repair, record. The split was made up front: the
+    two together are about 830 lines.
+  - **Threads.** `thread::Builder::spawn_scoped`: a thread that cannot start or panics is an `observe-failed`, never a
+    panic of the pass (Decision 9). One thread runs the two Herdr calls, one runs each pane's chain.
+  - **The fix.** It acts, then observes again even after a failed select; the re-observation is what is recorded.
+    `fixed` needs a successful select and the session of record shown afterwards. A select that was acknowledged while
+    the TUI still shows another session is `failed`, with `fix_error.code` `shown-driven-mismatch`, because ADR-0021
+    leaves the closed code of a post-act mismatch to #644 and #645.
+  - **Dedupe.** It is on the whole finding (`sort` + `dedup`), with the message as the last sort key. Decision 2's
+    4-tuple would merge the two pane-less Herdr `observe-failed` findings that AC 21 requires.
+  - **First observation.** A record at `last_observed.at == 0` gets its first observation written even when the values
+    equal the defaults (A's W-1 edge case). After that, a record is written only on a change.
+  - **A's warns, taken as written:**
+    - W-2: a `pub` `shown_differs`;
+    - W-3: `holler_proto::clock::now_millis()`;
+    - W-4: `pub` `doctor_command` and `FindingKind::remedy` as the one remedy table;
+    - W-5(a): `FindingKind` serializes from `code()`;
+    - W-5(b): `ObservedHealth` is `healthy | server-wedged | server-down | unknown`;
+    - W-5(c): `observe-failed`'s doc covers the record write;
+    - W-6(d): `findings::quoted` is the one quoting helper, used by the CLI renderer too;
+    - W-1: the meanings are in `reconcile.rs`'s module doc, and edit (c) uses A's wording.
 - **Assumed:**
-  - The fleet's OpenCode is 1.19.0, the version whose `info.agent`, rule list, `native`, `mode` and `hidden` the opt-in test proved today.
-  - No live config writes a `task` rule whose permission is a wildcard other than `*`: such a rule is read as another permission.
+  - Decision 3's remedies and the fixture's documented semantics (C-2) are the contract, as T assumed.
+  - `ports` and `herdr_pane` are filled only where the server or Herdr pane is the subject, since no AC pins them beyond
+    the strays.
 - **Hedged:**
-  - The whole message list is read on every pass for each OpenCode pane without an agent. 1.19.0's `limit` counts every message, so it cannot bound "the last three user turns" without paging. Paging is a follow-up if the live fleet makes the read heavy.
-  - W-3's question, whether the remedy itself should carry `--profile`, stays the operator's.
-  - W-2's fold of the two remedy mechanisms belongs to whichever of #839 and this story merges second.
+  - ADR-0021 section 1's rows (W-1) are not edited, because AC 28 forbids it. O decides the amend channel.
+  - AC 31's grep only works with paths made relative (the worktree path contains `reconcile`); recorded for T and S.
+  - The 4 `logging_test` failures in the first `cargo test --workspace` are environmental: a live hub on this machine
+    answers `holler roster`. They pass with an isolated `HOLLER_STATE_DIR`.
 - **Evidence:**
-  - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2687 passed, 0 failed, 39 ignored.
-  - `cargo clippy --workspace --all-targets -- -D warnings`: clean. `bash scripts/lint.sh`: exit 0. `cargo doc` of the touched crates: no warning.
-  - Opt-in runs: real OpenCode 14/14, `ac647` included; real tmux 9/9, the conformance suite's case 11 included.
-  - A scratch crate showed `E0639` for every struct literal of `AgentView` and `TurnAgent`.
-  - The W7 mutation check: every constant wrapper failed its pinning tests, and `bind.rs` was restored byte-identical (sha256).
-  - The `limit` measurement on a scratch 1.19.0 server at 11:03 MDT.
-  - The privacy grep of the added lines: clean.
+  - `cargo test -p holler-cli --test pane_verbs doctor`: 31 passed, 0 failed.
+  - `pane_verbs` 94, `cli_surface_test` 3, `docs_cli_test` 3, `pane_cli_process` 34 and every `holler-pane` target
+    passed.
+  - `observation_runs_concurrently`: 20/20.
+  - `HOLLER_STATE_DIR=<fresh dir> cargo test --workspace --no-fail-fast`: 126 targets, 1415 passed, 0 failed, 5
+    ignored, exit 0.
+  - Clean: clippy `--workspace --all-targets -D warnings`; `lint.sh` (exit 0); `changelog-check`; `rustfmt --check` on
+    the touched files; `cargo machete`; no `unsafe`; no manifest diff; gitleaks.
+  - The text output was checked by eye once, with a temporary print that has since been removed.
 
-## T (Phase 6, verify / GREEN) — 2026-10-12T11:20-06:00
+## T (Phase 7, verify / GREEN + Tier 2) — 2026-10-09T18:08:43-06:00
 - **Decided:**
-  - GREEN: every RED test passes on F's `8b6030e`, and F touched no test file.
-  - Added four rows to OpenCode's `can_dispatch` table: `allow *` of another pattern, `ask` of another pattern, `ask *`, and an unknown action. They pin F's sharpened ADR-0021 section 12 clause, which no test held (M1 survived without them).
-  - Added `attached_test::an_empty_listing_or_counts_that_disagree_are_unavailable`, because `parse_attached`'s two strictness branches survived mutation (P1, P2).
-  - Appended one evidence entry: the scratch rig's dead-end config names no agent, which acceptance 18's end state relies on.
-  - Verdict PASS: no production change is needed.
+  - GREEN is valid: 31/31 RED tests pass on `9500955`, and F changed no test file.
+  - I added one test, `acknowledged_select_that_switches_nothing_is_not_fixed`. A mutation spot-check showed that
+    Decision 5's "equal to S is `fixed`, anything else `failed`" was unpinned: M6 survived all 31 tests. The new test uses
+    the test kit's `Quirk::SelectAckedWithoutTui` and fails under M6. It is a suite gap, not an F defect.
+  - I appended 3 test-kit facts to `evidence.md`: `select_session`, the fake Herdr's unsupported `version()`, and
+    `FakeProfileScope::resolve`'s refusals.
 - **Assumed:**
-  - The `remote_admin_test` failure is #847's known flake. The branch changes nothing in its path, and it passed 5 of 5 on its own.
+  - CI's `--skip roster_stays_accurate_under_concurrent_body_load` form of `cargo test --workspace` is the AC 30 gate.
+  - An isolated `HOLLER_STATE_DIR` is a valid environment, as F found.
 - **Hedged:**
-  - Acceptance 18's opt-in scratch scenarios were not run (they need real Herdr). They compile, and the opt-in `ac647_a_scratch_server_without_project_agents_has_no_dispatcher` backs their claim.
+  - `findings_test.rs` is still outside the brief's Files list (AC 33). It is left to O or S as bookkeeping, not
+    routed to F.
 - **Evidence:**
-  - Workspace: 2686 passed, 1 failed (#847), 39 ignored.
-  - Clippy is clean. Lint exits 0. changelog-check, docs_cli_test, wire_selftest and machete pass. rustfmt is clean on all 63 touched `.rs` files.
-  - Real tmux 3.7c: 9 of 9. Real OpenCode 1.19.0: 14 of 14.
-  - 12 production mutations, each restored with `git checkout`:
-    - M1 to M8 and both W7 wrapper mutations were killed;
-    - P1 and P2 were killed once T's new test was in place.
+  - Tier 1 on `9500955`: lint 0, changelog 0, clippy 0, workspace 126 targets / 1414 passed / 0 failed, docs_cli 0,
+    wire_selftest 0, machete 0, test-hooks 0.
+  - After the test edit: `pane_verbs` 95/95, doctor 32/32, clippy clean, lint 0, rustfmt clean, gitleaks clean.
+  - `observation_runs_concurrently`: 20/20.
+  - Mutations M1-M5 and M7 are caught. M6 was not caught, and is caught after the new test.
 
-## T (Phase 7 re-entry, verify / GREEN) — 2026-10-12T11:55-06:00
-- **Decided:**
-  - GREEN is confirmed again at `4bd4e75`. Production code is unchanged since F's `8b6030e`, so the mutation results stand.
-  - Corrected the first pass's "rustfmt clean" claim. A per-file comparison of `cargo fmt` drift, `origin/main` against HEAD, found three test files that were rustfmt-clean on `main` and that only this branch's lines broke: `real_opencode_test.rs`, `pane_verbs/doctor.rs` and `ports_test.rs`. T fixed them, whitespace only.
-  - Left four files as they are: `docs_pane_control_test.rs`, `pane_integration/{scenario,wired}.rs` and `fake_host_test.rs`. Their long-line style was already there on `main`, and the branch's lines follow it.
-  - Verdict PASS.
+## A (Phase 7, anti-duplication gate) — 2026-10-09T18:18:44-06:00
+- **Decided:** PASS on `3bdd129..baf176f`, with 0 blocks and 5 warns (see handoff-A-dup.md).
+  - F extended every object the brief's Reuse map names and copied none:
+    - `Ports`, and `ProfileScope::resolve`;
+    - `PaneStore` `list`, `get` and `cas_put`;
+    - the closed codes, through `ErrorBody::from` and `emit`;
+    - `GridPos`, `ProfileOpt`, and the name parsers;
+    - `error::excerpt`, wrapped and not copied;
+    - `now_millis` (W-3);
+    - the test kit's fakes, `run_verb_with`, `check_envelope` and `try_parse` (W-6(c)).
+  - Every new object is the brief's own (the engine, the findings, the named fallback submodules) or one Phase 3 asked
+    for (`shown_differs`, `doctor_command`, the one remedy table, `quoted`, `findings_test.rs`).
+  - The warns:
+    - D-1: the doctor rig is private to `doctor`, and #643's branch has a second rig in the same `pane_verbs` binary;
+    - D-2: three quoting rules (`quoted`; #643's `text_value`; the Herdr adapter's private `excerpt` copy on `main`);
+    - D-3: #663 and #644 plan their own `holler pane doctor` spelling in `profile_scope.rs`;
+    - D-4: `fix_error.code` holds a finding-kind code for a post-act mismatch, pending #644/#645's code (ADR-0021:536);
+    - D-5: a fourth crate-local control-character sanitizer, with no shared one to extend.
 - **Assumed:**
-  - rustfmt is advisory here, because CI and `lint.sh` do not run it and the repo has no `rustfmt.toml`.
+  - `origin/main` at `3bdd129` is current: `git ls-remote` agrees, so no sibling rig or helper has merged. I did not run
+    `git fetch`, so that the remote-tracking refs other worktrees diff against stay unchanged.
+  - The #643, #644, #662 and #663 branches and briefs are plans, not patterns. I used them only as evidence of forward
+    duplication.
 - **Hedged:**
-  - Acceptance 18's opt-in scratch scenarios still have not been run (they need real Herdr).
+  - D-1 to D-3 are warns, not blocks. No rig, quoting helper or reconcile-step builder is on `main`, so #647 cannot be
+    folding onto one. The role rule is to block a parallel path to an existing object only. Whichever sibling merges
+    second faces the fold at its own gate.
+  - D-4 is a warn because ADR-0021 defers the post-act code by name, and the choice is documented and tested.
+  - D-5 is a warn because the codebase has no dominant sanitizer pattern (role rule: cite the ambiguity, do not block).
+  - Not re-rated, still with O: W-1's ADR-0021 §1 half, W-7, and AC 33's Files list.
 - **Evidence:**
-  - Workspace: 2688 passed, 0 failed, 39 ignored (exit 0).
-  - Clippy is clean, before and after the fix. Lint exits 0.
-  - changelog-check, `docs_cli_test` (3), `wire_selftest` (3) and machete pass.
-  - After the fix: `ports_test` passes 8 of 8, and `pane_verbs -- doctor` 71 of 71.
+  - Read in full:
+    - every changed code file: `findings.rs`, `reconcile.rs`, `reconcile/observe.rs`, `pane/doctor.rs`;
+    - the tests: `pane_verbs/doctor.rs`, `doctor/{rig,read_only,surface}.rs`, `findings_test.rs`;
+    - the diffs of `cli-surface.txt`, `process/stub.rs`, ADR 0003, ADR-0021 and the CHANGELOG;
+    - the brief, and handoff-A, -T-red, -F and -T-green.
+  - Neighbours read on `main`:
+    - `holler-pane/src/{reply,lib,probe}.rs` and the stubs;
+    - `output.rs` (lines 90-360), `pane/args.rs`, `pane/profile_scope.rs`;
+    - `verb_harness/{mod,parse}.rs` and `pane_verbs/main.rs`;
+    - the sanitizers in `log.rs`, `acp_driver/auth.rs`, `holds.rs` and `adapter-herdr/src/protocol.rs`.
+  - Greps over `crates/`:
+    - `Ports {` construction sites;
+    - `impl *Port for`;
+    - `check_envelope`;
+    - call-log snapshot helpers;
+    - `PaneNotFound`, `PaneRole::Orchestrator` and `pane doctor` literals;
+    - control-character escaping;
+    - personal infrastructure names in the diff.
+  - Sibling branches inspected with `git show`:
+    - `issue-643-implementation`: `pane_verbs/list.rs` and `src/pane/list.rs`;
+    - `issue-662-implementation`: `profile_verbs/rig.rs`;
+    - the #663 and #644 briefs (reconcile step).
 
-## A (Phase 7, anti-duplication gate) — 2026-10-12T11:41-06:00
-- **Decided:**
-  - PASS, with 0 blocks and 3 warns (`handoff-A-dup.md`). F extended every object in the Reuse map and built no parallel path in production code.
-  - The plan review's W-1 is settled: each OpenCode route has one reader (`prompt::messages`, `server::agent_list`), and the default-agent rule is stated once (`server::as_default`).
-  - W-2 is carried as warn 2. #839 (S PASS at `d4ec665`, not merged) still sets two remedies outside the table, and it edits the same module-doc and `remedy`-doc lines. The second merge reconciles them and files the fold.
-  - Warn 1: `scratch/verbs.rs`'s `assert_end_state` copies `Scratch::findings` inline (T's RED commit). It is T's to fold, with no F respawn.
-  - Warn 3: the host adapter's `list-panes -s` builder now has four copies, and its method body three. That is the model the brief named, so the warn is for a follow-up.
+## S (Phase 10, spec audit) — 2026-10-09T18:31:36-06:00
+- **Decided:** ADVISORY-HOLD (see handoff-S.md).
+  - The A and T preconditions are met.
+  - Every one of the brief's ACs 1-33 has a test or other proof that asserts behaviour.
+  - Decisions 1-13 are built as stated, or the change from them is documented (A endorsed most of the changes):
+    - dedupe on the whole finding, because AC 21 needs it;
+    - a record's first observation is written;
+    - the serde for `FindingKind`, `FixState` and `ObservedHealth` comes from one string each;
+    - `now_millis()` is the clock.
+  - The quality checks are clean: guards, sizes, privacy, gitleaks and the docs.
+  - The hold: the operator confirmed the "agent" amendment to #647 at 17:40 MDT, after T-red. It requires a typed
+    `agent-cannot-dispatch` finding and adds a dependency on #700 (OPEN). The brief, the ACs and the code know 12 kinds,
+    and AC 25 pins 12. F cannot add the finding: the field is #700's, and no frozen port observes the agent of
+    hub-delivered turns. So the fix is a decision for O or the MO: (a) split the agent part into a later story, or (b)
+    hold until #700 merges and amend the brief.
+  - Eight advisories go to O. The main one: when `select_session` errors but the re-observation shows the session of
+    record, the finding says `failed` with a relaunch remedy while the record says the session is shown. No test covers
+    it, and D5's literal rule would say `fixed`.
 - **Assumed:**
-  - #839 lands its `findings.rs` as it is on `origin/issue-839-implementation` at `e57a7b5`.
-  - The `{report}` diagnostic is the reason `assert_end_state` does not call `findings()`. Its author did not say.
+  - The live issue text and its GraphQL edit history are authoritative for when the amendment landed.
+  - I relied on T's recorded results for the Tier 1 and Tier 2 commands and did not re-run them, per S's role. Only docs
+    changed after T-green (`git diff --stat baf176f..HEAD`).
 - **Hedged:**
-  - Warn 1 is not a block: it is test code, it is not one of the helpers the overlay names, and acceptance 18's wording ("read as `Scratch::findings` reads one") describes the reading more than it requires the call.
-  - The duplicated "newest `max_turns`" slice (the adapter and the fake) is not flagged, because a fake models the port.
+  - The hold could have been a PASS with an advisory. I did not choose that, because the run's agent merges its own PR,
+    and a PASS could close #647 with an operator-confirmed requirement silently dropped.
+  - Advisory 1 is not REWORK, because D5 does not say what happens when the act itself errors.
+  - Option (a) changes the scope of an operator-confirmed amendment, so the MO may need the operator's OK.
 - **Evidence:**
-  - Diffs read: `git show 8b6030e`; `git diff 6eff9cc HEAD -- crates/` (65 files); the T commits `a3a9e2b`, `4bd4e75` and `b5fc4bb`.
-  - Read in full: `agents.rs`, `observe.rs` (lines 1-300), `observe/agent.rs`, `agent_view.rs`, `tmux.rs`, `forwarding.rs`, `doctor/agent.rs`, `doctor/attach.rs`, `fake_harness_agent_test.rs`, `attached_test.rs` and `scratch/verbs.rs`.
-  - Commands:
-    - `grep` of every `HostPort`/`HarnessPort` impl;
-    - `grep` of `GET_MESSAGES`/`GET_AGENT` senders and `known(` callers;
-    - `grep` of the two new methods' call sites in `holler-pane`;
-    - `git diff 6eff9cc origin/issue-839-implementation -- crates/holler-pane/src/findings.rs`;
-    - `bash scripts/lint.sh` (exit 0);
-    - the privacy grep of the added lines.
-  - The outside diff gate r1 (`647-diff-result-r1.md`): PASS.
-
-## S (Phase 8, spec audit) — 2026-10-12T11:52-06:00
-- **Decided:**
-  - REWORK, production (`handoff-S.md`).
-  - The A and T preconditions are met. Acceptance 1 to 21 and W1 to W8 each have a proving test or evidence.
-  - Every decision of the brief is implemented as stated or as A's warns amended it, and each amendment is recorded.
-  - Item 1: `reconcile/observe/agent.rs:129-133` puts the pane's `ProfileName` into the W-3 clause raw, twice, once as a suggested `--profile` argument.
-    - A display name may hold spaces (`Some Profile`), so the advice splits in a shell.
-    - It breaks #662 B1's written rule (`holler-cli/src/profile/delete.rs:203-205`) and `findings.rs`'s "untrusted text only through `quoted`".
-    - Every other profile-name message in both crates quotes the name, including the sibling `drift.rs:80`.
-    - Fix: `quoted(profile.as_str())` in both places.
-  - Item 2 (T at T-green): pin item 1 with a profile name that has a space. `blue` passes either way.
-  - Not REWORK:
-    - D9's Claude Code clause holds by structure but has no test (advisory 1, recommended for T);
-    - acceptance 9's "skipped" against the ADR's `None` is a brief defect that T resolved for the ADR (advisory 2);
-    - `GET /agent`'s 60-byte quote is pre-existing (advisory 3).
-- **Assumed:**
-  - T's recorded Tier 1 and Tier 2 output at `4bd4e75` and `b5fc4bb` is accurate: 2688/0, clippy, lint, opt-in real tmux and OpenCode. I did not re-run them (S's rule).
-  - The `quoted` fix leaves the existing `a_profile_members_message_names_its_profile` green, because `"blue"` still contains `blue`.
-- **Hedged:**
-  - `quoted` (Rust `Debug`) is the minimal fix within the crate. It does not protect `$` or a backtick in a pasted name, which #662 B1's POSIX single quotes do. That helper lives only in `holler-cli`, and the message is prose (the paste-ready field, `remedy`, carries no profile), so single quotes are not required here. If the remedy ever carries `--profile` (W-3), it must use single quotes.
-  - Acceptance 18's opt-in scratch scenarios were never run in this run (they need real Herdr).
-- **Evidence:**
-  - Read in full: the production diff of all 25 `src` files; every new test file (`agent_view_test.rs` x2, `doctor/attach.rs`, `doctor/agent.rs`, `forwarding.rs`, `attached_test.rs`); the test diffs of `findings_test.rs`, `fake_host_test.rs`, `bind.rs`, `wired.rs`, `read_only.rs`, `doctor.rs`, `doctor/rig.rs`, `pane_claude/{rig,mixed}.rs`, `docs_pane_control_test.rs`, `scratch/verbs.rs`, `scenario.rs` and `real_opencode_test.rs`; the ADR, guide and CHANGELOG diffs.
-  - Commands:
-    - greps for profile-name interpolations across `holler-pane/src` and `holler-cli/src` (about 20 sites, all quoted except `agent.rs`);
-    - `wc -l` on every touched `.rs` file (max 865);
-    - added-line greps for `unwrap`, `expect`, `panic`, `unsafe`, `allow(`, `sleep(` and privacy patterns;
-    - per-commit `crates/` check before `45bff85`, and that `45bff85` touches only `//!` lines of `ports.rs` plus the ADR;
-    - `with_fix` and `remedy` call sites;
-    - `gh pr list` (#839 is PR #863, open);
-    - `gh api .../compare/6eff9cc...ef14b1a` (remote `main` moved by #847's test-only fix, no overlap).
-
-## F (Phase 6 call, S REWORK round) — 2026-10-12T12:15-06:00
-- **Decided:**
-  - S's item 1 is done. The W-3 clause of `agent-cannot-dispatch`'s message (`reconcile/observe/agent.rs`) quotes the profile name in both places it appears:
-    - `quoted` in the prose, as S asked;
-    - POSIX single quotes for the suggested `--profile` argument, through the new `findings::single_quoted` (`pub(crate)`, typed `&ProfileName`), per #662 B1.
-  - The remedy is unchanged.
-  - This deviates from S's literal fix, which was `quoted` in both places. The argument takes #662 B1's form for two reasons:
-    - `quoted`'s double quotes let a shell run `$(...)` and a backtick.
-    - Every message in the repository that suggests a command with a profile name single-quotes it: `delete.rs` twice, `create.rs`, `import/writes.rs` twice, and `profile_scope.rs`'s reconcile step, which ADR-0021 section 3 states.
-  - The helper lives in `findings.rs`, beside `quoted` and `embedded`, because `holler-pane` cannot reach `holler-cli`'s two copies. The module doc's untrusted-text bullet now names it.
-  - S's item 2, the pinning test, is T's. The handoff gives T the exact expected text: `--profile 'Some Profile'` and the prose `profile "Some Profile"`.
-  - archChanged: false. The change is a `pub(crate)` helper and a message string, with no public interface, module boundary or dependency change.
-- **Assumed:**
-  - S accepts the single-quoted argument as meeting item 1. It is the rule S cited, and S's own Hedged entry names it as the stronger protection.
-  - The operator pastes the suggested argument into a POSIX shell (bash, zsh, dash), as #662 B1 assumes.
-- **Hedged:**
-  - A profile name with a leading `-` still does not parse as `--profile '-x'`, because clap reads it as an option. `profile_scope.rs`'s doc already accepts that limit for the reconcile step. The joined `--profile='-x'` would parse, but no message in the repository uses it, so F kept the precedent's space form.
-  - Folding `holler-cli`'s two `single_quoted` copies onto this one is a follow-up, not done here, because that code is outside this story. All six `holler-cli` call sites quote a `ProfileName`, so the typed helper fits them.
-- **Evidence:**
-  - Read: `handoff-S.md` and S's journal entry; `agent.rs`; `findings.rs` (`quoted`, `embedded`, the module doc); `error.rs:691-698` (`excerpt`); `profile.rs:27-105` (`ProfileName`); `drift.rs:72-83`; every `single_quoted` site in `holler-cli` (`delete.rs:158-208`, `create.rs:251-259`, `import/writes.rs:76-86, 179-192`, `profile_scope.rs:40-56, 270, 549-560`); the sites S listed (`tx_apply.rs`, `tx_apply/run.rs`, `close.rs`, `launch.rs`, `park.rs`, all prose); ADR-0021 lines 530-531; `doctor.rs:128`; the pipeline's routing (`coding-pipeline-logic.mjs` case 10, the script's Phase 6 F call).
-  - Probe (scratch, outside the repository): the clause prints `--profile 'Some Profile'` and `--profile 'It'\''s $(id) Demo'`. A shell reads each back as one word, with nothing expanded. The `{:?}` form expanded `$(...)`.
-  - Tier 1: rustfmt clean on both files; `cargo test -p holler-pane` all ok; `pane_verbs -- doctor` 71 of 71; clippy `--workspace --all-targets -D warnings` exit 0; rustdoc `-D warnings` (with and without private items) exit 0; `lint.sh` exit 0; changelog-check ok.
-  - Workspace (`test.unit.command`): 2686 passed, 2 failed, 39 ignored, at a load average of 25 to 31 from other sessions' suites. The two failures are outside this story's code, and each binary passes 3 of 3 alone:
-    - `body_run_test::fresh_hello_and_presence_on_every_reconnect`: a restarted hub exited before it listened;
-    - `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`: an inode was reused, in the hub's own profile registry.
-
-## T (Phase 7 call, S REWORK round, T-green) — 2026-10-12T12:25-06:00
-- **Decided:**
-  - S's item 2 is done in `pane_verbs/doctor/agent.rs`. `a_profile_members_message_names_its_profile` (profile `blue`) is merged into `a_profile_members_message_names_its_profile_as_one_shell_word`, which pins F's form for `Some Profile` and `It's $(id) Demo`: the prose `quoted`, the `--profile` argument POSIX-single-quoted, never raw and never double-quoted. The remedy assertion of the old test is kept in the helper.
-  - T accepts F's deviation from S's literal fix (single quotes, not `quoted`, for the argument). S's stated goal was #662 B1's rule, which is single quoting, and the repository's other profile-command messages single-quote. So the test asserts F's form, and S's example string `--profile "Some Profile"` is asserted absent.
-  - S's advisory 1 is taken: `pane_claude/doctor.rs::a_claude_pane_with_no_tmux_client_is_unattached` pins D9's "raised for a Claude Code pane too".
-  - Verdict PASS: the suite is GREEN (2689 passed, 0 failed) and no production change is needed.
-- **Assumed:**
-  - S accepts the single-quoted argument as meeting item 1. If S insists on `quoted`, mutation Q1 shows the new test would fail, and the test (not F's code) would need to change.
-- **Hedged:**
-  - The opt-in real tmux and OpenCode runs were not repeated for this round. The rework touches only a message and a `pub(crate)` helper in `holler-pane`, which neither adapter calls.
-- **Evidence:**
-  - Read: `handoff-S.md`, `handoff-F.md` (Rework round), F's `6f07eff` diff, `observe.rs:111-200`, `pane_claude/rig.rs`, `pane_verbs/doctor/rig.rs` (`in_profile`, `profiles_of`), `error.rs:691-698`, `profile.rs:42-61`, `profile_scope.rs:545-565`.
-  - Mutations Q0, Q1, Q2 and C1 each killed by an assertion, with the files restored and checked by sha256 (table in `handoff-T-green.md`, Re-entry 2).
-  - Tier 1: the workspace `test.unit.command` exit 0 (171 binaries, 2689/0/39); clippy `-D warnings` exit 0; `lint.sh` exit 0; changelog-check ok; `docs_cli_test` and `wire_selftest` 3 each; `cargo machete` clean; rustfmt clean on both edited files.
-
-## A (Phase 7 re-entry, anti-duplication gate, S REWORK round) — 2026-10-12T12:33-06:00
-- **Decided:**
-  - PASS, with 0 blocks (`handoff-A-dup.md`, "Re-entry"). The round is `e393e87..1d12249`: F's `6f07eff` changed two production files, and T's `1d12249` changed two test files.
-  - R1, new warn. `findings::single_quoted` is the third copy of the POSIX single-quote body. `holler-cli` keeps two: `profile/delete.rs:206`, which `create.rs` and `import/writes.rs` share, and `pane/profile_scope.rs:270`. It is not a block, for three reasons:
-    - The object S named, `quoted`, uses `{:?}` double quotes, which a shell expands. F's prose-plus-argument split is the repository's dominant pattern, and ADR-0021 section 3 states it.
-    - The copies live in `holler-cli`, which `holler-pane` cannot depend on. Folding them would be an unplanned drive-by in four files outside the story.
-    - The helper sits beside `quoted` and `doctor_command`, which both crates already share, and F justified it in writing.
-  - The follow-up for R1 is XS: make the helper `pub` and fold the six `holler-cli` call sites onto it. All six pass a `ProfileName`.
-  - R2, carried from W-2 and updated. PR #863 (#839) is still open at `e57a7b5`. This round's untrusted-text bullet (`findings.rs:24-30`) sits directly below the "Remedies" bullet that both branches rewrite, so it joins that conflict region.
-  - The first pass's warns 1 and 3 are unchanged, and their files are untouched this round.
-  - T's tests reuse `Rig`, `Seed::in_profile`, `seed`, `one`, `mixed`, `doctor`, `kinds` and `FakeHost::detach_clients`. The superseded profile test was merged into its replacement, not kept beside it.
-- **Assumed:**
-  - #839 still lands its `findings.rs` as it is at `e57a7b5`. Its hunks do not touch the region of `quoted`, `single_quoted` and `embedded`.
-- **Hedged:**
-  - R1 is a warn only because the fold would edit code outside the story. If the operator would rather fold now, the change is mechanical: six call sites, two deletions and one module-doc line.
-- **Evidence:**
-  - Diffs read: `git diff af34a4f 6f07eff -- crates/`, `git diff 6f07eff 1d12249 -- crates/` and `git diff --stat e393e87 HEAD`.
-  - Commands:
-    - greps for quoting helpers and the `'\''` escape across `crates/`, and for shell-quoting crates in every `Cargo.toml` (none);
-    - greps for `holler_pane::findings` imports in `holler-cli/src`, for `--profile` and `holler profile` in `holler-pane/src` string literals, for `single_quoted` call sites, and for `$(id) Demo` and shared test fixtures;
-    - `git diff 6eff9cc origin/issue-839-implementation -- crates/holler-pane/src/findings.rs` (hunk headers and module doc);
-    - `git ls-remote origin` and `gh pr view 863` (read-only, no fetch);
-    - `gh api .../compare/6eff9cc...05471b9`: remote `main` gained #847 and #848, both test-only, with no overlap;
-    - `wc -l` on the four touched files.
-  - Read: `handoff-S.md`, `handoff-F.md` (Rework round), `handoff-T-green.md` (Re-entry 2), this journal's S, F and T entries, `findings.rs:395-458`, `error.rs:689-698`, `profile/delete.rs:140-219`, `profile_scope.rs:30-56, 255-272`, `create.rs:232-260`, `import/writes.rs:60-90, 168-186`, `reconcile/drift.rs` (the message), `docs/pane-control.md:606, 650` and `ADR-0021.md:530-531`.
-
-## S (Phase 8, spec audit, round 2 after the S REWORK) — 2026-10-12T12:42-06:00
-- **Decided:**
-  - PASS (`handoff-S.md`, "Round 2"), at `f62ff16`. The A precondition (A PASS; A-dup re-entry PASS) and the T precondition (T-green re-entry 2: no blocking issue, 2689/0/39) are met.
-  - Round 1's item 1 is resolved. The W-3 clause quotes the profile as `quoted` in the prose and POSIX-single-quoted (`findings::single_quoted`) as the suggested `--profile` argument. The remedy is unchanged.
-  - I accept F's deviation from round 1's literal fix, which was `quoted` in both places:
-    - round 1's stated goal was #662 B1's rule, which is single quoting (`profile/delete.rs:202-205`);
-    - `quoted` is `{:?}`, whose double quotes a shell expands `$(...)` in;
-    - the repository's messages that name a profile and suggest a command with it use exactly F's split (`delete.rs:158-183`, `profile_scope.rs:54-55`, ADR-0021 section 3).
-  - Round 1's item 2 is resolved. `a_profile_members_message_names_its_profile_as_one_shell_word` pins F's form for `Some Profile` and `It's $(id) Demo`, and T's mutations Q0, Q1 and Q2 fail it.
-  - Round 1's advisory 1 is taken. `pane_claude/doctor.rs::a_claude_pane_with_no_tmux_client_is_unattached` pins D9's Claude Code clause, and mutation C1 fails it.
-  - As a fresh S, I re-audited the whole branch: acceptance 1 to 21 and W1 to W8 each have a proving test or evidence, and nothing new is blocking.
-- **Assumed:**
-  - T's recorded Tier 1 output at `6f07eff` plus `1d12249` is accurate, and the opt-in real runs of round 1 still hold. The round touched only a message and a `pub(crate)` helper in `holler-pane`, which neither adapter calls. I did not re-run them (S's rule).
-  - The run's agent does the brief's "Pipeline" step 3 and the PR steps after the script opens the PR.
-- **Hedged:**
-  - The merge timing is the operator's (Q2). #654 is still open, and merging changes what `doctor` reports on the live fleet during the soak. Advisory 2 asks the run's agent to surface it before merging.
-  - Acceptance 18's opt-in scratch scenarios have never been run in this run. Their premise, that Holler attaches no tmux client, I confirmed in the code (`tui.rs`: the TUI runs inside the session through `respawn-pane`).
-  - Acceptance 9's "skipped" against the ADR's `None` stays a brief defect for the operator, not an ADVISORY-HOLD. The implementation follows the standing spec, and the reading can only suppress a finding.
-- **Evidence:**
-  - Diffs read:
-    - `git diff e393e87 HEAD -- crates/` (the round);
-    - `git diff origin/main...HEAD` for every production file, the ADR, the guide and the CHANGELOG;
-    - the new or edited tests of every acceptance row (`doctor/agent.rs`, `doctor/attach.rs`, `pane_claude/doctor.rs`, `forwarding.rs`, `bind.rs`, `read_only.rs`, `doctor/rig.rs`, `findings_test.rs`, both `agent_view_test.rs`, `fake_harness_agent_test.rs`, `fake_host_test.rs`, `host_conformance_test.rs`, `attached_test.rs`, the Claude tests, `scratch/verbs.rs`, `scenario.rs`, `wired.rs`, `real_opencode_test.rs`).
-  - Commands:
-    - added-line greps for `unwrap`, `expect`, `panic`, `todo`, `dbg`, `unsafe` and `#[allow` (none in `src`; every allow linked);
-    - the privacy grep of all 10,168 added lines and of the commit messages (clean);
-    - `wc -l` on every touched `.rs` file (max 865);
-    - the per-commit `crates/` check before `45bff85`, and the `//!`-only filter on its `ports.rs` hunk;
-    - the `cli-surface.txt` and ADR-0003 diff (empty);
-    - the `with_fix`, `remedy` and `with_agent` call sites;
-    - `gh issue view 647` (comments) and `gh issue view 654` (OPEN);
-    - `gh pr list` (#839 is PR #863, open);
-    - `git log 6eff9cc..origin/main` (#847 and #848, test-only), with `comm` of the two file lists (no overlap).
-  - Read: `error.rs:689-698` (`excerpt`, 64 characters), `profile.rs:25-62` (`ProfileName`), `profile/delete.rs:150-208`, `profile_scope.rs:40-56, 262-272`, `ADR-0021.md:531`, and `holler-adapter-opencode/src/tui.rs:1-40, 160-200`.
+  - Issues read with `gh`:
+    - `gh issue view 647`, and the issue's `userContentEdits` (amendment edits at 23:38:10Z and 23:40:09Z, which is
+      17:38 and 17:40 MDT);
+    - epic #633's decision 8, the "#700 only; it merges before #642, #644 and #647 start" ruling, and its wave-3 table;
+    - #700 (OPEN, created 17:39 MDT) and #642's agent amendment.
+  - Code and diffs read in full:
+    - `findings.rs`, `reconcile.rs`, `reconcile/observe.rs` and `pane/doctor.rs`;
+    - the tests `doctor.rs`, `doctor/{rig,read_only,surface}.rs` and `findings_test.rs`;
+    - the diffs of the ADRs, the CHANGELOG, the fixture and `stub.rs`;
+    - `ports.rs`, `pane/wiring.rs`, `pane/args.rs`, and the error and name parsers.
+  - Read-only checks I ran:
+    - the AC 27, 28, 29, 32 and 33 greps;
+    - `wc -l` on the touched files;
+    - greps for `unwrap`, `expect`, `panic!`, `unsafe`, `#[allow]` and printing;
+    - a privacy grep of the added lines;
+    - `gitleaks git --log-opts=origin/main..HEAD` (no leaks).
