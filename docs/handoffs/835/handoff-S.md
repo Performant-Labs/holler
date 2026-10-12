@@ -1,303 +1,231 @@
-# Handoff-S: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code`  (spec audit, cycle 2: after S's REWORK 1 and the merge of #851)
+[S]
 
-**Date:** 2026-10-11, 20:59 MDT
-**Branch:** `issue-835-implementation` at `2156b5f`. `origin/main` is `d6ae539` (#851, PR #854; `git fetch` at 20:59 MDT). It is
-an ancestor of the branch through F's two-parent commit `e6d5fa0`, so the branch tree is the PR's merge result.
-**Issue:** [#835](https://github.com/Performant-Labs/holler/issues/835), OPEN. I read it live with `gh issue view 835`:
-- its body matches the brief's issue section (I diffed them; only a trailing blank line differs);
-- it has two comments, at 15:51 and 18:12 MDT, on coordination with #832 and #831 (Advisory 1).
+# Handoff-S: #835, `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (spec audit, cycle 3: after F's third pass `f1d1bd0`)
 
-**Brief:** `docs/handoffs/835-brief.md` (the issue, the amendment and rounds 2 and 3), unchanged since `f8a1864`.
+**Date:** 2026-10-12, 03:47 MDT
+**Branch:** `issue-835-implementation` at `f1d1bd0`. Its merge base is `d6ae539` (#851).
+- **`origin/main` has moved to `b76f4d2`.** I ran `git fetch` at 03:40 MDT. Four PRs merged since the merge base:
+  - `0f5835e`: #667, PR #855, 21:11 MDT on 10-11;
+  - `037405f`: #648, PR #856, 21:25 MDT;
+  - `8462c9e`: #665, PR #858, 00:02 MDT on 10-12;
+  - `b76f4d2`: PR #857, "part of #831", 00:50 MDT.
+- **The branch conflicts with `origin/main`.** `git merge-tree --write-tree HEAD origin/main` exits 1, with conflicts in 10 files. The automatic merge also leaves three silent defects in files git reports as merged cleanly (see the Verdict).
+
+**Issue:** [#835](https://github.com/Performant-Labs/holler/issues/835), OPEN. I read it live:
+- the body is unchanged since cycle 2;
+- there are two new comments:
+  - 21:21 MDT: the run was parked after two REWORKs;
+  - 23:09 MDT: #831 (PR #857) took #835's own names, `CLAUDE_CODE_COMMAND`, `is_claude_code_command` and the required `HostPort::foreground_commands`, and "whichever PR lands second merges main in".
+
+**#831:** I read it live. It is OPEN and was reopened at 00:50 MDT. Its comment says PR #857 is part of #831 and lists what is still to do: "Adopt the existing Claude Code panes (`pane import --adopt-claude-code`): after #835 is on `main`."
+
+**Brief:** `docs/handoffs/835-brief.md`, unchanged since `f8a1864`.
+
 **Handoffs reviewed:**
-- `handoff-A.md`: pass 4, PASS. Passes 1 to 3 are in git.
-- `handoff-T-red.md`: cycle 2. Cycle 1 is at `36b0de8`.
-- `handoff-F.md`: cycle 3. Cycles 1 and 2 are at `9bd101b` and `4604693`.
-- `handoff-T-green.md`: cycle 3, PASS. Cycle 2 is at `b488a33`; cycle 1's BLOCK is at `25ff495`.
-- `handoff-A-dup.md`: second pass, PASS. The first pass is at `e5e35ee`.
-- My cycle-1 handoff (REWORK 1), at `ccc53a0`, which this handoff replaces.
+- `handoff-A.md`: pass 4, PASS.
+- `handoff-T-red.md`: cycle 2.
+- `handoff-F.md`: the third pass of S's gate (F's header says cycle 4).
+- `handoff-T-green.md`: cycle 3, PASS, on `e6d5fa0`.
+- `handoff-A-dup.md`: second pass, PASS.
+- My cycle-2 handoff at `d71b091` (REWORK) and my cycle-1 handoff at `ccc53a0` (REWORK).
 - `decisions.md` and `evidence.md`.
-- Also read: #831's issue (`gh issue view 831`) and, through git only, its branch `origin/issue-831-implementation` at `008a995`.
+- The orchestrator's Tier-1 log for `f1d1bd0`, `/home/andre-angelantoni/.cache/tmp/835-tier1.log` (exit 0).
 
 **Diff audited:**
-- **This cycle.** `git show --remerge-diff e6d5fa0` touches 5 files, all prose or doc comments, plus handoffs. I checked that
-  it equals `git diff e77e7a0 e6d5fa0`, where `e77e7a0` is the automatic merge `git merge-tree --write-tree ccc53a0 d6ae539`
-  (no conflict). `e6d5fa0..HEAD` changes handoffs only.
-- **The whole PR.** `git diff origin/main...HEAD` outside `docs/handoffs/` is 37 files, +1452/-159. The 32 files this cycle
-  did not touch are byte-identical to `b488a33`, the tree of my cycle-1 audit. The one exception is ADR-0003, whose only
-  change since is #851's, from `main`. I re-read the full production diff anyway.
+- `git diff d71b091 f1d1bd0`. It changes `pane.rs`, `ports.rs`, ADR-0021 and the guide (prose and doc comments only), plus handoffs.
+- The whole PR, `git diff origin/main...HEAD` outside `docs/handoffs/`.
+- The trial merge tree `3264623` (`git merge-tree HEAD origin/main`).
 
-**Verdict:** **REWORK** (production, docs only), two items. Cycle 1's REWORK 1 (the "foreground" wording) is resolved
-everywhere.
-1. Two sentences say that no story owns the adoption after #831. Since 15:50 MDT, #831's issue body records, as an operator
-   decision, that #831 owns it.
-2. In the same pass: the contract's list of the rule's limits (ADR-0021 and `pane.rs`) gains the case that the help, the
-   guide and the CHANGELOG now name. This is A-dup's warn 1, which was left to the gate.
+**Verdict:** **REWORK** (production). Cycle 2's two items are resolved, and on its own base the branch is consistent everywhere. But `main` now contains PR #857. That PR took this story's port method, constant and rule, and it rewrote the same ADR, guide and doc places. The branch must merge `origin/main` and bring its prose in line with it. Without that it cannot merge, and the automatic merge would not compile.
 
 ## A precondition
 
 Met.
-- `handoff-A.md` (pass 4) is **PASS**, with 0 block and 4 warn. All four warns were carried out in cycle 2, which my cycle-1
-  audit checked.
-- `handoff-A-dup.md` (second pass) is **PASS**, with 0 block and 2 warn:
-  - warn 1 (the records list the limits differently) is REWORK item 2 below;
-  - warn 2 is test-only and optional (Advisory 6).
+- `handoff-A.md` (pass 4) is **PASS**, with 0 block.
+- `handoff-A-dup.md` (second pass) is **PASS**, with 0 block. Its warn 1 was my cycle-2 item 2, which is now resolved.
 
 ## T precondition
 
 Met.
-- **RED, cycle 1** (`36b0de8`). It was a compile RED on the new required method, also proved at assertion level:
-  - on unchanged code, `import_test`, both `compile_fail` doctests, `cli_surface_test` and six `import::` tests failed;
-  - under a bare-API stub, reverted and checked with `sha256sum`, 28 tests failed, each on an assertion and each in this
-    story.
-- **RED, cycle 2** (`526bbd3`). The guide's two docs tests failed on their assertions.
-- **Cycle 3** is text only. No RED is due: I asked for no test, and no test pins this prose.
-- **GREEN** (T-green cycle 3, on `e6d5fa0`, which has the same code as `HEAD`):
-  - CI's test step: 155 groups, 2406 passed, 0 failed, 32 ignored;
-  - clippy with `-D warnings`, `lint.sh`, `changelog-check.sh`, `docs_cli_test`, `docs_pane_control_test` (17),
-    `wire_selftest`, `cargo machete`, rustdoc with `-D warnings` for `holler-pane`, and `git diff --check`: all clean;
-  - 0 blocking issues.
-- **Mutations** (T-green cycle 2). These were not repeated, because no code changed since:
-  - the rule always `false`: 4 tests fail;
-  - dead panes kept: 1 test fails;
-  - the guide's codes and the flag renamed: 2 tests fail.
-- **Real tmux.** Case 10 passed on tmux 3.7c.
-- **My own check.** The built `target/debug/holler` (20:36 MDT, after the last source edit at 20:25 MDT) prints the
-  reworked `pane import --help`.
+- **RED.** Cycle 1 (`36b0de8`) and cycle 2 (`526bbd3`) are as recorded in cycle 2. Cycle 3 (`e6d5fa0`) and this pass (`f1d1bd0`) are prose only, and no test pins that prose, so no RED is due.
+- **GREEN.**
+  - T-green cycle 3 is PASS with 0 blocking issues, on `e6d5fa0`. That is the same code as `f1d1bd0`: I read `git diff e6d5fa0 f1d1bd0`, and it touches doc comments and markdown only.
+  - The orchestrator's Tier 1 on `f1d1bd0`, which I spot-checked in the log:
+    - `changelog-check: ok`;
+    - `lint.sh` gives warnings only, for files under 900 lines;
+    - 156 `test result: ok` groups, and no `FAILED` and no non-zero `failed` count anywhere;
+    - clippy, rustdoc `-D warnings`, `docs_cli_test` and `git diff --check` are recorded as clean.
 
 ## Acceptance criteria
 
-Paths are under `crates/`. `harness.rs` is `holler-cli/tests/pane_verbs/import/harness.rs`.
+These are on the branch as it stands at `f1d1bd0`. Paths are under `crates/`. `harness.rs` is `holler-cli/tests/pane_verbs/import/harness.rs`. Every proving test is as in cycle 2, because no test or code changed since.
 
 | # | Criterion (source) | Proving test or evidence | Status |
 |---|---|---|---|
-| 1 | A pane whose tmux session has a foreground process `claude` is not registered. It gets one `info` finding, `harness-claude-code`, and nothing is written for it (issue Work 1; brief §2, §3 and R2-4). | `harness.rs::a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode` (:93), a real run:<br>- B has exactly one finding, `harness-claude-code` at `info`;<br>- B's row is `skipped`, with null role, position and session;<br>- B has no record, and `fleet` holds A and C only.<br>The mutation "rule always `false`" fails it. | Met |
-| 2 | Not a block: the import goes on for the other panes. One finding and no others, and no harness call for the pane (Work 1; §3). | - The same test: `recorded` is 2, with 2 `health` and 2 `list_sessions` calls for 3 panes.<br>- `a_pane_left_alone_blocks_nothing_even_unlabelled` (:172). | Met |
-| 3 | A dry run shows the same finding and writes nothing (Work 1; the issue's fixture). | `a_dry_run_reports_the_pane_left_alone_and_writes_nothing` (:143):<br>- JSON, and text (`B skipped - - -`, `  info harness-claude-code: `);<br>- no store write, no file changed, no record and no profile. | Met |
-| 4 | A pane left alone shows as `unregistered-herdr-pane` in a whole-fleet `doctor` pass, which is expected (Work 1). | Criterion 1 (no record), together with `holler-cli/tests/pane_verbs/doctor.rs::unregistered_herdr_pane_is_reported` (:131) and `reconcile.rs:362-372` (`evidence.md`). This is a consequence, not new behaviour. | Met |
-| 5 | `--adopt-claude-code` is refused as `usage` (exit 2), naming #831, with nothing written; a dry run is refused too, before any file or port is read (Work 2; §4). | `adopt_claude_code_is_usage_naming_831_and_writes_nothing` (:193), alone and with `--dry-run`, in JSON and text:<br>- exit 2, `usage`, and the text contains `not_implemented_message(831)`;<br>- one stderr line;<br>- no Herdr, host or harness call, no store write and no file changed.<br>The check is the first one in `Input::read` (`holler-cli/src/pane/import.rs:176-182`). | Met |
-| 6 | "After #831 it registers them with that harness" (Work 2). | Not built here. Brief §5 puts it out of scope, and `HarnessKind` has only `Opencode`. #831 owns it (#831's issue body, operator decision of 2026-10-11). | Out of scope by a recorded decision. Two sentences that say no story owns it are REWORK item 1. |
-| 7 | The signal is a read-only `HostPort::foreground_commands`. It is required, it reads names only and never a command line, and a missing session answers `pane-not-found` (Work 3; §1; R2-1). | - `holler-pane/src/ports.rs:303`: a `compile_fail,E0046` doctest (`PidsOnly`), RED before F.<br>- Conformance case 10 (`holler-pane-testkit/src/conformance/host.rs:226`), with two `Mutant` breaks (`host_conformance_test.rs:241`, `:249`).<br>- The fake: `fake_host_test.rs:316`, `:337` and `:352`.<br>- The adapter, `holler-adapter-host/tests/foreground_test.rs:35`, `:62`, `:78` and `:92`: live panes in tmux order with the dead one dropped; one exact-target `list-panes -s`; no `start_command` in the format (I7); `pane-not-found`; `unavailable` with stderr's first line only; one bad line fails the whole read.<br>- `fake_tmux_test.rs` `METHODS`. | Met |
-| 8 | A pane whose OpenCode server is merely down is still adopted and flagged `server-down` (Work 3). | `holler-cli/tests/pane_verbs/import/join.rs::an_unhealthy_server_is_down_or_wedged_as_reconcile_says` (:334, #650). It now runs through the new chain. | Met |
-| 9 | Only an exact `claude` is left alone. `bash`, `opencode` and an empty session are imported as OpenCode. There is one constant and one predicate (§2; R2-7). | - `holler-pane/tests/claude_code_rule_test.rs:14` and `:20`.<br>- `harness.rs:93`: A (`bash`) and C (no process) are recorded as `expected_record`.<br>- grep: the constant is `pane.rs:147` and the only comparison is `:158`. The one production caller is `import/observe.rs:131`. The other `"claude"` literals in any `src` are protocol harness ids or test code. | Met |
-| 10 | An unreadable signal fails closed. A read error other than `pane-not-found`, a failed `ps` and a lost chain are each `harness-unreadable` (a problem): no record, and a real run is `import-blocked`. A `pane-not-found` from either read is `tmux-session-missing` (§2; R2-6; R2-2). | - `a_failed_ps_is_harness_unreadable_and_blocks` (:227). It replaces #650's opposite test, with a pointer at `join.rs:391-393`.<br>- `a_failed_command_name_read_is_a_problem_and_blocks` (:261), both cases.<br>- `a_lost_chain_is_harness_unreadable_and_blocks` (:327). | Met |
-| 11 | The surface: the `cli-surface.txt` line, ADR 0003's row, ADR-0021 section 9's row and the help. `--format=json` shows the finding like every other (Work 4; §3, §4). | - `holler-cli/tests/fixtures/cli-surface.txt:171`, through `cli_surface_test` (RED before F).<br>- `holler-cli/tests/pane_verbs/import.rs::the_adrs_name_the_switch_and_the_two_new_codes` (:123).<br>- The JSON assertions of criteria 1, 3 and 10.<br>- The help, read in the source (`pane/import.rs:67-79`, `:116-119`) and from the built binary. | Met. Cycle 1's REWORK 1 is resolved. |
-| 12 | The code table has two new codes, at `info` and `problem`, and the prose counts are updated (R2-2; R2-4). | - `holler-pane/tests/import_test.rs::import_finding_codes_are_the_pinned_set` (:99, RED before F) and `each_import_finding_has_its_level` (:147).<br>- `findings.rs` says "eighteen kinds", "twelve" of them the import's own. That matches `ALL`: 18 kinds, 6 shared. | Met |
-| 13 | ADR-0021 records the change (§1 records; R2-2; R2-5): section 2's table and its "amended since" sentence; section 13's "Decided (#835)" (the method, the rule, its limits, the codes, the switch); section 9's row; the closing lists. | The test of criterion 11 pins the row, the paragraph and both codes. I read `:108-109`, `:121-124`, `:760`, `:950-986`, `:1013-1023`, `:1105-1107` and `:1168-1174`. | Met, except REWORK item 1 (`:1106`) and item 2 (`:973-976`) |
-| 14 | Every host decorator forwards `foreground_commands`, and each is pinned (R2-1). | - `holler-cli/tests/pane_integration/bind.rs::the_binding_host_passes_the_host_conformance_suite` (:319), now with case 10.<br>- `the_wired_host_passes_the_host_conformance_suite` (:330).<br>- `wired.rs:111`.<br>- `Unwired` answers `NotImplemented` (`holler-cli/src/pane/wiring.rs:328`).<br>The production chain is `BindingHost` over `WiredHost` over `TmuxHost` (`wiring.rs:153`, `:172`). | Met |
-| 15 | `HerdrPort::observe_pane` is required, `observe_panes` keeps its default, and `BindingHerdr` and `LazyHerdr` forward both (R3-1; R3-2). | - `holler-pane/src/ports.rs:180`: a `compile_fail,E0046` doctest (`NoObservation`), RED before F.<br>- D33's pins, which were not copied: `pane_integration/observe.rs:52`, `:184`, `:192` and `:202`, and `bind.rs:294`.<br>- The overrides are at `wiring/bind.rs:138-142` and `:253-257`. | Met |
-| 16 | Over the real wiring, `pane list` shows an unmanaged pane's working directory, and its last screen change when the adapter reports one; otherwise the time is null in JSON and `-` in text (R3-3). | `pane_integration/observe.rs:290` and `:308`, in JSON and text. They run over `BindingHerdr(LazyHerdr(FakeHerdr))`, which is how `Wiring` builds it (`wiring.rs:140-152`). | Met, as regression pins: D33 made this hold before F |
-| 17 | #652's guide is told of the new default and the flag (§6). | - `holler-cli/tests/docs_pane_control_test.rs::import_findings_are_named_in_section_3_or_10` (:451) and `section_3_names_every_flag_of_pane_import` (:531), both RED in cycle 2.<br>- I read sections 1, 3, 10 and 12 against the code. | Met, except REWORK item 1 (section 12, `:816-817`) |
-| 18 | A `CHANGELOG.md` `[Unreleased]` entry links #835 and names the follow-up to #832 (§6; R3-4). | `CHANGELOG.md:76-91`, under `## [Unreleased]` and `### Enhancements`, links #633, #835, #831 and #832. `changelog-check: ok`: I ran it. | Met |
-| 19 | Fixture addition: a pane left alone writes nothing, in a real run and in a dry run. | Criteria 1 and 3. | Met |
-| 20 | Case 10 holds on a real tmux (R2-8): no empty-list assertion, a poll within a bound, the name the process settles to, and a `Mutant` break that fails it. | `holler-pane-testkit/src/conformance/host.rs:226-252` polls every 20 ms for up to 2 s (`:50-51`) and asserts only that `sleep` is named. Both breaks fail it, and it passed on tmux 3.7c. | Met |
-
-No test is a tautology. Each criterion's test either was RED before F, failed under a mutation, or is a regression pin that
-is named as one (criterion 16).
+| 1 | A pane whose tmux session has a foreground `claude` is not registered. It gets one `info` finding, `harness-claude-code`, and nothing is written for it (Work 1; §2, §3, R2-4). | `harness.rs::a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode`. The mutation "rule always false" fails it. | Met |
+| 2 | Not a block, and no harness call for that pane (Work 1; §3). | The same test (2 `health` and 2 `list_sessions` calls for 3 panes), and `a_pane_left_alone_blocks_nothing_even_unlabelled`. | Met |
+| 3 | A dry run shows the same finding and writes nothing (Work 1; the fixture). | `a_dry_run_reports_the_pane_left_alone_and_writes_nothing`, in JSON and text. | Met |
+| 4 | A pane left alone is `unregistered-herdr-pane` in a whole-fleet `doctor` (Work 1). | Criterion 1, together with `pane_verbs/doctor.rs::unregistered_herdr_pane_is_reported`. | Met (a consequence, not new behaviour) |
+| 5 | `--adopt-claude-code` is `usage` (exit 2), names #831, writes nothing, and is refused in a dry run too, before any read (Work 2; §4). | `adopt_claude_code_is_usage_naming_831_and_writes_nothing`. The check is the first one in `Input::read` (`holler-cli/src/pane/import.rs:176-182`). | Met |
+| 6 | "After #831 it registers them" (Work 2). | Out of scope (brief §5). The branch now names #831 as the owner: ADR `:982-985` and `:1108-1111`, guide `:816-817`. After the merge, see REWORK item 2. | Out of scope by a recorded decision |
+| 7 | `HostPort::foreground_commands` is required, reads names only, and answers `pane-not-found` for a missing session (Work 3; §1; R2-1). | The `ports.rs` `compile_fail,E0046` doctest, conformance case 10, the `Mutant` breaks, `fake_host_test.rs` and `holler-adapter-host/tests/foreground_test.rs`. | Met |
+| 8 | A pane whose server is merely down is still adopted and flagged `server-down` (Work 3). | `join.rs::an_unhealthy_server_is_down_or_wedged_as_reconcile_says`. | Met |
+| 9 | Only an exact `claude` is left alone. There is one constant and one predicate (§2; R2-7). | `holler-pane/tests/claude_code_rule_test.rs`, and `harness.rs` (`bash` and no process are recorded). The constant is `pane.rs:147` and the only comparison is `:160`. | Met on the branch. The merged tree defines both twice (REWORK 1a). |
+| 10 | Unreadable means fail closed: a read error, a failed `ps` or a lost chain is `harness-unreadable` and `import-blocked` (§2; R2-6). | `a_failed_ps_is_harness_unreadable_and_blocks`, `a_failed_command_name_read_is_a_problem_and_blocks`, `a_lost_chain_is_harness_unreadable_and_blocks`. | Met |
+| 11 | The surface: the `cli-surface.txt` line, ADR 0003, ADR-0021 section 9, the help, and JSON (Work 4). | `cli_surface_test`, `pane_verbs/import.rs::the_adrs_name_the_switch_and_the_two_new_codes`, and the JSON assertions. | Met |
+| 12 | Two new codes with their levels, and the prose counts updated (R2-2; R2-4). | `import_test.rs::import_finding_codes_are_the_pinned_set`, `each_import_finding_has_its_level`. | Met |
+| 13 | ADR-0021 records the change: section 2, "amended since", section 13 "Decided (#835)", section 9, the closing lists (R2-2; R2-5). | I read `:108-124`, `:760`, `:950-990`, `:1013-1025`, `:1108-1111`, `:1172-1178`. | Met on the branch. The merge must reconcile it (REWORK 1 and 2). |
+| 14 | Every host decorator forwards `foreground_commands`, and each is pinned (R2-1). | `pane_integration/bind.rs` (both conformance runs), `wired.rs:111`, `Unwired`. | Met |
+| 15 | `observe_pane` is required, `observe_panes` keeps its default, and both decorators forward both (R3-1; R3-2). | The `ports.rs` `compile_fail,E0046` doctest, the `pane_integration/observe.rs` pins, `wiring/bind.rs` overrides. | Met |
+| 16 | Over the real wiring, `pane list` shows the working directory and the last change (or null / `-`) (R3-3). | `pane_integration/observe.rs` (JSON and text, over `BindingHerdr(LazyHerdr(FakeHerdr))`). | Met (regression pins) |
+| 17 | #652's guide is told of the default and the flag (§6). | `docs_pane_control_test.rs::import_findings_are_named_in_section_3_or_10` and `section_3_names_every_flag_of_pane_import`. | Met on the branch. The merge must reconcile it (REWORK 2). |
+| 18 | A CHANGELOG `[Unreleased]` entry links #835 and names the follow-up to #832 (§6; R3-4). | `CHANGELOG.md:76-91`; `changelog-check: ok`. | Met |
+| 19 | A pane left alone writes nothing, in a real run and a dry run. | Criteria 1 and 3. | Met |
+| 20 | Case 10 holds on a real tmux: no empty-list assertion and a bounded poll (R2-8). | `holler-pane-testkit/src/conformance/host.rs:226-252`; it passed on tmux 3.7c. | Met |
 
 ## Spec compliance
 
-**Cycle 1's REWORK 1 is resolved, in every place I named and one more.** Each place now says that the import reads the
-command name of the foreground process of each tmux pane in the pane's tmux session. Each limits sentence also names a
-`claude` outside the foreground. The places:
-- the help (`pane/import.rs:67-79`);
-- the guide's section 1 (`:29`), section 3's `harness-claude-code` row (`:299`) and section 10's fact (`:697-708`);
-- the CHANGELOG (`:79-88`);
-- `read_tmux`'s doc (`import/observe.rs:114-116`);
-- beyond my table, the `holler-pane` import module doc (`import.rs:24-32`), which is F's DD5 and consistent with the rest.
+**Cycle 2's REWORK is resolved on the branch.**
 
-F reworded two places differently from my suggestions. That was within the rule I gave, so it is not a deviation.
+1. **#831 owns the adoption.**
+   - ADR-0021 "The switch" (`:982-985`): "The adoption itself is not built here: #831 owns it (operator, 2026-10-11)".
+   - The "Deferred" entry (`:1108-1111`) names #831 by the operator's decision.
+   - The guide's section 12 (`:816-817`) names #831.
+2. **The same three limits everywhere.** On the branch, every place that states the rule agrees on each point:
+   - the foreground process;
+   - the command name (a name only, never a command line);
+   - an exact `claude`;
+   - three limits: the `claude` has exited, it is not in the foreground (a wrapper script, or suspended), or it runs under another `argv[0]` or name;
+   - "a default, not a proof".
 
-I checked the wording against the adapter: `FOREGROUND_FORMAT` is `#{pane_dead} #{pane_current_command}` (`tmux.rs:35`),
-read once per live tmux pane. I also checked it against how tmux names a pane's command: the argv[0] of the leader of the
-pane's foreground process group. Under that model, each case of the limits sentence is true:
-- an exited `claude` shows its shell;
-- a wrapper script that stays in the foreground shows its interpreter, and a suspended `claude` gives the terminal back to
-  the shell;
-- a `claude` started under another name shows that name.
+   The places I read:
+   - the help (`holler-cli/src/pane/import.rs:67-79`);
+   - the guide's sections 1 (`:28-30`), 3 (`:299-300`), 10 (`:697-708`, `:775-778`) and 12 (`:816-817`);
+   - the CHANGELOG (`:76-88`);
+   - ADR-0021 section 9 (`:760`) and section 13 (`:950-990`);
+   - `pane.rs:140-160`;
+   - `ports.rs:27-31` and `:340-348`;
+   - the `holler-pane` import module doc (`import.rs:24-32`);
+   - `read_tmux`'s doc (`import/observe.rs:114-116`).
+3. **Grep.** There is no "no story owns" anywhere. "each process" and "every process" occur only in correct descriptions of the fake, `stop_owned` and test harnesses. "Pane process" remains only in the test module doc `harness.rs:2` (Advisory 2).
 
-**As stated, unchanged since cycle 1:**
-- the signature, required;
-- names only, from the `list-panes` listing that `ps` makes, with a parser as strict as `parse_ps`;
-- errors through `Call` and `refused()`, and `ps` left unchanged;
-- `HostOp::ForegroundCommands`, whose `as_str` is the adapter's `OP_*`;
-- the rule and its one home;
-- fail closed, with no record on a guess;
-- the two codes and their levels;
-- `Outcome::claude_code` through `left_alone`, with no new `Action` or `Level`;
-- the switch at one site, with `not_implemented_message(831)`;
-- the records.
+**The recorded decisions still hold:**
+- the `info` level, as against `harness-not-opencode`'s `skipped`;
+- `usage` rather than `not-implemented`;
+- the four recorded departures listed in cycle 2.
 
-**The recorded decisions I treat as such:**
-- The level is `info` where `harness-not-opencode`'s is `skipped` (brief §3).
-- The switch answers `usage`, not `not-implemented` (brief §4).
+**New: `main` has moved under the brief, as #831's body did in cycle 2.** PR #857 (part of #831) put on `main`:
+- `HarnessKind::Claude`;
+- harness calls keyed by `HarnessEndpoint`;
+- copies of this branch's `foreground_commands`, `CLAUDE_CODE_COMMAND`, `is_claude_code_command`, case 10 and the forwards, taken from `9bd101b` and `36b0de8`;
+- an ADR-0021 section 15 whose item 17 and decision 23 **decide** the adoption route: a re-run of `pane import --adopt-claude-code` that extends the existing profile, with `already-registered`.
 
-**Departures from the brief's literal text, each recorded and none silent** (unchanged from cycle 1):
-1. `observe_pane`'s change is recorded in section 14, section 2 and decision 23 (A pass 3, W2).
-2. R3-2's second bullet is read as applying to forwarding wrappers (A pass 3, W5; Advisory 5).
-3. F's design decision 1: a pane whose tmux read failed still has its server asked. It is blocked either way.
-4. R3-3's two tests passed before F. They are regression pins of the acceptance item; "no default" is proved by the
-   doctest of criterion 15.
-
-**New this cycle: one fact in the docs is out of date (REWORK item 1).** Brief §5 (round 1, written between A's passes 1 and
-2, 15:11 to 15:45 MDT) says "No story owns the post-#831 adoption" and asks the operator to "add a line to #831". The
-operator did:
-- #831's issue body has had a section "Adopting the fleet's existing Claude Code panes (added 2026-10-11, operator decision)"
-  since its revision of 15:50 MDT (last edited 16:00 MDT). The section says: "This story owns the step that adopts Claude
-  Code panes that already exist."
-- #831's branch, `008a995`, records the route too, in its ADR-0021 section 15, item 17. It is not merged.
-
-F wrote "no story owns the adoption yet" into the ADR's "Deferred to named stories" list (cycle 1, committed in `9bd101b` at
-18:42 MDT) and into the guide's section 12 (cycle 2, `4604693`, 19:34 MDT). By then #831 already owned it. A, T, A-dup and my cycle-1 audit all repeated the
-brief's fact; my cycle-1 advisory 6.2 was wrong on this point.
-
-This is not an `ADVISORY-HOLD`: the brief needs no amendment. Its own contingency ("The operator should add a line to
-#831") has happened, and naming #831 changes no decision. This story still builds the refusal, not the adoption.
+This is not an `ADVISORY-HOLD`. The brief needs no change: the issue's "until #831" switch is still a refusal that #831's last step replaces, and the issue comment of 23:09 MDT says "whichever PR lands second merges main in". It is branch upkeep plus prose that must match the new `main`, which is F's work.
 
 ## Quality audit
 
-- **Correctness and failure handling.** I read the full production diff again.
-  - `ps` runs first, and the names are read only after it answers (`import/observe.rs:117-132`).
-  - A `pane-not-found` from either read is `tmux-session-missing`.
-  - Any other error, and a lost chain, is `harness-unreadable` (`:203-234`). Both are problems, so the pane gets no record and
-    a real run is refused before any write (`Plan::refusal`; `writes.rs:38-42`).
-  - The Claude Code path returns before the server is asked, and `assess_all` routes it to `Outcome::claude_code`.
-  - The messages quote no observed name. Errors go through `failed_message` and `embedded`.
-  - The adapter adds no new subprocess path: `Call::start`, `run_tmux`, a strict parse, then `refused()`.
-  - Everything is read only, on the pane's own scoped thread.
+- **Correctness and failure handling.** There is no code change since cycle 2; my cycle-2 reading stands:
+  - `ps` runs first;
+  - `pane-not-found` is `tmux-session-missing`;
+  - any other error, and a lost chain, is `harness-unreadable`, so the pane gets no record and a real run is `import-blocked`;
+  - the Claude Code path makes no harness call;
+  - the messages quote no observed text.
 - **Build guards.**
-  - No `unwrap`, `expect`, `panic`, `todo`, `unimplemented` or `unreachable` is added in any `src`. I grepped the added
-    lines.
-  - The two `#![allow]` lines are in new test files and carry `// #835`.
-  - The largest touched `.rs` file is `pane_verbs/launch/rig.rs`, at 839 lines.
-  - Clippy with `dead_code = "deny"` is clean (T-green).
-  - `rustfmt --check` passes on every touched production file except `wiring.rs:73-77`. That drift is `main`'s line 76, from
-    #832 (`git blame` `652841b0`), outside this diff, whose only `wiring.rs` hunk is `:324-330`.
-- **Protocol.** Nothing changed: no file in `holler-proto`, no `docs/protocol/v2.md` change and no golden file.
-  - `usage` already exists, and the two new codes are import findings.
-  - The only fixture change is the additive `cli-surface.txt` line.
-  - ADR-0021 section 9's row is updated.
-- **Tests.**
-  - The import is a CLI verb over ports, so the tests run in-process over the test kit's fakes. The real tmux runs in the
-    `--ignored` suite on a scratch server.
-  - No fixed sleep is used for synchronisation. Case 10 polls within a bound, as R2-8 asks.
-  - The RED-first evidence is in both T-red handoffs.
-- **Documentation.**
-  - These are updated: `CHANGELOG.md`, ADR 0003, ADR-0021, the guide and the help.
-  - No other doc names `pane import`. I grepped `README.md`, `docs/*.md` and the ADRs.
-  - The wording of cycle 1's REWORK 1 is correct now.
-  - **Two defects remain:** REWORK items 1 and 2.
-- **Public-repository privacy.**
-  - I grepped all 3,303 added lines, handoffs included. There is no IP, no tailnet or `ts.net` name, no personal host or
-    account name, no home path and no secret.
-  - Every path is neutral (`/srv/demo`, `/srv/state`, `/opt/demo/bin/claude`, `/usr/bin/sleep`, `/work/seeding`).
-  - I7 holds: the format asks for `#{pane_current_command}` only, and `foreground_test.rs` pins that it has no
-    `start_command`.
+  - No new `unwrap`, `expect` or `panic` in `src`. The two `#![allow]` lines carry `// #835`.
+  - The largest touched `.rs` file is `pane_verbs/launch/rig.rs`, at 839 lines, and 852 in the trial merge. Every touched `.rs` stays under 900 after the merge too: `pane.rs` is 486 and `apply/rig.rs` is 775.
+  - The guide is 821 lines on the branch and `main`'s is 964. It is markdown, so the 900 guard does not apply (`lint.sh` passed).
+- **Protocol.** No change.
+- **Tests.** Fakes, plus a real tmux in `--ignored`. No fixed sleeps. RED-first evidence is in both T-red handoffs.
+- **Documentation.** Consistent on the branch. The merge must reconcile it (REWORK 2).
+- **Public-repository privacy.** I grepped every added line of `git diff origin/main...HEAD`, handoffs included, for IPs, `ts.net`, tailnet and tailscale, personal host and account names, home paths, e-mail addresses and keys or tokens. The only hits are rule text that names the categories ("no personal host, tailnet or account names"). Clean.
 - **Commits and PR.**
-  - All 19 commits since `main` have a Conventional subject and a `Co-Authored-By` trailer. That is the form the repo hook
-    writes, with no session link, as on `main`.
-  - No PR is open yet (`gh pr list --head issue-835-implementation`). Its AI disclosure and coexistence notes are the run
-    agent's (Advisory 7).
+  - All 21 commits since the base have Conventional subjects and a `Co-Authored-By` trailer, the hook's form, as on `main`.
+  - No PR exists (`gh pr list --head issue-835-implementation --state all` is empty). The AI disclosure is the run agent's job, after the script opens the PR.
 
 ## Scope check
 
-- **Delivered:**
-  - the issue, as amended by rounds 1 to 3;
-  - A's pass-4 warns;
-  - the guide's update that brief §6 asks for;
-  - cycle 1's REWORK 1.
-- **This cycle's extras:**
-  - **The `holler-pane` import module doc (F's DD5).** It is one sentence, consistent with the rest.
-  - **F's merge of `origin/main` (#851).** This is branch upkeep that R2-1 ("it also needs the current `main`") and A's W1
-    precedent support.
-    - I verified it is the automatic merge plus F's prose.
-    - #851 and #835 share only `CHANGELOG.md`, ADR-0003 and the guide, in separate places.
-- **Changes to #649's files** are the forwards and the module doc that describes them only, as R2-1 and R3-1 allow.
-- **Under-delivery:** only the adoption after #831, which brief §5 puts out of scope and #831 owns.
-- **No over-delivery:** there is no unrelated refactor and no new rig, page, table or helper.
+- **Delivered:** the issue as amended by rounds 1 to 3, A's warns, the guide update, and both earlier REWORKs.
+- **This pass:** prose only, within my cycle-2 items, plus the optional `ports.rs` wording (my Advisory 2 of cycle 2).
+- **No over-delivery.** Under-delivery is only the adoption, which brief §5 puts out of scope and #831 owns.
+- **After the merge, part of this PR's diff will already be on `main`** (the port method, constant, rule, case 10 and forwards from #857). That is expected, and the PR body should say so.
 
 ## Verdict
 
-**REWORK** (production, docs and one doc comment). There is no test change, so the rework goes to F. **Report
-`archChanged: false`.**
+**REWORK** (production, with some test files in the merge). It goes to F. Report `archChanged: false`: the contract and behaviour do not change.
 
-1. **Two sentences say no story owns the adoption after #831, and #831 owns it.**
+1. **Merge `origin/main` (`b76f4d2`) into the branch and resolve it fully.** Line numbers below refer to the trial merge tree `3264623` unless they name `HEAD`.
 
-   The source is #831's issue body, section "Adopting the fleet's existing Claude Code panes (added 2026-10-11, operator
-   decision)": "This story owns the step that adopts Claude Code panes that already exist."
+   a. **Silent duplicate, a compile error.** `crates/holler-pane/src/pane.rs` defines `CLAUDE_CODE_COMMAND` and `is_claude_code_command` twice: `main`'s copy at `:232`/`:242` and the branch's at `:253`/`:265`. git reports this file as merged cleanly.
+      - Keep one, at `main`'s position.
+      - Its doc keeps `main`'s use sentence ("for the import (#835) and the stories that adopt or show such a pane (#831, #832)") and this branch's three-limit paragraph (HEAD `pane.rs:153-158`).
 
-   | Where | Lines | Change |
-   |---|---|---|
-   | `docs/adr/ADR-0021.md`, "Deferred to named stories" | 1105-1107 | "No story owns the adoption yet." becomes a sentence that names #831 as the owner, by the operator's decision of 2026-10-11 recorded in #831's issue. Keep the rest: the switch is refused until #831; the import leaves such a pane alone; the write step refuses a `fleet` that exists, so the owner changes that step or takes another route. |
-   | `docs/pane-control.md`, section 12 | 816-817 | "and no story owns the adoption yet" becomes a statement that #831 builds the adoption, for example "adopting the Claude Code panes the import leaves alone (#831; until it lands, `--adopt-claude-code` is refused)". |
-   | `docs/adr/ADR-0021.md`, section 13 "The switch" (optional) | 980-982 | "so its owner changes that step" may name #831. The sentence is accurate as it is. |
+   b. **Silent duplicate numbering.** In ADR-0021's "Decisions taken", the branch's decisions 22 and 23 (`:1540`, `:1543`) sit beside `main`'s 22 to 29. Renumber the branch's two as 30 and 31.
 
-   Do not describe #831's route (a re-run of the import, or another verb). It is undecided on `main`, and #831's own
-   amendment records it.
+   c. **Silent duplicate entry.** ADR-0021's "Deferred to named stories" holds both `main`'s adoption sentence (`:1453-1454`, "#831 itself, once #835 is on `main`") and the branch's bullet (`:1476-1479`). Keep one.
 
-2. **In the same pass: the contract's list of limits gets the case the user docs now name** (A-dup's warn 1). The help
-   (`crates/holler-cli/src/pane/import.rs:74-76`), the guide (`docs/pane-control.md:705-707`) and the CHANGELOG
-   (`CHANGELOG.md:86-88`) name three ways a Claude Code pane is missed:
-   - its `claude` has exited;
-   - it is not in the foreground (a wrapper script runs it, or it is suspended);
-   - it was started under another name.
+   d. **The 10 conflicts.** Take both sides' meaning in each:
 
-   ADR-0021 section 13's "The rule's limits" (`docs/adr/ADR-0021.md:973-976`) and `is_claude_code_command`'s doc
-   (`crates/holler-pane/src/pane.rs:153-156`) name two of these. The guide links section 13 as "the contract".
-   - Add the missing case to both, for example: "nor is one whose `claude` is not the pane's foreground process (a wrapper
-     script that stays in the foreground runs it, or it is suspended)".
-   - Keep R2-5's two cases and its "a default, not a proof" sentence. If "(a wrapper, ...)" stays under "another
-     `argv[0]`", make it say a wrapper that starts `claude` under another name, so that "wrapper" is not ambiguous.
-   - The wording is F's, as long as every place lists the same three cases.
+      | File | Resolution |
+      |---|---|
+      | `holler-pane/src/import/observe.rs:20-26` | Import both `is_claude_code_command` and `HarnessEndpoint`. |
+      | `holler-pane/src/ports.rs` module doc (`:15-55`) | `main`'s "Amended since:" header and its #831 bullet, plus the branch's #835 bullet, which uses the "foreground process of each pane" wording and says that `observe_pane` lost its default. |
+      | `holler-pane/src/ports.rs:406-411` | `main`'s added `process-in-use` clause. |
+      | `holler-cli/src/pane/wiring/bind.rs:17-31` | `main`'s list of the four process methods, plus the branch's sentence that `observe_pane` and `foreground_commands` have no default. |
+      | `holler-pane/src/unmanaged.rs:66-95` | `main`'s text. The branch's "The import (#835) does not call it" may stay if it agrees with `main`'s section 14. |
+      | `holler-cli/tests/pane_integration/wired.rs:112-118` | `main`'s `HarnessEndpoint` form. |
+      | `holler-pane/tests/ports_test.rs:18-30` | `main`'s import list. |
+      | `holler-pane/tests/claude_code_rule_test.rs` (add/add) | One file. The module doc should say #831 and #832 reuse the rule (`main`). |
+      | `holler-cli/tests/docs_pane_control_test.rs:532-571` | Keep both functions (`section_3_names_every_flag_of_pane_import` and `main`'s `built_lines_marked_proposed`). |
+      | `docs/adr/ADR-0021.md`, `docs/pane-control.md` | See item 2. |
 
-**Change no behaviour and no test.** Do not grow the guide (821 lines: 817 from this branch plus #851's 4).
+   e. Then `cargo build --workspace --all-targets` and the full Tier 1. T-green must confirm GREEN on the merged tree, because test files change in the merge.
+
+2. **Bring the prose in line with `main` after #857.** The Claude Code harness has landed; what has not is #831's adoption step (`main`'s ADR-0021 section 15 item 17, decision 23). After the merge these statements are false:
+
+   a. **"until the Claude Code harness (#831) lands".** It should say: until #831's adoption step lands (section 15, item 17). The runtime text `not implemented (story #831)` stays. The places, by HEAD lines:
+      - help: `holler-cli/src/pane/import.rs:78-79` and the flag doc at `:116-117`;
+      - guide: `docs/pane-control.md:283-284`, `:326`, `:816-817`;
+      - `CHANGELOG.md:84-85`;
+      - ADR-0021: `:760` (section 9 row), `:979` ("The switch"), `:1109` ("Deferred"), `:1174` (decision 22, to be renumbered).
+
+   b. **"#831 changes that step or takes another route, such as `pane launch --profile fleet`".** This is at HEAD ADR-0021 `:983-985` and `:1110-1111`, and it contradicts `main`'s decision 23. The route is decided: a re-run with `--adopt-claude-code` that extends the existing profile. Refer to section 15, item 17 and decision 23 instead of naming a route.
+
+   c. **The guide's section 1 boundary paragraph** (conflict at the trial merge's `:25-43`):
+      - keep `main`'s two harness kinds;
+      - drop the branch's "closed set with one member, `opencode`";
+      - keep the branch's `harness-claude-code` sentence;
+      - drop `main`'s "which waits for #835 and is not built".
+
+   d. **The guide's section 10 fact** (`:867-887`). Take the branch's text, since `main`'s says #835 is "not built".
+
+   e. **The guide's section 12** (`:999-1007`). Drop `main`'s "#835" bullet. Keep one adoption bullet, naming #831's last step, and `main`'s other two bullets.
+
+   f. **ADR-0021 section 2's `HostPort` row** (`:108-116`). Keep the branch's `HerdrPort` row ("required since #835"). The `HostPort` row cites both: "#835, section 13; #831, section 15".
+
+   g. **ADR-0021 section 14's unmanaged bullet** (`:1085-1095`). Take `main`'s text: #831's Claude Code is drivable, and the import uses `is_claude_code_command`. The branch's "#831 adds a second kind and is added to this function then" is out of date.
+
+   h. **The CHANGELOG #835 entry.** "through the new `HostPort::foreground_commands`" should not claim the method as new, because `main`'s #831 entry already announces it, "built to #835's brief". Say that the import now uses it.
+
+   i. **Keep every limits statement exactly as it is on the branch:** the three cases, foreground, name only, exact `claude`. It is consistent now; do not reword it during the merge.
 
 **Then run:**
-- `cargo test -p holler-cli --test pane_verbs import::the_adrs_name_the_switch_and_the_two_new_codes`. It reads ADR-0021:
-  keep "Decided (#835)", both codes, and the flag in the `pane import` row.
-- `cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test`.
-- `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane`, for the `pane.rs` doc and its links.
-- `bash scripts/changelog-check.sh`.
-- `git diff --check`.
+- the full Tier 1 (`lint.sh`, `changelog-check.sh`, clippy `-D warnings`, `cargo test --workspace`, `docs_cli_test`, `docs_pane_control_test`, rustdoc `-D warnings` for `holler-pane`, `git diff --check`);
+- `git merge-tree --write-tree HEAD origin/main` once more, which should now be clean;
+- `git grep -n "lands" -- crates/holler-cli/src/pane/import.rs docs/pane-control.md CHANGELOG.md docs/adr/ADR-0021.md | grep 831`, to check item 2a.
 
 ## Advisory notes (non-blocking)
 
-1. **Coordinating with #831 on the constant's name** (for the run agent or the operator; an outward action).
-   - #835's comment of 18:12 MDT gives #831's spelling, `pub const CLAUDE_COMMAND`, and asks: "If you have already named the
-     constant differently, say so here and #831 adopts your name".
-   - This PR names it `holler_pane::pane::CLAUDE_CODE_COMMAND`, with the predicate `is_claude_code_command`.
-     `foreground_commands`' signature matches #831's text exactly.
-   - So reply on #835 with these two names. #831's branch (`008a995`) still spells `CLAUDE_COMMAND`, in its ADR-0021
-     section 15, items 2 and 17, and in its brief. Its brief already says "if #835 has merged, adopt its constant".
-   - #831's branch also edits ADR-0021 section 2's `HostPort` row (`:109`), as this PR does. Whichever merges second
-     resolves that conflict.
-2. **Two internal docs say "pane process"** where the rest says "the foreground process of each tmux pane". They are the
-   `ports.rs` module doc (`:27-28`) and the module doc of `harness.rs` (`:1-2`, a test file, T's).
-   - Neither is user-facing, and both read as "each pane's process".
-   - F may fold `ports.rs` into the rework. This is optional.
-3. **The guide is 821 lines,** past #652's soft "about 800". No check enforces that. This story added 23 lines; #851 added 4.
-4. **`rustfmt` drift in this story's new test code** (carried from cycle 1). It is test-only and optional. CI has no format
-   step, and `main` already drifts.
-5. **The test-only Herdr wrappers still use `observe_panes`'s default** (carried). This is harmless; the brief's R3-1 lists
-   them as fine.
-6. **A-dup's warn 2** (test-only, optional). `ImportRig::run_with_host` copies `run_with_store`. `text_row` is a twin of the
-   import rig's `text_line`.
-7. **For the run's agent, after the script opens the PR:**
-   - add the AI disclosure that `CONTRIBUTING.md` asks for, with `gh pr edit`;
-   - add coexistence notes for #832 (PR #836), #840, #652 and #851 (PR #854). They edited `ports.rs`, `wiring.rs`,
-     `bind.rs`, ADR-0021 sections 2, 9, 13 and 14, ADR-0003, the guide and the CHANGELOG. Also note #831's open branch
-     (Advisory 1);
-   - write times in MDT;
-   - CI's "PR size" step will warn, because the PR adds more than 800 lines. The step is advisory and does not fail.
-8. **For the operator (outside the pipeline):**
-   1. **The epic's contract block.** #633's body (the `HostPort ensure_session / run / stop_owned / ps` line) does not name
-      `foreground_commands`. Its `HerdrPort` line does not name `observe_pane` or `observe_panes`.
-   2. **#831 replaces the refusal at one code site,** `Input::read` (`pane/import.rs:176`). "Refused until #831" is also
-      prose in:
-      - ADR-0021: section 9's row, section 13's "The switch" and "Deferred";
-      - the guide: sections 3 and 12;
-      - the help;
-      - the CHANGELOG.
-
-      The limits of the rule are also written in five places: the help, the guide, the CHANGELOG, ADR-0021 and `pane.rs`.
-   3. **R2-5's real-fleet check.** Run the first real import's dry run while the fleet's Claude Code sessions run. The
-      guide's section 10, step 1 says so.
+1. **The PR body** (for the run agent):
+   - say that #857 already carries this story's port method, constant, rule, case 10 and forwards;
+   - give the coexistence notes: #832/#836, #840, #652, #851/#854, #667/#855, #648/#856, #665/#858, #831/#857;
+   - add the AI disclosure from `CONTRIBUTING.md` with `gh pr edit`;
+   - write times in MDT. CI's "PR size" step will warn; it is advisory.
+2. **`harness.rs:2`, a test module doc, says "every pane process".** The others say "the foreground process of each tmux pane". TEST-ONLY and optional.
+3. **For the operator:**
+   - #633's contract block still omits `foreground_commands`, `observe_pane` and `observe_panes`;
+   - the refusal "until #831" is prose in about eight places that #831's adoption step must update with its one code change at `Input::read`;
+   - R2-5's real-fleet dry run (guide section 10, step 1) is still the only check of the rule's limits.
+4. **Carried from cycle 2:**
+   - `rustfmt` drift in this story's new test code (test-only);
+   - the test-only Herdr wrappers use `observe_panes`'s default;
+   - A-dup's warn 2 (`run_with_host` and `text_row` twins).
