@@ -40,12 +40,12 @@ pub const SUPPORTED_VERSIONS: &str = "Herdr protocol 22 (0.9.1)";
 /// compared.
 pub const UNSUPPORTED_VERSION: &str = "99.0.0-fake";
 
-// ASSUMPTION (#640): `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS` are the fake's own
-// values. No verb or adapter raises or names them yet, and no suite case tests them, so
-// they do not bind #640 today. A merged code is never renamed (ADR-0021 section 9), so a
-// verb test (#644 and later) compares against the constants, never the literals. #640
-// either declares the same values in its own file and asserts in its dev-tests that they
-// equal the test kit's, or the fake takes #640's values before any verb story pins them.
+// ASSUMPTION (#640): `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS` began as the fake's own
+// values. The Herdr adapter declares the same ones (`plan::GRID_UNREACHABLE`,
+// `protocol::SUPPORTED_VERSIONS`), and its dev-tests assert that they equal the test kit's
+// and (#853) that split-only placement accepts exactly the cells its planner plans. A merged
+// code is never renamed (ADR-0021 section 9), so a verb test compares against the
+// constants, never the literals.
 /// The open code that split-only placement refuses an unreachable cell with: a refusal
 /// (`ErrorClass::Refusal`, exit 3). Provisional test vocabulary: a verb test compares
 /// against `GRID_UNREACHABLE.as_str()`, never the literal.
@@ -86,10 +86,12 @@ pub enum Placement {
     /// Any free cell inside the workspace (the default).
     #[default]
     Absolute,
-    /// Only a cell that a split reaches, as in real Herdr (spike section 7): the root
-    /// `r1c1` of an empty workspace, or a free cell right of a pane (a `right` split) or
-    /// below one (a `down` split). Any other free cell is refused with
-    /// [`GRID_UNREACHABLE`].
+    /// Only a cell that one split reaches, as in real Herdr (spike section 7) and by the
+    /// Herdr adapter's planner (`plan_splits`, ADR-0021 section 10): the root `r1c1` of an
+    /// empty workspace, the cell just right of a row's last pane (a `right` split), or
+    /// column 1 just below the last row when that row is one pane (a `down` split; under a
+    /// wider row it nests inside one cell). Any other free cell is refused with
+    /// [`GRID_UNREACHABLE`]. The adapter's tests check that the two agree (#853).
     SplitOnly,
 }
 
@@ -468,28 +470,50 @@ impl Workspace {
         self.panes.get(&(grid.row, grid.col)).map(|pane| &pane.id)
     }
 
-    /// Step 4, split-only placement: a free cell is reachable as the root of an empty
-    /// workspace (`r1c1`), or by a `right` split of the pane on its left or a `down`
-    /// split of the pane above it. No call places a pane at a cell (spike section 7).
+    /// Step 4, split-only placement: whether one split makes the free cell `grid`, by the
+    /// rule of [`Placement::SplitOnly`]. No call places a pane at a cell (spike section 7).
     fn check_split(&self, grid: GridPos) -> Result<(), PaneError> {
-        // Row 0 and column 0 hold no pane, so nothing is left of the first column or
-        // above the first row.
-        let holds = |row: u16, col: u16| self.panes.contains_key(&(row, col));
-        let root = self.panes.is_empty() && (grid.row, grid.col) == (1, 1);
-        let left = holds(grid.row, grid.col.saturating_sub(1));
-        let above = holds(grid.row.saturating_sub(1), grid.col);
-        if root || left || above {
+        // ASSUMPTION (#640): the planner's rule reads a grid with no hole, as real Herdr
+        // leaves (a closed pane's space goes to its sibling), but the fake's `close` and
+        // `vanish` leave the other panes in their cells. So a row's last pane is its
+        // rightmost, the last row is the highest-numbered that holds a pane, and a hole
+        // before either is never refilled.
+        let reachable = match (self.last_row(), self.end_of(grid.row)) {
+            // An empty workspace starts at its root pane.
+            (None, _) => (grid.row, grid.col) == (1, 1),
+            // A row that holds a pane grows by a `right` split of its last pane.
+            (Some(_), Some(end)) => grid.col.checked_sub(1) == Some(end),
+            // A new row is a `down` split of the last row, which must be one pane, at c1.
+            (Some(last), None) => {
+                grid.col == 1
+                    && grid.row.checked_sub(1) == Some(last)
+                    && self.end_of(last) == Some(1)
+            }
+        };
+        if reachable {
             return Ok(());
         }
         Err(PaneError::Refused {
             code: GRID_UNREACHABLE,
             message: format!(
-                "{grid} cannot be reached in workspace {:?}: Herdr places a pane only by a \
-                 right or down split of an existing one (an empty workspace starts at r1c1), \
-                 and no pane sits left of {grid} or above it",
+                "{grid} cannot be reached in workspace {:?}: Herdr makes every pane by \
+                 splitting one (an empty workspace starts at r1c1), a row's next cell by a \
+                 right split of its last pane, and a new row, at c1, only below a last row \
+                 of one pane; place rows before columns",
                 self.name
             ),
         })
+    }
+
+    /// The highest-numbered row that holds a pane: `None` for an empty workspace.
+    fn last_row(&self) -> Option<u16> {
+        self.panes.keys().next_back().map(|&(row, _)| row)
+    }
+
+    /// The column of `row`'s last pane, its rightmost: `None` when the row holds none.
+    fn end_of(&self, row: u16) -> Option<u16> {
+        let last = self.panes.range((row, 0)..=(row, u16::MAX)).next_back();
+        last.map(|(&(_, col), _)| col)
     }
 
     /// Step 5: a new pane at `grid` with an empty screen, under the next id. The counter

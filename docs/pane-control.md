@@ -421,12 +421,15 @@ holler profile apply fleet --dry-run
 holler profile apply fleet --herdr-session demo
 ```
 
-Each step is `{pane, action, outcome, code, diff, detail}`. The actions are `create`, `adopt`, `report`, `relaunch`,
-`refuse` and `observe`; the outcomes are `created`, `relaunched`, `adopted`, `reported`, `refused`, `failed`, `skipped`
-(after a failed step) and `planned` (a dry run's step that would act). A `refused` or `reported` step does not stop the
-run or change the exit code; a `failed` step stops the run and exits 1. Its own open codes are
-`orchestrator-not-relaunched` and `spec-not-launchable`. It exits 2 (`usage`) when the plan has a create and no
-`--herdr-session`, 3 for `profile-not-found`, 1 for a failed step, and 0 otherwise.
+Each step is `{pane, action, outcome, code, diff, detail}`, one per spec pane in creation order (a workspace's column 1
+by row, then its other cells by row and column), so apply can build a whole grid from an empty workspace. The actions
+are `create`, `adopt`, `report`, `relaunch`, `refuse` and `observe`; the outcomes are `created`, `relaunched`,
+`adopted`, `reported`, `refused`, `failed`, `skipped` (after a failed step) and `planned` (a dry run's step that would
+act). A `refused` or `reported` step does not stop the run; a `failed` step stops the run and exits 1. A real run with a
+`refused` step and no failed one exits 3 and prints only the refusal, `apply refused <N> step(s): ...` (section 6); a
+dry run exits 0 with its plan. Its own open codes are `orchestrator-not-relaunched` and `spec-not-launchable`. It exits
+2 (`usage`) when the plan has a create and no `--herdr-session`, 3 for `profile-not-found` and for a real run with a
+refused step, 1 for a failed step, and 0 otherwise.
 
 ### `holler profile rename OLD NEW`
 
@@ -710,9 +713,12 @@ One step per spec pane, in creation order (below); the first matching row applie
 - **A refused run prints only the refusal** (#853), as a failed run prints only the failure: in JSON the failure
   envelope, whose `error.code` is the first refused step's code and whose message is
   `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`, then, for each refused step whose launch
-  or relaunch had begun its act, `; <pane>: <detail>` (its detail ends with the command that reconciles, and carries a
-  take-over note when there is one); in text one `error:` line on stderr and nothing on stdout. To read the steps as data, run `holler profile apply NAME --dry-run` (exit 0) or read
-  `holler pane list` and `holler profile show NAME` afterwards.
+  or relaunch had begun its act, `; <pane>: <detail>` (its detail ends with the command that reconciles, and carries
+  the step's take-over note when it has one); in text one `error:` line on stderr and nothing on stdout. A refused step
+  that acted nothing adds only its pane and code, so a relaunch refused before its act after a `--take-over` does not
+  say that the pane moved: `holler pane list` and `holler profile show NAME` show its new profile. To read the steps as
+  data, run `holler profile apply NAME --dry-run` (exit 0) or read `holler pane list` and `holler profile show NAME`
+  afterwards.
 - **A failure stops it.** A `failed` step (`unavailable`, `timeout`, a failed health call, a store conflict) stops the
   run, and the later steps are `skipped`. A run that ends with a `failed` step prints **only the failure**: in JSON the
   failure envelope, whose `error.code` is the failed step's code and whose message is

@@ -157,3 +157,63 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     the disk. That ran four `scripts/spikes/herdr-*.sh` scripts. Each starts and tears down its own scratch server
     (one printed `target proven`). No spike process was left. The operator's live Herdr servers (session `jupiter`, 15
     h old, and `herdr-jupiter`, 20 days old) were not touched.
+
+## F, implementation (the script's phase 6): 2026-10-12T05:58-06:00
+
+- **Decided:** done; T's RED is GREEN with no test edited (see handoff-F.md).
+  - **The order.** `cell_key` is `(workspace, col != 1, row, col)`, private, and its doc names `plan_splits` as the
+    rule it mirrors. There is no second order function and no public order API (A's map). `plan` keeps its stable
+    sort, so specs of one cell keep P's order.
+  - **The exit decision.** `refused(&Applied)` sits beside `stopped()`, and `run` asks
+    `stopped(..).or_else(|| refused(..))`: a failed step still wins (exit 1), then a real run's refused step (exit 3),
+    then the steps (exit 0). `refused` returns `None` for a dry run. The code is the first refused step's error
+    (`ErrorCode::from`), so `class_of` alone gives the 3. The message is built as `stopped()` builds its own:
+    `quoted(&step.pane)`, each code, and each acted step's `detail` as `reconciled()` left it. There is no second
+    reconcile builder and no exit table.
+  - **The carried detail keys on `Step::acted` alone** (A's warn 3; T's `rest == ""` assertions).
+  - **A's warn 4: option (a), decided under the standing orders.** The take-over note travels only with an acted
+    refused step. A relaunch refused before its act after a take-over prints only its pane and code, and the pane's new
+    profile shows in `pane list` and `profile show`. ADR-0021 section 8 and the guide's section 6 now say so; their rule
+    sentence (only an acted step's detail follows) was already this, so only the over-claiming clause changed.
+    - Rejected (b), carrying every refused step's detail: it changes the stated rule and contradicts T's tests.
+    - Parked for the operator (not done): carrying a not-acted step's detail when it holds a take-over note. It needs
+      a new `Step` signal (A rules out a new field) or a string test on `detail` (A rules that out too).
+  - **The fake (A's warns 1 and 8).** `check_split` follows section 10's rule: an empty workspace's `r1c1`; in a row
+    that holds a pane, only the cell just right of its last pane; a new row only at `c1`, just below the last row, when
+    that row is one pane at `c1`. The rule for holes is an `ASSUMPTION (#640)`: a row's last pane is its rightmost, the
+    last row is the highest-numbered that holds one, and a hole before either is never refilled. The new rule only
+    narrows the old one, so no cell the old fake refused is now accepted. The stale `GRID_UNREACHABLE` assumption is
+    refreshed (the adapter's `ac13` and `protocol_test.rs` pin both constants). The adapter's `Cargo.toml` comment on
+    its test-kit dev-dependency now names the cross-check.
+  - **Docs.** The guide's section 3 entry (A's warn 5), the `ProfileApply` `--help` text and both module docs state
+    the new order and exit code. `CHANGELOG.md` gains a `### Bug Fixes` subsection under `## [Unreleased]` linking
+    #853. #664's own Unreleased entry is left as written: the file does not rewrite an earlier entry that a later story
+    supersedes (that entry still says the verb answers `not-implemented` until #649).
+- **Assumed:**
+  - `<M>` is every step that is not refused. A run that reaches `refused()` has no failed step, so it has no skipped
+    one either, and `M` counts created, adopted, reported and relaunched steps.
+  - A step's detail is one line, as `stopped()` assumes for its own message. The JSON envelope makes the message one
+    line in any case (`one_line`).
+- **Hedged:**
+  - A's warn 9 (the brief's overlap paragraph with #835, and who renumbers decisions 30 and 31) is O's text. F changed
+    nothing for it.
+  - Acceptance 3 on real Herdr (the opted-in `grid.rs`, `probe.rs`, `scenario.rs`) and A's warn 1 revert check are
+    T-green's (Tier 2). F ran only Tier 1.
+- **Evidence:**
+  - **Ran (warm build in the worktree):**
+    - `cargo test -p holler-cli --test profile_verbs`: 118 passed, 0 failed (RED had 13 failing);
+    - `cargo test -p holler-pane-testkit`: every target ok, including `fake_herdr_test` (25) and
+      `herdr_conformance_test` (22, both placements);
+    - `cargo test -p holler-adapter-herdr --test plan_splits_test`: 20 passed, the cross-check included;
+    - `cargo clippy -p holler-pane -p holler-pane-testkit -p holler-cli -p holler-adapter-herdr --all-targets -- -D
+      warnings`: clean;
+    - `bash scripts/lint.sh`: exit 0. `herdr.rs` is 598 lines (from 575, under the 600 warn), `tx_apply.rs` 565 and
+      `profile/apply.rs` 225;
+    - `rustfmt --check` on the three changed source files: clean, as they were at HEAD;
+    - the workspace verify command: the result is in handoff-F.md.
+  - **Read:** the brief, handoff-A.md (round 2), handoff-T-red.md, the amendment diffs (`1f4ab40`, `05d8e6a`), T's
+    RED diff (`0064fac`), `tx_apply.rs`, `tx_apply/run.rs`, `profile/apply.rs`, `output.rs`, `error.rs` `class_of`,
+    `tx_launch.rs:590-700`, `tx_launch/server.rs:100-152`, `plan.rs`, the test kit's `herdr.rs` and its conformance
+    suite's header and cases, `docs_pane_control_test.rs`, and the guide's sections 3, 6 and 9.
+  - **Searched:** every statement of the old order and the old exit rule across `crates`, `docs`, `scripts`,
+    `README.md` and `CHANGELOG.md`; the remaining ones are in `docs/handoffs/` (history) and #664's CHANGELOG entry.
