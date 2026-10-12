@@ -120,8 +120,8 @@ pub const PANE_METHODS: &[&str] = &[
     "pane/watch",
 ];
 
-/// The hub's `profile/*` control-socket methods (the profile registry; issue #637).
-/// `profile/rename` is PROPOSED (#665). Outside [`CATALOG`]: see the module docs.
+/// The hub's `profile/*` control-socket methods (the profile registry; issue #637;
+/// `profile/rename`, #665). Outside [`CATALOG`]: see the module docs.
 pub const PROFILE_METHODS: &[&str] = &[
     "profile/get",
     "profile/list",

@@ -38,8 +38,8 @@
 //! cursor of the reply before it (E16). A batch yields its events in order, and a batch with
 //! none is the idle item `Ok(None)`. An error is one `Err`, and then the stream ends.
 //!
-//! `profile/rename` is PROPOSED (#665): the client sends it and passes the hub's `not-implemented`
-//! through.
+//! `profile/rename` (#665) is the hub's one transaction that renames a profile and moves its member
+//! panes; the client sends it like any other write.
 
 use std::collections::VecDeque;
 use std::io::ErrorKind;

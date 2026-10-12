@@ -15,7 +15,9 @@
 //!    is guessed.
 //! 2. **Compare** (each [`FindingKind`] says when it is reported). Stray sessions are judged
 //!    against every record, not only the scope, so another profile's session of record is
-//!    never a stray; unregistered Herdr panes are reported by whole-fleet passes only.
+//!    never a stray; unregistered Herdr panes are reported by whole-fleet passes only. A pane
+//!    that differs from its profile's spec is `profile-drift` (#665, `drift.rs`), for which
+//!    the pass reads `profile_store.list` once, and only when a pane in scope names a profile.
 //! 3. **Repair**, with `--fix`, one thing: a shown/driven mismatch, by selecting the session
 //!    of record when the pane's healthy server has it, then observing the TUI again (I3). It
 //!    never creates, starts, attaches, aborts or deletes anything, never types into a pane
@@ -42,6 +44,7 @@
 //! "Once per episode" is once per pass: a pass reports every current finding exactly once
 //! and keeps no memory between passes.
 
+mod drift;
 mod observe;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -197,6 +200,7 @@ pub fn reconcile(ports: Ports<'_>, request: &ReconcileRequest<'_>) -> Result<Rep
     let whole_fleet = request.profile.is_none() && request.pane.is_none();
     let mut findings = herdr_findings(herdr.as_ref(), &scope, &records, whole_fleet);
     findings.extend(strays(&scope, &checked, &records));
+    findings.extend(drift::findings(ports.profile_store, &scope));
     if let (true, Some(after), Some(Ok(snapshot))) = (
         whole_fleet,
         request.unmanaged_stalled_after_secs,

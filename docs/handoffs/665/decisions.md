@@ -58,3 +58,28 @@
 - **Evidence:**
   - **Gates:** `cargo clippy --workspace --all-targets -- -D warnings` is clean, and `bash scripts/lint.sh` exits 0.
   - **The RED run:** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`. The targeted runs are recorded in `handoff-T-red.md`.
+
+## F (implement): 2026-10-11 21:14 MDT
+- **Decided:**
+  - **The transaction's shape is A's preferred option (warn 2b): a guard-holding handle, no closure.** `PaneState::locked()` returns `panes::Locked`, which holds the pane lock. `profile::store::Store::rename` takes the profile lock, then the handle, so ADR-0021 section 7's lock-order sentence stays true unamended, and a `panes.json` that failed to load is `store-corrupt` before any profile check (the order the ADR states).
+  - **The twins are generalized in place (warn 2c).** In both stores, `entries_with`, `save` and `commit` take a slice of changes, `apply` (memory and the wake-up) is split out of `commit`, and `after(cursor)` gives consecutive cursors. The single writes pass one change. The restore after a failed profile save is the pane store's unlogged `write` of the committed table, and its failure is logged as `profile_rename_restore_failed` through `log_fault`.
+  - **One `Store::rename(.., panes: Option<&PaneState>)` (warn 3).** The port passes `None` (the record half), and `profile/rename` passes the pane registry. `ProfileState::rename`'s doc and the port doc in `holler-pane/src/profile.rs` say exactly what each does, without the sentence A found false.
+  - **A rename with no member writes no pane file and wakes no pane watcher.** The handle's `save`, `restore` and `apply` do nothing for an empty list of moves.
+  - **`profile::dispatch` and `rename::dispatch` take `panes: &Arc<PaneState>` (warn 2a).** The handler is `panes::handlers::run` with a closure, like the other `profile/*` methods.
+  - **D7's key order: warn 4 option (a).** holler-cli declares `serde_json`'s `preserve_order`, with lint #149's marker, and the workspace comment now says holler-cli relies on it. `ProfileSpec`'s fields are not mirrored: each pane is `to_value(spec)` with `herdr.grid` replaced in place.
+  - **One `Document` type in `export.rs`, both directions.** Reading decodes it with `deny_unknown_fields`, and maps any failure to `usage` from serde's category and position alone. The specs then go through `GridPos::parse` (text positions) and `decode_params`.
+  - **A spec's `usage` replaces serde's message** with one naming the spec's position, because serde's text can quote the file (the acceptance's "never echo serde's message"). A typed guard's own code passes unchanged.
+  - **File errors follow A's warn 5:** the split `pane import` makes. `usage` for a path that names nothing usable (missing, a missing or non-directory parent, a directory, no file name, not a regular file, over 1 MiB, not a document). `unavailable` for any other I/O failure. ADR-0021 section 9's two rows and the guide's "Ends with" lines say so. This deviates from D8 and D9, which made every file error `usage`.
+  - **The text forms print "N specs" as the tests pin them** (`1 specs`), not through `count()`.
+  - **Drift compares a profile with its members in scope.** For a pane in scope, the row is the one `profile show` computes over all members. The profiles are read by one `list`, only when a pane in scope names a profile. A pane naming a missing profile is not reported (brief: out of scope).
+  - **`profile_rename_restore_failed` is recorded in ADR-0021's "Rename as built".** The README "Debug output" table is unchanged, since the registries' other fault events (`*_registry_corrupt`, `*_registry_write_failed`) are not listed there either.
+- **Assumed:**
+  - **The brief overrides the issue's "edit none of #661's files" (A warn 2d).** `Store`'s lock, save and commit are private to `profile::store`, so the rename has to edit them. This is recorded here and in the handoff, because the brief is O's and is not edited after the plan check.
+  - **The fake's rename can leave half a write.** It appends two events in one `feed.write`, so a cursor overflow on the second append would leave the first in place. A `u64` cursor cannot overflow in a test, and the fake's `Log.head` is private to `feed.rs`, so there is no pre-check.
+- **Hedged:**
+  - **Two of T's new conformance cases fail over the wire only:** `rename-of-one-slug-is-one-put` and `rename-feed-is-deletion-then-put`, through `HubProfileStore` in `pane_integration`. `HubProfileStore::watch` makes its first long-poll at once (#649, D4), so the first `next()` after `open(...)` at the head is the idle batch of a window that ended before the rename. The suite's own cases 19 and 21 consume that first idle item before writing. Both cases pass on the fake and on `ProfileState`. This is a test sequencing defect, flagged for T in `handoff-F.md`. F did not edit the cases.
+  - **Lock-order safety is reasoned, not proven.** It rests on `check_membership` releasing the profile lock before the pane write takes the pane lock (`evidence.md`), plus T's two 20-round race tests, both green.
+- **Evidence:**
+  - **Gates:** `cargo clippy --workspace --all-targets -- -D warnings` is clean, and `bash scripts/lint.sh` exits 0 (every touched file is under 600 lines).
+  - **Formatting:** rustfmt was run per file on the leaf files F touched. Every touched module tree passes `rustfmt --check`, and no other file changed.
+  - **Tests:** the targeted and workspace runs are in `handoff-F.md`. `evidence.md` holds the unchanged-code facts the diff relies on.
