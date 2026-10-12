@@ -102,3 +102,15 @@
     - with no deletion event in the fake's rename, case 27 fails;
     - with no member moves in `Locked::moves`, H2, H3 and H5 fail.
   - **Concurrency:** `profile_rename_faults_test` passed 5 runs of 5.
+
+## T (Phase 7, verify / GREEN, re-run): 2026-10-11 21:58 MDT
+- **Decided:**
+  - **PASS again, on `3b20fc0`.** Nothing changed since the first GREEN round, and no rework note came with the call, so no test was edited.
+  - **The re-run was full and independent:** the workspace suite, lint, the changelog check, clippy and machete.
+  - **One new mutation spot check, for drift.** The earlier round's mutations covered the feed and the member moves.
+- **Assumed:** this is a re-entry of the same phase, for example a resumed script, and not a request for a rework.
+- **Hedged:** #693 did not recur in this run. It is still open and can still fail CI on a test this diff does not touch.
+- **Evidence:**
+  - **The workspace run:** 154 targets, 2,434 passed, 0 failed, 32 ignored, exit 0.
+  - **The gates:** `lint.sh` exits 0, `changelog-check` prints `ok`, and clippy `-D warnings` and `cargo machete` are clean.
+  - **The drift mutation:** `drifted` was changed to match no `Differs` row. Four `doctor::drift` tests failed: agreement, one-per-pass, scope and shape. The change was reverted, and `git status` is clean.

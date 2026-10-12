@@ -6,6 +6,36 @@
 **Handoff-F reviewed:** `docs/handoffs/665/handoff-F.md`
 **Handoff-T-red:** `docs/handoffs/665/handoff-T-red.md`
 
+## Re-verification (Phase 7 pass, 2026-10-11, 21:48 to 21:58 MDT, on `3b20fc0`)
+
+The script ran this phase again on `3b20fc0` (this handoff's first round). Since then:
+- no production or test code has changed;
+- the tree was clean at the start;
+- no "TEST-ONLY REWORK" note came with the call.
+
+Every check was re-run independently:
+- **Workspace.** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 154 targets, **2,434 passed, 0 failed, 32 ignored**, exit 0. This includes:
+  - `pane_integration`, the wire conformance runner, with repaired cases 26 and 27;
+  - `profile_rename_test` and `profile_rename_faults_test`;
+  - `docs_cli_test` and the `wire_selftest` canary.
+
+  #693 did not recur in this run.
+- **Gates.** All clean:
+  - `bash scripts/lint.sh` exits 0, with size warnings only and no `.rs` file at 900 lines;
+  - `bash scripts/changelog-check.sh` prints `ok`;
+  - `cargo clippy --workspace --all-targets -- -D warnings`;
+  - `cargo machete` finds no unused dependency.
+- **A new spot check: the drift finding.** In `crates/holler-pane/src/reconcile/drift.rs`, `drifted` was changed to never match a `Differs` row (`false && ...`). `cargo test -p holler-cli --test pane_verbs drift` then failed 4 of 7 tests:
+  - `drift_agrees_with_profile_show_on_one_fixture`;
+  - `drift_is_one_finding_per_pane_per_pass_for_as_long_as_it_stands`;
+  - `drift_follows_the_scope_of_the_pass`;
+  - `a_drift_finding_has_its_shape_and_never_quotes_a_value`.
+
+  The 3 tests that still passed check the number of profile calls and the failed-read case, not the finding, so they should be unaffected. The change was reverted, and `git status` is clean.
+
+  (My first try at this mutation did not apply, because the pattern did not match. I saw that before relying on the result, and redid it.)
+- **The verdict is unchanged: PASS.** There is no blocking issue. The advisory notes below still apply.
+
 ## Test repair: the two cases F flagged
 
 F flagged two conformance cases under "Tests that look wrong (for T)": case 26 `rename-of-one-slug-is-one-put` and case 27 `rename-feed-is-deletion-then-put`. They failed over the wire only (`pane_integration` :: `clients::the_profile_client_passes_the_profile_store_conformance_suite`), with `next() after ...: expected the change of "demo-alpha" ..., got None`.
