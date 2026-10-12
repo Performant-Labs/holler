@@ -169,3 +169,42 @@
 - **Evidence:**
   - **Read:** the full diff `git diff origin/main...HEAD`; every production file in full; every new or changed test; the brief's decisions, acceptance, contract and guide sections; all six handoffs, `evidence.md` and the outside gate's `665-diff-result-r1.md` (PASS).
   - **Commands:** `git merge-tree` against `origin/main` (5 conflicting docs and test files, advisory); `git diff --stat` of the untouched files; `wc -l` of every touched file; a privacy grep of the added lines (no hits); greps for `unwrap`, `expect`, `panic` and `#[allow]`; `target/debug/holler profile import --help`; and source reads of `GridPos::parse`, `excerpt`, `from_decode` and `split_prefix`.
+
+## F (rework 1, after S REWORK items 1 and 2): 2026-10-11 22:40 MDT
+- **Decided:**
+  - **Item 1: `profile import` and `profile export` print the spec count through `super::list::count`,** as every sibling verb does. A one-spec profile now prints `1 spec`, which resolves A-dup warn 2. T updates the three test strings that pin `1 specs` (`handoff-F.md`).
+  - **Item 2: S's option (b). The code is made to match the claim, rather than the claim narrowed to the code.**
+    - In import, the two grid codes keep their codes. Their messages now give `herdr.grid of spec N` and `GridPos`'s hint or bounds, in place of the text `GridPos` quotes.
+    - This covers a text position (`read_position`) and the object form's `pos` label and zero cell (the spec's decode). Both now go through `spec_refused`.
+  - **Why (b) and not (a):**
+    - The brief's import acceptance says "the refused value is never printed" right after it lists `grid-ambiguous` (`hj-c1r2`) and `grid-out-of-range` (`r0c1`). Option (a) would document an exception to the brief.
+    - It is the rule the repository's file importers already keep: `pane import`'s launcher table names the file and the position "and never the error's text", and `spec_refused` already redacted `usage`.
+    - The spec's number locates the fault in a file with several specs, which the excerpt did not.
+  - **The claim is scoped to what a spec holds,** in the `--help`, both module docs, the guide and the CHANGELOG. The new wording is "no refusal quotes what a spec holds: a bad position or member is named by the spec's number".
+    - "No refusal prints what the file holds" cannot be made true. The document's name is printed as a name: on success, by `profile-exists` (create's `taken`, the reuse A asked for), and quoted by `ProfileName::parse` when it is invalid, as `--name` is.
+    - The `version` refusal prints the number.
+    - Hiding the name would make `profile-exists` useless.
+  - **`GRID_FORMS` and `GRID_BOUNDS` repeat holler-pane's private `FORMS` and `BOUNDS`.**
+    - Making them public would edit `grid.rs`, which is outside the Blast radius.
+    - Cutting the hint out of the original message could leak part of a `pos` label.
+    - The member's path comes from `SpecField::Grid.as_str()`, not a literal.
+  - **S's advisory 8 is taken, because it is in F's own files:**
+    - the 132-character doc line in `profile/store.rs` is rewrapped;
+    - the guide's rename sentence now says the new name's log gets one entry, after the log of a profile deleted earlier under that name;
+    - the CHANGELOG bullet names `profile_rename_restore_failed`, as the registries' earlier entries name their events.
+- **Assumed:**
+  - **Not taken:**
+    - advisory 2 (`docs/protocol/v2.md`), which the brief's "Not touched" list puts out of reach;
+    - A-dup warn 3 (an opaque `Moves`), which is optional and can be a follow-up;
+    - a README "Debug output" row, since the table lists none of the registries' events.
+  - **The order of refusals across specs is unchanged.** Every text position is read before any spec decodes (D8 steps 4 then 5).
+- **Hedged:**
+  - **`spec_refused`'s `other => other` arm relies on holler-pane's guards keeping their no-echo rule** (`argv.rs`'s module docs). A future closed code with a message, answered by a spec's decode, would pass through unchanged. Today only the two grid codes carry text (`evidence.md`).
+  - **Correction to round 1's handoff (S advisory 4).** `agent-key-invalid` does not pass through import. It is an open code, so `from_decode` folds it into `usage`, and the spec's generic message replaces it.
+- **Evidence:**
+  - **Gates:** clippy `-D warnings` (workspace, all targets) is clean, `lint.sh` exits 0, `changelog-check` prints `ok`, `cargo machete` is clean, and `rustfmt --check` passes on each touched file.
+  - **`profile_verbs`:** 109 passed and 3 failed. The failures are exactly the three `1 specs` pins, each now `1 spec`.
+  - **A scratch hub on its own temporary state dir:** four files with a canary in spec 2's position (text ambiguous, text `r0c1`, an object `pos` label, an object zero cell). Each was refused with its grid code, exit 3, as `herdr.grid of spec 2` with the hint, in both formats. The canary was printed 0 times, and `profile list` said `no profiles`.
+  - **The control:** with the two new arms removed, the text position and the `pos` label both printed the canary. The arms were then restored.
+  - **The workspace run:** 154 targets, 2,431 passed, 3 failed (the three pins), 32 ignored.
+  - **The evidence check:** a script checked the eight new `evidence.md` entries against their cited lines: 0 mismatches.

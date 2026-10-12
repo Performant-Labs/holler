@@ -308,3 +308,133 @@ Written by F (Phase 6 of the script, implement). Line numbers are the worktree's
   >     )?;
   >     let created = put(store, &p, 0, &who)?;
   > ```
+
+## F rework 1 (after S REWORK, items 1 and 2): the spec count and the import refusals
+
+- **Fact:** `count` writes the noun in the singular for 1 and in the plural otherwise, and `create` and `show` print a profile's spec count through it; `import` and `export` now do too.
+  **Source:** `crates/holler-cli/src/profile/list.rs:91-99`, `crates/holler-cli/src/profile/create.rs:339`, `crates/holler-cli/src/profile/show.rs:126`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// `n` and `noun`, with the noun in the plural unless `n` is 1: `1 pane`, `2 panes`,
+  > /// `0 specs`.
+  > pub(crate) fn count(n: usize, noun: &str) -> String {
+  >     if n == 1 {
+  >         format!("1 {noun}")
+  >     } else {
+  >         format!("{n} {noun}s")
+  >     }
+  > }
+  > ```
+  > ```rust
+  >         count(profile.panes.len(), "spec"),
+  > ```
+
+- **Fact:** `GridPos::parse` refuses a text position with an excerpt of that text (up to 64 characters) in both grid codes. Import reads a file's text position through it (`read_position`), so without the replacement in `spec_refused` the file's text reached the message.
+  **Source:** `crates/holler-pane/src/grid.rs:44-55`
+  **Verbatim excerpt:**
+  > ```rust
+  >     pub fn parse(text: &str) -> Result<GridPos, PaneError> {
+  >         let lower = text.trim_ascii().to_ascii_lowercase();
+  >         let (row, col) = split_cells(&lower).ok_or_else(|| PaneError::GridAmbiguous {
+  >             what: format!("{} ({FORMS})", excerpt(text)),
+  >         })?;
+  >         match (coordinate(row), coordinate(col)) {
+  >             (Some(row), Some(col)) => Ok(GridPos { row, col }),
+  >             _ => Err(PaneError::GridOutOfRange {
+  >                 what: format!("{} ({BOUNDS})", excerpt(text)),
+  >             }),
+  >         }
+  >     }
+  > ```
+
+- **Fact:** a position in the record's object form is checked by `GridPos`'s deserializer, during the spec's decode. A `pos` label that disagrees is `grid-ambiguous` quoting the label, and a zero cell is `grid-out-of-range` naming both numbers.
+  **Source:** `crates/holler-pane/src/grid.rs:157-168` and `:58-63`
+  **Verbatim excerpt:**
+  > ```rust
+  >         if let Some(label) = raw.pos {
+  >             if GridPos::parse(&label).ok() != Some(cell) {
+  >                 let err = PaneError::GridAmbiguous {
+  >                     what: format!(
+  >                         "pos {} disagrees with row {} and column {}",
+  >                         excerpt(&label),
+  >                         raw.row,
+  >                         raw.col
+  >                     ),
+  >                 };
+  >                 return Err(de::Error::custom(err.coded_message()));
+  >             }
+  > ```
+  > ```rust
+  >     fn from_cells(row: u16, col: u16) -> Result<GridPos, PaneError> {
+  >         if row == 0 || col == 0 {
+  >             return Err(PaneError::GridOutOfRange {
+  >                 what: format!("row {row}, column {col} ({BOUNDS})"),
+  >             });
+  >         }
+  > ```
+
+- **Fact:** `decode_params`'s `from_closed` keeps the coded message's text in the two grid variants, so the excerpt survives the decode. The other codes a spec's decode can answer (`command-not-argv`, `env-name-invalid`, `profile-secret-refused`) are unit variants and carry no text. This is why `spec_refused` replaces the two grid messages and leaves the rest alone.
+  **Source:** `crates/holler-pane/src/error.rs:568-577` and `:585`
+  **Verbatim excerpt:**
+  > ```rust
+  >     fn from_closed(code: PaneCode, message: String, detail: Option<String>) -> PaneError {
+  >         let text = detail.unwrap_or(message);
+  >         match code {
+  >             PaneCode::NotImplemented => PaneError::NotImplemented,
+  >             PaneCode::Usage => PaneError::Usage { message: text },
+  >             PaneCode::GridAmbiguous => PaneError::GridAmbiguous { what: text },
+  >             PaneCode::GridOutOfRange => PaneError::GridOutOfRange { what: text },
+  >             PaneCode::CommandNotArgv => PaneError::CommandNotArgv,
+  >             PaneCode::EnvNameInvalid => PaneError::EnvNameInvalid,
+  >             PaneCode::GenerationConflict => PaneError::Conflict,
+  > ```
+  > ```rust
+  >             PaneCode::ProfileSecretRefused => PaneError::ProfileSecretRefused,
+  > ```
+
+- **Fact:** the hint and the bounds that import's grid refusals carry are holler-pane's private constants, which import repeats as `GRID_FORMS` and `GRID_BOUNDS`.
+  **Source:** `crates/holler-pane/src/grid.rs:24` and `:27`
+  **Verbatim excerpt:**
+  > ```rust
+  > const FORMS: &str = "write r<row>c<col>, c<col>r<row> or <row>,<col>";
+  > ```
+  > ```rust
+  > const BOUNDS: &str = "rows and columns run from 1 to 65535";
+  > ```
+
+- **Fact:** a verb's error message is the error's `Display`, which for the two grid codes is a fixed prefix and then the `what` import builds. So the message is `ambiguous grid position: herdr.grid of spec N (...)` or `grid position out of range: herdr.grid of spec N (...)`.
+  **Source:** `crates/holler-cli/src/output.rs:134-141` and `crates/holler-pane/src/error.rs:644-647`
+  **Verbatim excerpt:**
+  > ```rust
+  > impl From<&PaneError> for ErrorBody {
+  >     fn from(error: &PaneError) -> Self {
+  >         Self {
+  >             code: ErrorCode::from(error),
+  >             message: error.to_string(),
+  >         }
+  >     }
+  > }
+  > ```
+  > ```rust
+  >             PaneError::GridAmbiguous { what } => write!(f, "ambiguous grid position: {what}"),
+  >             PaneError::GridOutOfRange { what } => {
+  >                 write!(f, "grid position out of range: {what}")
+  >             }
+  > ```
+
+- **Fact:** `SpecField::Grid`'s path is `herdr.grid`, the name `profile show` and the drift finding give that member. Import's grid refusals name the member by it.
+  **Source:** `crates/holler-pane/src/profile_diff.rs:81`
+  **Verbatim excerpt:**
+  > ```rust
+  >             SpecField::Grid => "herdr.grid",
+  > ```
+
+- **Fact:** `ProfileName::parse` quotes an invalid name. A document's name that is not a valid name is therefore quoted, as `--name` is, and a valid one is printed on success. The docs therefore scope the claim to what a **spec** holds, not to the whole file.
+  **Source:** `crates/holler-pane/src/profile.rs:55-58`
+  **Verbatim excerpt:**
+  > ```rust
+  >         match refusal {
+  >             Some(rule) => Err(PaneError::Usage {
+  >                 message: format!("invalid profile name {}: {rule}", excerpt(text)),
+  >             }),
+  > ```

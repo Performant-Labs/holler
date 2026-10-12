@@ -1,3 +1,157 @@
+# Handoff-F (rework 1): after S REWORK - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
+
+**Date:** 2026-10-11 (22:45 MDT)
+**Branch:** `issue-665-implementation`, on `bde41cf` (S's REWORK)
+**Issue:** #665
+**Reworks:** `handoff-S.md` items 1 and 2, which are production.
+- Items 3 and 4 are test-only, so they are T's. They are listed under "Tests that look wrong (for T)", with the three test strings that item 1 changes.
+- The first round's handoff follows this section, unchanged.
+
+## What was done
+
+**Item 1: the spec count is pluralized.**
+- `crates/holler-cli/src/profile/import.rs` and `export.rs`: `render` prints the count through `super::list::count`, as `create`, `show`, `list`, `delete` and `apply` do.
+- A one-spec profile now prints `imported profile Fleet (fleet): 1 spec, generation 1` and `exported profile Fleet (fleet) to FILE: 1 spec`.
+
+**Item 2: the no-echo claim is made true, and stated for what it covers.**
+- `crates/holler-cli/src/profile/export.rs`:
+  - `spec_refused` keeps both grid codes but replaces their messages. The new messages name the member and the spec, never the text:
+    - `grid-ambiguous`: `ambiguous grid position: herdr.grid of spec N (write r<row>c<col>, c<col>r<row> or <row>,<col>)`;
+    - `grid-out-of-range`: `grid position out of range: herdr.grid of spec N (rows and columns run from 1 to 65535)`.
+  - `Document::specs` now routes a text position's refusal (`read_position`, D8 step 4) through `spec_refused` too. The object form's `pos` label and zero cell already reach it through the decode (step 5).
+  - New constants `GRID_FORMS` and `GRID_BOUNDS`.
+  - The module docs restate the rule.
+- `crates/holler-cli/src/profile/import.rs`:
+  - the `--help` text now says "no refusal quotes what a spec holds: a bad position or member is named by the spec's number";
+  - the module docs say the same, and say that the document's name is printed as a name.
+- `docs/pane-control.md`, the import subsection, and `CHANGELOG.md` carry the same wording.
+
+**S's advisory 8 (smaller items):**
+- `crates/holler-hub/src/profile/store.rs`: the 132-character module-doc line is rewrapped (doc only).
+- `docs/pane-control.md`, the rename subsection: the new name's log gets one entry "after the log of a profile deleted earlier under the new name, if there was one". It used to say the log "begins with" the rename (D4).
+- `CHANGELOG.md`: the bullet names the `error` event `profile_rename_restore_failed`, as the registries' earlier entries name theirs.
+
+**Handoffs:** eight `evidence.md` entries under "F rework 1", and one `decisions.md` entry.
+
+## Design decisions
+
+- **Option (b) of S's item 2 (make the claim true), not (a) (narrow it), for three reasons:**
+  - The brief's import acceptance lists `grid-ambiguous` (`hj-c1r2`) and `grid-out-of-range` (`r0c1`) among the refusals, then says "**the refused value is never printed**". Option (a) would have documented an exception to that.
+  - Not echoing the file is the rule the repository's file importers already keep. `pane import`'s launcher table names "the line and column of the error's span, and never the error's text", and `spec_refused` already redacted `usage`.
+  - The spec's number is better than the excerpt for an operator: it says *which* spec, in a file with several.
+- **The claim is scoped to what a spec holds.** Round 1's "no refusal prints what the file holds" cannot be made true:
+  - the document's name is printed as a name, the way `--name` is: on success, by `profile-exists` (create's `taken`, which A asked import to reuse), and quoted by `ProfileName::parse` when it is not a valid name;
+  - the `version` refusal prints the number.
+
+  Hiding the name would make `profile-exists` say nothing useful. So the `--help`, both module docs, the guide and the CHANGELOG now say "no refusal quotes what a spec holds", and the import module docs name the exception.
+- **Where the arms go.** They go in `spec_refused`, the one place that already maps a spec's refusal. Both steps route through it, so there is one redaction path, not two. Positions are still read for every spec before any spec decodes, so the order of D8's steps 4 and 5 is unchanged.
+- **The hint text is repeated in two constants.**
+  - holler-pane's `FORMS` and `BOUNDS` are private. Making them public would edit `grid.rs`, which is outside the Blast radius.
+  - Cutting the hint out of the original message is not safe. The `pos` message has no hint, and the excerpt it carries could hold `" ("`.
+  - The member's path comes from `SpecField::Grid.as_str()`, the path `profile show` and the drift finding use, not from a literal.
+- **One message for both sources of a grid code.** The `pos`-label case keeps the generic hint "write r<row>c<col>, ...", which fixes it too: export writes the text form, and writing the position as text removes the label. A label-specific message would rest on what `GridPos`'s deserializer happens to refuse today.
+
+## Reuse / extend-vs-new
+
+- **`super::list::count`** is the shared pluralization helper. Nothing new was written for it (A-dup warn 2's first option).
+- **`spec_refused` is extended** with two arms. It is not a parallel redaction path, and `Document::specs` routes both steps through it.
+- **`SpecField::Grid.as_str()`** supplies the member's path.
+- **New:** only `GRID_FORMS` and `GRID_BOUNDS`, which are message text. The reason is above.
+
+## Architecture notes for A
+
+None. No layer, public interface, dependency, protocol field or error code changes. The change is two private constants and two match arms in one CLI module, plus doc and message text. The grid refusals keep their codes and exit classes (3).
+
+## Deviations from spec / wireframe
+
+None new. The scoped wording ("what a spec holds") is narrower than round 1's prose, which claimed more than the code did and more than the brief asked.
+
+## Tier 1 self-check (incl. tests now GREEN)
+
+- **Gates, on the final sources:**
+  - `cargo clippy --workspace --all-targets -- -D warnings` exits 0;
+  - `bash scripts/lint.sh` exits 0, and its warnings are only pre-existing files of other crates;
+  - `bash scripts/changelog-check.sh` prints `ok`;
+  - `cargo machete` finds no unused dependency;
+  - `rustfmt --edition 2021 --check` passes on the three touched `.rs` files.
+- **Sizes:** `export.rs` is 306 lines, `import.rs` 129 and `profile/store.rs` 562.
+- **`cargo test -p holler-cli --test profile_verbs`: 109 passed, 3 failed.** The three failures are exactly the pins of `1 specs` that item 1 changes, each now `1 spec`:
+  - `export::export_out_writes_the_file_at_0600_and_replaces_one_that_exists`;
+  - `import::import_creates_a_detached_profile_at_generation_one_in_both_formats`;
+  - `import::import_name_overrides_the_files_name_and_is_parsed`.
+
+  Every refusal test passes, including the grid codes, the canary tests and `a_document_of_another_shape_is_usage_and_never_quoted`.
+- **The workspace run** was `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (the pipeline's verify command with `--no-fail-fast`), finished about 22:50 MDT. Across 154 targets: **2,431 passed, 3 failed, 32 ignored.**
+  - The total, 2,434, is T-green's last count.
+  - The 3 failures are the three `profile_verbs` pins above. No other target failed, and #693 did not recur.
+  - The run exits 101 until T updates those three strings.
+- **Item 2, checked by hand** (F wrote no test). A scratch hub ran on its own temporary state dir, as the process tests do, and was stopped and removed afterwards. Four documents had a made-up canary in spec 2's position: a text position, `r0c1`, an object-form `pos` label and an object zero cell. Each was refused in text and in JSON with its code and exit 3, as `herdr.grid of spec 2` with the hint or the bounds. The canary appeared 0 times, and `holler profile list` printed `no profiles`.
+- **The control.** With the two new arms removed, the text position printed `ambiguous grid position: "r1<canary>" (write ...)` and the label printed `pos "<canary>" disagrees with row 2 and column 1`. The arms were restored, and `git diff` shows no trace of the control.
+
+## Evidence appendix
+
+`docs/handoffs/665/evidence.md`, section "F rework 1 (after S REWORK, items 1 and 2)", holds eight entries:
+- `count`;
+- `GridPos::parse`'s excerpt;
+- the object form's `pos` and zero-cell refusals;
+- `from_closed` keeping the grid text, while the other guards are unit variants;
+- the private `FORMS` and `BOUNDS`;
+- `ErrorBody`'s message as `Display`;
+- `SpecField::Grid`'s path;
+- `ProfileName::parse` quoting an invalid name, which is why the claim is scoped to specs.
+
+A script checked every quoted line against its cited lines: 0 mismatches.
+
+## Tests that look wrong (for T)
+
+F edits no test. Items 1 to 4 below are needed for GREEN or are S's REWORK. Item 5 is optional.
+
+1. **Item 1 changes three pinned strings.** Change `1 specs` to `1 spec` in:
+   - `crates/holler-cli/tests/profile_verbs/import.rs:80`: `"imported profile Fleet (fleet): 1 spec, generation 1\n"`;
+   - `crates/holler-cli/tests/profile_verbs/import.rs:159`: `"imported profile Fleet Copy (fleet-copy): 1 spec, generation 1\n"`;
+   - `crates/holler-cli/tests/profile_verbs/export.rs:318`: `format!("exported profile Fleet (fleet) to {out_text}: 1 spec\n")`.
+2. **Item 2(b) is unpinned.** S asks T to pin it with `CANARY`, for example in `import/refusals.rs`'s `a_bad_position_is_its_grid_code`, using the file's own `refused` helper (code, exit 3, never printed, nothing written):
+   - `spec["herdr"]["grid"] = json!(format!("r1{CANARY}"))` is `grid-ambiguous`;
+   - `spec["herdr"]["grid"] = json!({"row": 2, "col": 1, "pos": CANARY})` is `grid-ambiguous`;
+   - optionally, `json!({"row": 0, "col": 1})` is `grid-out-of-range`, and the text message names `herdr.grid of spec 1`.
+
+   The control is the one above: without the two arms, the first two print the canary.
+3. **S item 3 (test-only).** The spec-level `usage` redaction is unpinned. Add members of the wrong type that hold `CANARY`, each refused as `usage` (exit 2) and never printed:
+   - `spec["context"]["soft"] = json!(CANARY)`;
+   - `spec["role"] = json!(CANARY)`.
+4. **S item 4 (test-only).** "The stamp as `updated`" is checked only as `>=`. Assert equality:
+   - in `crates/holler-hub/tests/profile_rename_test.rs:148`, `stored.updated == rig.log("Day Shift")[0].at`;
+   - in conformance case 23 (`crates/holler-pane-testkit/src/conformance/profile_store/rename.rs:43-61`), `renamed.updated` equals the `at` of the new name's one log entry.
+5. **Optional.**
+   - `import/refusals.rs:1-3` says each refusal "never prints what the file holds". The rule now stated is "no refusal quotes what a spec holds", because the document's name is printed as a name. A test that put `CANARY` in the file's `name` would fail by design.
+   - S advisory 3: the name and doc of `process/profile_io.rs::rename_on_an_empty_hub_reaches_the_real_handler` overstate it, since the CLI's own `get` answers first.
+
+## Known issues
+
+- **S advisory 1, for the rebase before merge (not F's):** the branch conflicts with `origin/main` in `CHANGELOG.md`, `docs_pane_control_test.rs`, ADR-0003, ADR-0021 and `docs/pane-control.md`.
+- **S advisory 2:** `docs/protocol/v2.md:817` still says "the proposed `profile/rename`". The brief's "Not touched" list puts v2.md out of reach, so fix it at the rebase or as a follow-up.
+- **A-dup warn 3** (an opaque `Moves` type for `panes::Locked`) is optional and left as a follow-up.
+- **`spec_refused`'s `other => other` arm** relies on holler-pane's guards keeping their no-echo rule. Today only the two grid codes carry text from a spec's decode (`evidence.md`).
+- **A correction to round 1** (S advisory 4): `agent-key-invalid` does not pass through import. As an open code it folds into `usage` in `from_decode`, and the spec's generic message replaces it. The behaviour matches the docs, and only round 1's prose below was wrong.
+
+## Files changed (this round)
+
+Production:
+- `crates/holler-cli/src/profile/export.rs`
+- `crates/holler-cli/src/profile/import.rs`
+- `crates/holler-hub/src/profile/store.rs` (module doc only)
+
+Docs:
+- `CHANGELOG.md`
+- `docs/pane-control.md`
+
+Handoffs:
+- `docs/handoffs/665/decisions.md`
+- `docs/handoffs/665/evidence.md`
+- `docs/handoffs/665/handoff-F.md`
+
+---
+
 # Handoff-F: Phase 5 (implement; the Workflow script's phase 6) - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
 
 **Date:** 2026-10-11 (21:20 MDT)

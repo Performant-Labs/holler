@@ -12,13 +12,15 @@
 //! its variables, and the verb reads nothing from the process environment.
 //!
 //! **Reading it back** ([`Document::read`], [`Document::specs`]): the text must decode as the
-//! document, with no other member, `format` and `version` as written here, else `usage`; the
-//! message gives the position and never quotes the text. A position may be any form
-//! `GridPos::parse` reads, or the record's own object form. The specs then decode through
-//! `holler_pane::decode_params`, so the typed guards answer with their own codes:
-//! `profile-secret-refused`, `command-not-argv`, `env-name-invalid`, the grid codes. Any other
-//! spec that does not decode is `usage`, again without quoting it: nothing scans the text for a
-//! secret a second time, and nothing from the file is echoed.
+//! document, with no other member, `format` and `version` as written here, else `usage`; a
+//! text that does not decode is refused by its line and column, never by serde's message,
+//! which can quote it. A position may be any form `GridPos::parse` reads, or the record's own
+//! object form. The specs then decode through `holler_pane::decode_params`, so the typed guards
+//! answer with their own codes: `profile-secret-refused`, `command-not-argv`,
+//! `env-name-invalid`, the grid codes. Any other spec that does not decode is `usage`. No
+//! refusal quotes what a spec holds: a refused position or member is named by the spec's
+//! number (the grid codes' own messages quote the text, so their messages are replaced), and
+//! the guards' other codes carry no value. Nothing scans the text for a secret a second time.
 //!
 //! **The file** (D9): with `--out` the document is written by `write_atomic` at mode 0600,
 //! replacing a file that exists, and nothing else is written. A path that names nothing the
@@ -29,12 +31,14 @@ use std::io::{self, ErrorKind};
 use std::path::Path;
 
 use clap::Args;
+use holler_pane::profile_diff::SpecField;
 use holler_pane::{decode_params, GridPos, PaneError, Ports, Profile, ProfileName, ProfileSpec};
 use holler_proto::atomic_file::write_atomic;
 use serde::{Deserialize, Serialize};
 use serde_json::error::Category;
 use serde_json::Value;
 
+use super::list::count;
 use super::show::text;
 use crate::output::{emit, ErrorBody, VerbCtx};
 
@@ -46,6 +50,14 @@ const VERSION: u64 = 1;
 
 /// The mode of an exported file: names and non-secret values only, still the operator's own.
 const FILE_MODE: u32 = 0o600;
+
+/// What a refused position is told to write instead: the hint `GridPos::parse` gives with
+/// `grid-ambiguous`. It is repeated here (holler-pane keeps it private) because a refusal of a
+/// file's position carries the hint and the spec's number, never the text `GridPos` quotes.
+const GRID_FORMS: &str = "write r<row>c<col>, c<col>r<row> or <row>,<col>";
+
+/// The bounds `GridPos` gives with `grid-out-of-range`, repeated for the same reason.
+const GRID_BOUNDS: &str = "rows and columns run from 1 to 65535";
 
 /// Write a profile to a file, or print it: its specs as one JSON document.
 ///
@@ -128,11 +140,12 @@ impl Document {
     }
 
     /// The document's specs: each position given as text read by `GridPos::parse`, then every
-    /// spec decoded by the typed guards (see the module docs).
+    /// spec decoded by the typed guards (see the module docs). A refusal names the spec by its
+    /// number and never quotes it ([`spec_refused`]).
     pub(crate) fn specs(self) -> Result<Vec<ProfileSpec>, PaneError> {
         let mut panes = self.panes;
-        for pane in &mut panes {
-            read_position(pane)?;
+        for (index, pane) in panes.iter_mut().enumerate() {
+            read_position(pane).map_err(|error| spec_refused(index, error))?;
         }
         panes
             .into_iter()
@@ -170,14 +183,26 @@ fn read_position(pane: &mut Value) -> Result<(), PaneError> {
     Ok(())
 }
 
-/// The error of the spec at `index` that did not decode: a typed guard's own code as it is,
-/// and `usage` without serde's message, which can quote the file.
+/// The error of the spec at `index` that was refused, which never quotes the spec:
+///
+/// - a position keeps its grid code, with the spec's number and `GridPos`'s hint in place of
+///   the text that `GridPos::parse` and the object form's `pos` check quote;
+/// - `usage` names the spec without serde's message, which can quote the file;
+/// - any other code is a typed guard's (`profile-secret-refused`, `command-not-argv`,
+///   `env-name-invalid`), whose message holds no value, and stays as it is.
 fn spec_refused(index: usize, error: PaneError) -> PaneError {
+    let spec = index + 1;
+    let grid = SpecField::Grid.as_str();
     match error {
+        PaneError::GridAmbiguous { .. } => PaneError::GridAmbiguous {
+            what: format!("{grid} of spec {spec} ({GRID_FORMS})"),
+        },
+        PaneError::GridOutOfRange { .. } => PaneError::GridOutOfRange {
+            what: format!("{grid} of spec {spec} ({GRID_BOUNDS})"),
+        },
         PaneError::Usage { .. } => not_a_document(&format!(
-            "spec {} has a member that is unknown, missing or of the wrong type \
-             (holler profile export writes the shape)",
-            index + 1
+            "spec {spec} has a member that is unknown, missing or of the wrong type \
+             (holler profile export writes the shape)"
         )),
         other => other,
     }
@@ -265,15 +290,16 @@ fn export(args: &ProfileExport, ports: Ports<'_>) -> Result<Exported, PaneError>
 }
 
 /// The text form: the document itself, or with `--out` `exported profile NAME (SLUG) to FILE:
-/// N specs`, the path escaped as `profile show` escapes a stored string.
+/// N specs`, the path escaped as `profile show` escapes a stored string and the count as
+/// `create` and `show` print it (`1 spec`).
 fn render(exported: &Exported) -> String {
     match &exported.out {
         Some(out) => format!(
-            "exported profile {} ({}) to {}: {} specs",
+            "exported profile {} ({}) to {}: {}",
             exported.name,
             exported.slug,
             text(out),
-            exported.specs
+            count(exported.specs, "spec")
         ),
         None => exported.text.clone(),
     }

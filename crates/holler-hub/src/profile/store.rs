@@ -38,9 +38,9 @@
 //! built"), it is also the one transaction that spans the two registries: under this lock it
 //! takes the pane lock (`PaneState::locked`), checks that both registries loaded, runs the
 //! rename's own checks (in the order [`Store::rename`] gives), saves the pane document with
-//! the member panes' moves, then this one, and only then commits both to memory. When this save fails after the pane save, the pane
-//! document is saved back (`Locked::restore`) and nothing changed. The port, given no pane
-//! registry, renames the record only.
+//! the member panes' moves, then this one, and only then commits both to memory. When this
+//! save fails after the pane save, the pane document is saved back (`Locked::restore`) and
+//! nothing changed. The port, given no pane registry, renames the record only.
 //!
 //! # A failed load
 //!

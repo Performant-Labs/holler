@@ -379,9 +379,9 @@ run or change the exit code; a `failed` step stops the run and exits 1. Its own 
 Rename a profile. The hub changes the profile's name and every member pane's `profile` in one transaction: the panes
 stay attached and nothing live is touched (no pane is detached, relaunched or switched), and each member's record
 moves one generation. The profile keeps its specs. Its change log is filed by its name: the old name's log ends with
-the rename, and the new name's log begins with it, saying who renamed it and from what. A new name that differs only
-in spelling is a rename too. If a rename is interrupted between its two writes, running the same command again
-completes it.
+the rename, and the new name's log gets one entry saying who renamed it and from what (after the log of a profile
+deleted earlier under the new name, if there was one). A new name that differs only in spelling is a rename too. If a
+rename is interrupted between its two writes, running the same command again completes it.
 
 ```bash
 holler profile rename fleet fleet-2
@@ -409,8 +409,8 @@ Ends with `profile-not-found` (3), `usage` (2) when FILE's directory does not ex
 Create a profile from a file `export` wrote, named as the file says or as `--name NAME` says. The profile is created
 **detached**: no pane joins it, and a spec may name a pane that belongs to another profile or has no record;
 `holler profile apply NAME` is what makes its panes match it. A position may be written `r2c1`, `c1r2` or `2,1`. A
-file that carries an environment value (`NAME=value`) is refused, and no refusal prints what the file holds. The
-document:
+file that carries an environment value (`NAME=value`) is refused without echoing it, and no refusal quotes what a spec
+holds: a bad position or member is named by the spec's number. The document:
 
 ```json
 {
