@@ -1,6 +1,7 @@
-//! Dispatch one inbound `session/prompt`/`session/cancel`/`session/answer`
-//! request: parse its typed params and spawn the matching task in
-//! [`crate::prompt_dispatch`], or answer `-32602 invalid_params`. Split out
+//! Dispatch one inbound `session/prompt`/`session/cancel`/`session/answer`/
+//! `session/rebind` (issue #839) request: parse its typed params and spawn the
+//! matching task in [`crate::prompt_dispatch`], or answer `-32602
+//! invalid_params`. Split out
 //! of `connection.rs` proper (issue #151) — inlining `session/answer`'s own
 //! parse-or-spawn arm alongside `session/prompt`/`session/cancel`'s pushed
 //! that file past the workspace's 900-line file-size guard
@@ -18,6 +19,7 @@
 use std::sync::Arc;
 
 use futures_util::Sink;
+use holler_proto::rebind::Rebind;
 use holler_proto::{Answer, Cancel, Code, CorrelationId, Envelope, Prompt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -55,8 +57,14 @@ where
             Ok(p) => spawn_cancel_dispatch(session_manager, priority_tx, id, p),
             Err(e) => send_invalid_params(sink, &id, &e).await,
         },
+        // Issue #839: re-point an attach-mode session (`outbound_tx`, as
+        // `session/answer`).
+        "session/rebind" => match holler_proto::typed_params::<Rebind>(&env) {
+            Ok(p) => spawn_rebind_dispatch(session_manager, outbound_tx, id, p),
+            Err(e) => send_invalid_params(sink, &id, &e).await,
+        },
         // The caller's own guard (`handle_text`) only reaches here for one
-        // of these three method names.
+        // of these four method names.
         _ => match holler_proto::typed_params::<Answer>(&env) {
             Ok(p) => spawn_answer_dispatch(session_manager, outbound_tx, id, p),
             Err(e) => send_invalid_params(sink, &id, &e).await,
@@ -104,6 +112,19 @@ fn spawn_answer_dispatch(
     let sm = Arc::clone(session_manager);
     let ob = outbound_tx.clone();
     tokio::spawn(crate::prompt_dispatch::handle_answer(sm, id, params, ob));
+}
+
+/// Spawn a `session/rebind` dispatch task (issue #839). See
+/// [`spawn_prompt_dispatch`]'s own doc.
+fn spawn_rebind_dispatch(
+    session_manager: &Arc<SessionManager>,
+    outbound_tx: &mpsc::UnboundedSender<Message>,
+    id: String,
+    params: Rebind,
+) {
+    let sm = Arc::clone(session_manager);
+    let ob = outbound_tx.clone();
+    tokio::spawn(crate::prompt_dispatch::handle_rebind(sm, id, params, ob));
 }
 
 /// Answer a `session/prompt`/`session/cancel`/`session/answer` whose params

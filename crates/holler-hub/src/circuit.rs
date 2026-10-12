@@ -734,9 +734,9 @@ where
                     Err(()) => Err(()),
                 }
             }
-            LiveCommand::Say { request_id, session, message, queue, replace, grant, reply } => {
+            LiveCommand::Say { request_id, session, message, queue, replace, grant, harness_session, reply } => {
                 let key = crate::holds::session_key(self.label, &session);
-                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref(), panes: self.registry.panes().cloned() };
+                let gate = HoldGate { holds: self.registry.holds(), key: &key, grant: grant.as_deref(), panes: self.registry.panes().cloned(), harness_session: harness_session.as_deref() };
                 match dispatch::send_prompt(self.sink, gate, &request_id, &session, message, queue, replace).await {
                     Ok(()) => {
                         self.pending_says.insert(request_id, PendingSay { reply, updates: Vec::new() });

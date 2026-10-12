@@ -329,6 +329,7 @@ impl Rig {
             harness: &harness,
             scope,
             prober: &self.fakes.prober,
+            hub: &holler_cli::pane::wiring::Unwired,
         })
     }
 

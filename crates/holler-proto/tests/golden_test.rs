@@ -28,6 +28,7 @@ use holler_proto::docs::*;
 use holler_proto::envelope::{decode, encode, Envelope, EnvelopeError};
 use holler_proto::error::{Code, Error as WireError};
 use holler_proto::hold::SessionHold;
+use holler_proto::rebind::{Rebind, RebindResult};
 use serde_json::{json, Value};
 
 fn golden_dir() -> PathBuf {
@@ -148,6 +149,20 @@ fn unauthenticated_error_frames_match_golden() {
         let env = Envelope::Error { id: Some(id()), error: WireError::new(Code::Unauthenticated, message, Some(reason)) };
         assert_golden(&format!("envelope/error.unauthenticated_{file}.json"), &encode(&env).unwrap());
     }
+}
+
+/// `-32004 not_connected` for an offline body (#839, P7): the hub marks the resolve-time answer
+/// of `say`, `interrupt` and `answer` with `data.reason: "offline"`, which is how a `--pane` verb
+/// tells a pane no body drives from a turn that outlived its wait (the same code, bare).
+#[test]
+fn not_connected_offline_error_frame_matches_golden() {
+    use holler_proto::error::OFFLINE_REASON;
+    assert_eq!(OFFLINE_REASON, "offline");
+    let error = WireError::offline("alpha's body is not connected");
+    assert_eq!(error.code, -32004);
+    assert_eq!(error.data.as_deref().and_then(|d| d.reason.as_deref()), Some(OFFLINE_REASON));
+    let env = Envelope::Error { id: Some(id()), error };
+    assert_golden("envelope/error.not_connected_offline.json", &encode(&env).unwrap());
 }
 
 /// A roster row's hold fields (issue #441) are flattened into the hub's row:
@@ -274,6 +289,10 @@ fn docs_instances() -> Vec<(&'static str, Value)> {
         ("Update", serde_json::to_value(Update { session: "io/alpha".into(), prompt_id: id(), seq: 1, parts: vec![Part::text_part("AL")] }).unwrap()),
         ("Cancel", serde_json::to_value(Cancel { session: "io/alpha".into() }).unwrap()),
         ("CancelResult", serde_json::to_value(CancelResult { applied: true }).unwrap()),
+        // #839: `session/rebind`, hub to body: the body's bare session name and the harness
+        // session it is to drive; the result names the id the body acknowledged.
+        ("Rebind", serde_json::to_value(Rebind { session: "alpha".into(), harness_session_id: "ses_1".into() }).unwrap()),
+        ("RebindResult", serde_json::to_value(RebindResult { session: "alpha".into(), harness_session_id: "ses_1".into() }).unwrap()),
         ("Join", serde_json::to_value(Join { secret: "hlr_join_x".into(), hostname: "kiwi".into(), body_pubkey: "b".repeat(64), body_x25519_pubkey: "e".repeat(64) }).unwrap()),
         ("JoinResult", serde_json::to_value(JoinResult { client_id: "cli_19".into() }).unwrap()),
         ("Authenticate", serde_json::to_value(Authenticate { protocol: 3, token_id: "tok_7f3a".into(), hostname: "kiwi".into(), advertised_url: "wss://hub.example.ts.net".into(), message: "1".repeat(96) }).unwrap()),

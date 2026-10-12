@@ -1,7 +1,8 @@
 //! The fixtures the fakes' tests and the conformance suites build their records from,
 //! all valid, deterministic and harmless: `sample_pane` (a `Pane`), `sample_spec` (a
 //! `ProfileSpec`) and `sample_profile` (a `Profile` of sample specs). `seed_unmanaged_pane`
-//! (#832) puts a Herdr pane that no record names into a `FakeHerdr`.
+//! (#832) puts a Herdr pane that no record names into a `FakeHerdr`. `session_id` (#839) is a
+//! `ses_`-shaped harness session id, the shape every hub-routed fixture uses.
 //!
 //! A sample spec places, configures and runs its pane as the sample pane of the same
 //! name is placed, configured and run (one workspace, grid cell, directory, harness,
@@ -137,6 +138,14 @@ pub fn sample_profile(name: &str, panes: &[&str]) -> Result<Profile, PaneError> 
         updated: 0,
         name,
     })
+}
+
+/// A harness session id shaped as OpenCode's are, and as `FakeHarness` mints them (#839, D8):
+/// `ses_` and `n` as 26 hex digits, 30 characters. The name grammar refuses `_`, so such an id
+/// is never a valid session name, and a fixture cannot pass by being one. Distinct for
+/// distinct `n`.
+pub fn session_id(n: u32) -> String {
+    format!("ses_{n:026x}")
 }
 
 /// The model of every sample pane and spec: a neutral provider and model.

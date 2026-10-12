@@ -43,6 +43,10 @@ pub struct PromptArgs {
 pub struct Routed {
     pub session: String,
     pub arg: Option<String>,
+    /// The `--pane` name the session was resolved from (#839), `None` for a SESSION: how the one
+    /// mapping of a hub refusal tells a pane no body drives (`pane-not-driven`) from a typed
+    /// session the hub does not know (`unknown session`, as before).
+    pub pane: Option<String>,
 }
 
 /// Why a prompt verb stops before it contacts a hub.
@@ -74,6 +78,7 @@ pub fn route(resolved: Result<PromptArgs, Usage>, profile: &ProfileOpt) -> Resul
         (PromptTarget::Session(session), None) => Ok(Routed {
             session,
             arg: args.arg,
+            pane: None,
         }),
         _ => Err(Stop {
             message: not_implemented_message(ROUTING_STORY),

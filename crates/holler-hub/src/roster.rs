@@ -61,6 +61,7 @@ use holler_proto::docs::{LastTurn, PendingItem, SessionAd};
 use holler_proto::Presence;
 use tokio::sync::watch;
 
+mod rebind;
 mod rfc3339;
 use rfc3339::parse_rfc3339_secs;
 pub use rfc3339::parse_rfc3339_secs_since;

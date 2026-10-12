@@ -14,11 +14,13 @@
 //! - [`herdr`] — `HerdrPort` (slice d, #683).
 //! - [`host`] and [`harness`] — `HostPort` and `HarnessPort` (slice e, #684).
 //! - [`claude`] — a single-process `HarnessPort`, Claude Code's (#831).
+//! - [`hub`] — `HubPort`, the prompt gate's selection as the hub answers it (#839).
 
 pub mod claude;
 pub mod harness;
 pub mod herdr;
 pub mod host;
+pub mod hub;
 pub mod pane_store;
 pub mod profile_scope;
 pub mod profile_store;

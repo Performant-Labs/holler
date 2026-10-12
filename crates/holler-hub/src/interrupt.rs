@@ -99,8 +99,7 @@ pub async fn interrupt(
     session: &str,
     text: Option<&str>,
 ) -> Result<InterruptOutcome, InterruptError> {
-    let name = holler_proto::RoutableName::parse(session).map_err(|_| InterruptError::UnknownSession)?;
-    let (handle, ad) = match registry.resolve_session(&name).await {
+    let (handle, ad) = match registry.resolve_prompt_target(session).await {
         ResolveOutcome::Found(h, ad) => (h, ad),
         ResolveOutcome::Unknown => return Err(InterruptError::UnknownSession),
         ResolveOutcome::NotConnected => return Err(InterruptError::NotConnected),
@@ -112,10 +111,14 @@ pub async fn interrupt(
     // whole redirect up front rather than cancel the turn and then fail to
     // deliver what was meant to replace it. (The refusal that cannot be raced
     // is still `send_prompt`'s; a hold set between this check and the redirect
-    // surfaces as `PromptFailed`.)
+    // surfaces as `PromptFailed`.) The pane gate (#839), keyed on the id the
+    // session advertises, is asked here for the same reason.
     if text.is_some() {
         if let Some(refusal) = registry.holds().would_refuse(&crate::holds::session_key(&handle.hostname, ad.name.as_str()), None) {
             return Err(InterruptError::Refused(refusal));
+        }
+        if let (Some(panes), Some(id)) = (registry.panes(), ad.harness_session_id.as_deref()) {
+            crate::panes::gate::pane_gate(panes, id).map_err(InterruptError::Refused)?;
         }
     }
 
