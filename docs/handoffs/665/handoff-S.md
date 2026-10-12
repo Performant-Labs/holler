@@ -1,3 +1,204 @@
+# Handoff-S (round 2): Phase 10 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)  (spec audit)
+
+**Date:** 2026-10-11 (23:43 MDT)
+**Branch:** `issue-665-implementation`, head `cd2e06e`, merge base `bda1069`
+**Issue:** [#665](https://github.com/Performant-Labs/holler/issues/665). The operator confirmed it on 2026-10-11 at 19:40 MDT, in the issue's comment.
+**Source of truth:** `docs/handoffs/665-brief.md`. The run has no O, so A's six warns (`handoff-A.md`) count as amendments.
+**Handoffs reviewed:**
+- `665/handoff-A.md`
+- `665/handoff-T-red.md`
+- `665/handoff-F.md`: round 1, rework 1 and rework 2
+- `665/handoff-T-green.md`: round 1, reworks 1 and 2, and the test-only round
+- `665/handoff-A-dup.md`: both passes
+- `665/decisions.md` and `665/evidence.md`
+- round 1 of this file
+- the outside diff gate's rounds 1 to 4 (`docs/handoffs/665-diff-result-r{1..4}.md`, gitignored). Round 4 is PASS.
+
+**Diff audited:**
+- `git diff origin/main...HEAD`: 59 files. I read every production file in full.
+- `git diff bde41cf HEAD`: the rework cycle since round 1, 10 code and docs files.
+
+**Verdict:** PASS
+
+Round 1 of this audit follows this section, unchanged.
+
+## A precondition
+
+Met.
+- A is PASS, with 0 block and 6 warns.
+- A-dup was re-run on `c63908e` and is PASS, with 0 block and 3 warns. Warn 1 is new (`GRID_FORMS` and `GRID_BOUNDS` copy holler-pane's text). Warns 2 and 3 carry over from the first pass.
+
+## T precondition
+
+Met.
+- **RED.** `handoff-T-red.md` records 70 failures in 14 targets. Each one is the missing feature, not a setup fault.
+- **GREEN.** T-green's last round ran on the sources of `c63908e`:
+  - the workspace run: 154 targets, 2,436 passed, 0 failed, 32 ignored;
+  - `lint.sh`, `changelog-check`, clippy `-D warnings` and `cargo machete` are all clean;
+  - `git diff --stat c63908e HEAD` shows changes only under `docs/handoffs/665/`, so that run covers every line of code audited here.
+- **Blocking issues:** none.
+- **Mutation spot checks on this cycle's repairs:**
+  - With `spec_refused`'s two grid arms disabled, both grid canary tests fail, and the output contains the canary.
+  - With the `usage` arm disabled, the wrong-type test fails on serde's `invalid type: string "t665-import-canary-..."`.
+  - A rename that keeps the old `updated` fails H1, 3 runs of 3.
+  - With `skip_serializing_if` added to `env` and `expect`, the new import test fails, and so does `export_leaves_out_absent_optional_members`.
+
+## Round 1's REWORK, item by item
+
+| # | What round 1 required | What was done | Proof |
+|---|---|---|---|
+| 1 | Pluralize the spec count with `count(n, "spec")` | Both `render` functions use `super::list::count` (`src/profile/export.rs:302`, `src/profile/import.rs:126`). | The three pins now read `1 spec`: `tests/profile_verbs/import.rs:81` and `:160`, and `tests/profile_verbs/export.rs:319`. |
+| 2 | Narrow the "never printed" claim, or make it true | **Option (b), make it true.** <ul><li>`spec_refused` keeps both grid codes but replaces their messages with `herdr.grid of spec N` plus the hint or the bounds (`export.rs:193-209`).</li><li>`Document::specs` sends the text-position step through `spec_refused` too (`:147-149`).</li><li>The claim is scoped to "what a spec holds" in `--help`, both module docs, the guide and the CHANGELOG.</li></ul> | <ul><li>`import/refusals.rs::a_bad_position_is_its_grid_code`: the canary in a text position, in a `pos` label, and a zero cell.</li><li>`a_refused_position_is_named_by_its_spec_number_not_quoted`: the spec number appears and the canary does not.</li></ul> |
+| 3 | TEST-ONLY: pin the spec-level `usage` redaction | Two wrong-type members hold the canary: `context.soft` and `role`. | `refusals.rs::a_document_of_another_shape_is_usage_and_never_quoted` (T's spot check 2) |
+| 4 | TEST-ONLY: pin that `updated` is the rename's stamp | <ul><li>**H1** waits until `now_millis() > old.updated` (a condition wait, not a sleep), then asserts `updated` equals the new log's `at`.</li><li>**Case 23** asserts the same equality on all three runners.</li></ul> | `crates/holler-hub/tests/profile_rename_test.rs:140-159`; `crates/holler-pane-testkit/src/conformance/profile_store/rename.rs:56-61` |
+
+F also took round 1's advisory 8 items:
+- the module-doc line is rewrapped;
+- the guide's log wording is corrected for a reused name (D4);
+- the CHANGELOG names `profile_rename_restore_failed`.
+
+**I checked the redaction claim against the code myself.**
+- By `from_decode` and `from_closed` (`crates/holler-pane/src/error.rs:568-596` and `:630-636`), a spec's decode can answer only:
+  - `usage`, whose message is replaced;
+  - the two grid codes, whose messages are replaced;
+  - the unit variants `command-not-argv`, `env-name-invalid` and `profile-secret-refused`, whose `Display` is a fixed sentence.
+- `Document::read` names only serde's category and the line and column.
+- A wrong `format` names the expected format, and a wrong `version` names the number.
+
+So no refusal quotes what a spec holds. See advisory 3 for one phrase that still says more than this.
+
+## Acceptance criteria
+
+The abbreviations used in this table:
+- **H:** `crates/holler-hub/tests/profile_rename_test.rs`.
+- **HF:** `profile_rename_faults_test.rs`, in the same directory.
+- **C:** `crates/holler-pane-testkit/src/conformance/profile_store/rename.rs`, cases 23 to 28. It runs against three stores: the fake (`profile_store_conformance_test`), `ProfileState` (`profile_registry_test`, 28 cases), and the wire (`pane_integration` `clients::the_profile_client_passes_the_profile_store_conformance_suite`).
+- **CLI:** `crates/holler-cli/tests/`.
+
+| # | Criterion | Proving test or evidence | Status |
+|---|---|---|---|
+| 1 | The record: found by NEW and by its slug, gone under OLD, generation + 1, old `created`, the stamp as `updated`, equal specs, the reply equals the stored record | H `the_record_moves_to_the_new_name_and_the_reply_is_the_stored_record`; C23 `rename-moves-the-record` | MET. Round 1's PARTIAL is closed: `updated` now equals the stamp. |
+| 2 | Every member follows and stays attached (control) | H `every_member_follows_and_nothing_else_of_a_pane_changes`. Control: with T's mutation (`Locked::moves` moves no member), H2, H3 and H5 fail. | MET |
+| 3 | Membership is by slug | H `membership_is_by_slug` | MET |
+| 4 | The log stays intact and gains one entry; `at` never decreases; a deleted profile's log under NEW goes on | H `the_old_log_is_closed_and_the_new_log_has_exactly_one_renamed_entry` and `a_deleted_profiles_log_under_the_new_slug_goes_on`; C24, C25 | MET |
+| 5 | The feeds: the deletion, then the put, then one pane put per member in name order, at consecutive cursors; a same-slug rename is one put | H `the_feeds_carry_the_deletion_then_the_put_and_one_put_per_member` and `a_rename_of_one_slug_is_one_put_one_entry_and_skips_a_member_naming_it_already`; C26, C27 | MET |
+| 6 | Refusals change nothing, come in order, and carry their code on the wire | H `a_refused_rename_changes_nothing_and_answers_its_code_in_order`: 13 cases, comparing the files' bytes, both memories, the logs and both heads. C28. | MET |
+| 7 | Fail closed | HF `a_pane_registry_that_failed_to_load_is_store_corrupt_and_nothing_is_written` (a missing OLD is still `store-corrupt`), and `a_profile_registry_that_failed_to_load_is_store_corrupt_and_nothing_is_written` | MET |
+| 8 | Failed saves (control) | HF `a_failed_pane_save_is_unavailable_and_changes_nothing`, and `a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`. The second checks the old bytes, a new inode (so the panes were saved first) and unchanged memory. | MET |
+| 9 | Restart | HF `a_rename_survives_a_restart_and_a_resumed_watcher_learns_of_the_deletion` | MET |
+| 10 | A retry completes an interrupted rename | HF `running_the_same_rename_again_completes_one_interrupted_between_the_saves` | MET |
+| 11 | Concurrency, with a time bound | HF `two_renames_of_one_profile_racing_exactly_one_wins_and_every_member_names_it` and `a_member_written_during_a_rename_is_moved_or_refused_never_lost`. Each runs 20 rounds inside a 60 s bound. | MET |
+| 12 | The membership hook after a rename | H `after_a_rename_a_pane_write_naming_the_old_name_is_refused_and_the_new_accepted` | MET |
+| 13 | The `not-implemented` pins are replaced | H `profile_rename_without_params_is_a_usage_error_from_the_real_handler`; `pane_dispatch_test.rs` (`assert_answers_an_empty_profile_request`, `profile_dispatch_takes_both_handles_and_routes_rename_to_its_handler`); `profile_handlers_test.rs::a_corrupt_registry_answers_store_corrupt_on_every_profile_method` | MET |
+| - | The conformance suite and the fake | C23 to C28 pass against all three stores. The mutants each fail their case: `a_rename_that_is_a_create_and_a_delete_fails`, `a_rename_that_skips_the_generation_check_fails` and `a_rename_that_overwrites_a_taken_name_fails`. Case 22's fifth refused write is now a stale rename. The fake still routes `rename` through `faults.enter(ProfileStoreOp::Rename)`. | MET |
+| - | CLI `profile rename` | CLI `profile_verbs/rename.rs`, 9 tests: <ul><li>the exact text and JSON;</li><li>the generation read (seeded at 2) and the actor;</li><li>names with spaces, and a spelling-only rename;</li><li>`profile-not-found` 3, `profile-exists` 3 (two spellings), the same name `usage` 2 with no `Rename` call;</li><li>`generation-conflict` 1, through a seam that runs `concurrent_put`;</li><li>the positional count, through clap; a clap error under `profile` in JSON mode is a `usage` envelope (`process/usage.rs`);</li><li>no adapter call (`run_both_with`).</li></ul> | MET |
+| - | CLI `profile export` | CLI `profile_verbs/export.rs`, 8 tests: <ul><li>the D7 document byte for byte, full and bare;</li><li>`rRcC` at four cells, and no record fields;</li><li>the environment canary appears in no output and no file;</li><li>`--out` writes at mode 0600, replaces an existing file and leaves no temporary file;</li><li>a missing directory is `usage`, and a missing profile is `profile-not-found`;</li><li>a control character in the path is escaped;</li><li>the count reads `1 spec`.</li></ul> | MET |
+| - | CLI `profile import` | CLI `profile_verbs/import.rs` (7 tests) and `import/refusals.rs` (8 tests): <ul><li>detached, at generation 1, with the actor;</li><li>six position forms;</li><li>`--name` overrides the file's name and is parsed;</li><li>every refusal, in both formats, writes nothing and never prints the canary;</li><li>a file that leaves `env` and `expect` out exports them back as `[]`;</li><li>the round trip gives equal specs.</li></ul> | MET. Round 1's PARTIAL is closed. |
+| 14-19 | Drift: it agrees with `show` (control: `env` compared as a set), once per pass, a pass stays a read, scope, a failed read, the finding's shape | CLI `pane_verbs/doctor/drift.rs`, 7 tests | MET |
+| 20 | The registry of finding kinds | `crates/holler-pane/tests/findings_test.rs`: `CODES` has 14 entries with `profile-drift` last, plus `profile_drift_is_still_a_failure_class_code` | MET |
+| 21 | Existing doctor tests unchanged | `doctor/rig.rs::profiles_of` builds each profile with `profile_from_panes`. The whole `pane_verbs` target passes. | MET |
+| - | Process level | CLI `pane_verbs/process/profile_io.rs`, 2 tests; `STUBS` in `stub.rs` has no #665 entry | MET (advisory 6) |
+| - | Docs and surface | <ul><li>`docs_pane_control_test.rs`: `profile_io_and_drift_are_built_not_proposed`, its negative control `the_built_not_proposed_rule_fails_a_proposed_line`, and `every_verb_is_named_in_a_span_or_heading`;</li><li>`docs_cli_test`, `cli_surface_test` and the ADR rows test.</li></ul> | MET |
+| - | Lint | <ul><li>T-green's run is clean.</li><li>No touched `.rs` file nears 900 lines: the largest are 596 (a test) and 562 (`src/profile/store.rs`).</li><li>No new `unsafe`.</li></ul> | MET |
+
+## Spec compliance
+
+**The decisions are implemented as stated.** For D1 to D13, round 1's findings hold, and the cycle changed none of them:
+- **D2 and D3:** one `Store::rename` takes the profile lock, then `PaneState::locked()`, and runs the checks in the brief's order. It saves the panes, then the profiles, then restores the panes if the profile save failed. It commits memory only after both saves.
+- **D4 and D5:** OLD's log gets one `deleted` entry and NEW's one `renamed` entry, under one stamp, and the feeds are in the stated order.
+- **D6:** `git diff --stat` is empty for `bind.rs`, `ports.rs`, `lib.rs`, `cli.rs`, `docs/protocol/v2.md`, `docs/orchestrating.md`, `entry.rs`, `grid.rs`, `read_only.rs` and `Cargo.lock`.
+- **D7:** each pane is `to_value(spec)` with the grid replaced, and holler-cli declares `preserve_order`.
+- **D8 and D9:** the steps run in order. Every position is read before any spec decodes, so the rework's routing does not change the order. Nothing is written before the last step.
+- **D10:** drift is `diff_profile` over each profile's members in scope, with one `list` per pass, and only when a pane in scope names a profile.
+- **D11:** every guide and test edit is in.
+- **D12 and D13:** both hold.
+
+**Recorded deviations.** Each one is sanctioned by A or forced by the code, and each is journalled:
+- A warn 2b: a guard-holding handle, not a closure.
+- A warn 3: the port doc's wording.
+- A warn 4a: holler-cli declares `preserve_order`.
+- A warn 5: file errors split into `usage` and `unavailable`, as `pane import` does.
+- A warn 6: where the large new test suites and cases are placed.
+- The issue's "edit none of #661's files" is overridden. The rename cannot be built without editing them.
+- The guide uses placeholders such as `NAME` and `PANE`, so that `docs_cli_test` can parse each inline span.
+- T put acceptance 16's allowlist in `drift.rs`. `read_only.rs` is unchanged, and its rig still makes no profile call, as acceptance 21 asks.
+- Formatting uses `rustfmt` file by file. `cargo fmt -p` reformats about 130 files this story does not own (advisory 5).
+
+## Quality audit
+
+- **Correctness and failure handling.** I re-read the full `Store::rename`, `renamed` and `Locked`, and the restore path.
+  - **Lock order.** The only hub path from the pane side to the profile registry is `check_membership`, which runs before the pane lock (`panes/handlers.rs:111-114`). No path takes the pane lock and then the profile lock.
+  - **No member is lost.** `moves` is computed under the pane lock, so a racing `cas_put` is either moved or refused.
+  - **NEW's log never goes back in time.** A tombstone at NEW's slug feeds the stamp through `entry::stamp(target, now)`, so `at` never decreases in NEW's log.
+  - **The restore is a real save.** It writes the committed table (`write(table, &[])`), and a failure is logged as `profile_rename_restore_failed`.
+  - **A bare relative `--out` works,** such as the guide's `fleet.json`. `write_atomic`'s `temp_path` uses `with_file_name`, so the temporary file lands in the current directory.
+- **Build guards.**
+  - No added line under `crates/*/src` contains `unwrap()`, `expect(`, `panic!`, `unreachable!`, `todo!`, `dbg!` or `unsafe`.
+  - The only new `#[allow]`s are four lines in the two new hub test files, and each carries `// #665`.
+  - Clippy's `dead_code = "deny"` is clean (T-green).
+- **Protocol.**
+  - There is no wire change: `ProfileRenameParams` and the reply already existed, and no golden file changed.
+  - `docs/protocol/v2.md` is untouched, as the brief requires (advisory 2).
+- **Tests.**
+  - The hub tests use real registries on temporary state dirs, and the process tests use `LiveHub`.
+  - There are no fixed sleeps. A grep of the touched tests finds only H1's yield loop, which waits on a condition.
+  - Every race is bounded, and each test was RED before F's code.
+- **Documentation.**
+  - The CHANGELOG has an `[Unreleased]` / Enhancements bullet that links #665 and names `profile_rename_restore_failed`. The README lists no registry fault event, and the earlier registries named theirs the same way.
+  - ADR-0003, ADR-0021 and the guide are updated.
+  - In ADR-0021, `PROPOSED` remains only in "Decisions taken" item 4, which the brief keeps as the record of 2026-10-09.
+- **Public-repository privacy.**
+  - I grepped all 8,718 added lines for personal hosts, tailnet names, non-loopback IPs, account names, home paths, private domains and key patterns. The only hits are the brief's own rule sentence and round 1's description of the same grep.
+  - Every commit's author is the GitHub no-reply address.
+- **Commit and PR hygiene.**
+  - Each subject is a Conventional Commit, and each commit carries `Co-Authored-By`.
+  - No commit has a session link. That is the pipeline's standard format, and #648's merged run (`037405f`) is the same.
+  - The PR does not exist yet. After the script opens it, the run's agent must add the AI disclosure with `gh pr edit` (CONTRIBUTING.md, "Disclosure is required").
+
+## Scope check
+
+**Delivered: the brief's scope, all three parts.** Round 1's accounting of the files outside the Blast radius still holds: each one comes from one of A's warns or from reuse expectation 8.
+
+The rework cycle added only what round 1's REWORK asked for:
+- two arms on `spec_refused`, and two message constants;
+- `count()` in both `render` functions;
+- the canary tests and the `updated` assertions;
+- one import test for the gate's B-1;
+- doc wording.
+
+There is no unrelated refactor. Nothing is under-delivered.
+
+## Verdict
+
+**PASS.** Every acceptance criterion has a test that proves it, and the tests that guard the security and stamp rules are checked by mutation. Every decision is implemented as stated or as a recorded, sanctioned deviation, and round 1's four REWORK items are closed. Nothing below blocks.
+
+## Advisory notes (non-blocking)
+
+1. **Rebase before the merge.** `git merge-tree` against `origin/main` (`037405f`) still conflicts in `CHANGELOG.md`, `docs_pane_control_test.rs`, `ADR-0003.md`, `ADR-0021.md` and `docs/pane-control.md`. The brief's clash table expects this.
+   - On `main`, "Decisions taken" item 22 is still free.
+   - `UnmanagedStalled` is still the last finding kind, so `profile-drift` stays appended last.
+   - The guide still says "four name none", so "five" is still right.
+   - Re-run the workspace suite after the rebase.
+2. **`docs/protocol/v2.md:817` still says "the proposed `profile/rename`".** The brief puts v2.md out of reach, so this is the brief's miss, not F's. Make the one-word fix while resolving the rebase's doc conflicts, or file a follow-up.
+3. **One phrase still says more than the code does:** "a bad position or member is named by the spec's number". It appears in `src/profile/import.rs:50-52` (`--help`), `docs/pane-control.md:413` and `CHANGELOG.md:21`.
+   - The problem: a member refused by a typed guard (`command-not-argv`, `env-name-invalid`, `profile-secret-refused`) prints the guard's fixed sentence. These codes are unit variants, so they cannot carry a spec number.
+   - The safety half of the sentence ("no refusal quotes what a spec holds") is true.
+   - Suggested wording: "a bad position, or a member that does not decode, is named by the spec's number".
+4. **A-dup warn 1 (new).** `GRID_FORMS` and `GRID_BOUNDS` (`src/profile/export.rs:57,60`) copy holler-pane's private `FORMS` and `BOUNDS` (`crates/holler-pane/src/grid.rs:24,27`), and no test ties the copies to the originals. The follow-up is to expose the originals from holler-pane and delete the copies.
+5. **Formatting.** Four new hunks in `docs_pane_control_test.rs` and one in `process/stub.rs:213` are not rustfmt-clean:
+   - in `docs_pane_control_test.rs`: `BUILT_BY_665`, `PROFILE_IO_HEADINGS` and two `format!` calls;
+   - the base already had 31 such hunks in `docs_pane_control_test.rs`, and CI has no fmt gate;
+   - they can be tidied at the rebase.
+6. **Carried over from round 1:**
+   - advisory 3: `rename_on_an_empty_hub_reaches_the_real_handler` is answered by the CLI's own `get`. The round-trip test does reach the handler, so coverage holds.
+   - advisory 4: `agent-key-invalid` folds into `usage`, so the key rule's text is lost.
+   - advisory 5: case 28's final read is vacuous on the wire runner.
+   - advisory 6: A-dup's warns. `pane_support::request` duplicates a helper, and `Locked` accepts any `PaneEvent`s.
+   - advisory 7: the `unavailable` half of the file-error split is unpinned.
+   - advisory 9: #693 is a known flake.
+
+---
+
 # Handoff-S: Phase 10 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)  (spec audit)
 
 **Date:** 2026-10-11 (22:17 MDT)

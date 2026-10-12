@@ -300,3 +300,46 @@
     - `REPLY_WITHIN` and the request helpers;
     - personal infrastructure names in the added lines and the commit metadata.
   - **Untouched files:** `git diff --stat bda1069..HEAD` is empty for `grid.rs`, `bind.rs`, `ports.rs`, `lib.rs`, `cli.rs`, `docs/protocol/v2.md` and `docs/orchestrating.md`.
+
+## S (Phase 10, spec audit, round 2): 2026-10-11 23:43 MDT
+- **Decided:** PASS (`docs/handoffs/665/handoff-S.md`, top section).
+  - **Round 1's four REWORK items are closed:**
+    1. Both counts go through `count()`.
+    2. The grid redaction is option (b): `spec_refused` replaces the grid codes' messages, and the claim is scoped to "what a spec holds".
+    3. The `usage` redaction is pinned by wrong-type canary members.
+    4. `updated` equals the rename's stamp, in H1 and in case 23.
+  - Every acceptance criterion maps to a named test. The deviations are the ones round 1 accepted.
+  - **Six advisories, none blocking:**
+    1. the rebase conflicts in 5 files;
+    2. `docs/protocol/v2.md:817`;
+    3. "a bad position or member is named by the spec's number" overstates the three unit-variant guard codes;
+    4. A-dup's new warn: the grid hint text is copied from holler-pane, and nothing pins the copy;
+    5. five new hunks are not rustfmt-clean, in two test files;
+    6. round 1's remaining advisories.
+- **Assumed:**
+  - T-green's last workspace run (2,436 passed, on `c63908e`'s sources) covers `HEAD`, because `c63908e..cd2e06e` changes only `docs/handoffs/665/`.
+  - The pipeline's commit format (no session link) satisfies CONTRIBUTING.md, as it did for #648's merged run. The PR's AI disclosure is added after the script opens the PR.
+- **Hedged:**
+  - I ran no test, since S does not re-run Tier 1 or Tier 2. Behaviour rests on T's recorded runs and mutation checks, plus my reading of the code.
+  - Advisory 2 is left as an advisory, not an ADVISORY-HOLD. It is a one-word, non-normative edit in a file the brief puts out of reach, and no criterion depends on it.
+- **Evidence:**
+  - **Read in full:** the brief; issue #665 and its confirming comment; every handoff and both A-dup passes; `evidence.md`; the outside gate's rounds 3 and 4.
+  - **Diffs:** `git diff origin/main...HEAD` and `git diff bde41cf HEAD`.
+  - **Source read in full or in part:**
+    - the three verbs (`rename.rs`, `export.rs`, `import.rs`);
+    - the hub's `profile/store.rs` and `panes/store.rs` (rename paths), `profile/{mod,rename}.rs` and `panes/mod.rs`;
+    - `reconcile/drift.rs`;
+    - the fake's `move_record`;
+    - `error.rs` (`from_decode`, `from_closed`, `Display`);
+    - `output.rs` (`emit`, `write_line`);
+    - `atomic_file.rs` (`temp_path`);
+    - every new and changed test.
+  - **Commands:**
+    - a grep of added `src` lines for `unwrap`, `expect`, `panic` and `unsafe`;
+    - a grep for `#[allow]`;
+    - `wc -l` of every touched file;
+    - a privacy grep of all 8,718 added lines, and `git log` for the authors;
+    - `git diff --stat` of the files D6 says are untouched;
+    - `git merge-tree` against `origin/main` `037405f`;
+    - `rustfmt --check` on the touched files, at the base and at the head;
+    - a grep of the touched tests for sleeps.
