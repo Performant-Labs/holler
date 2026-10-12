@@ -248,6 +248,8 @@ None blocks the build; each has a default that the brief already follows.
 3. **What "one change-log entry" means for a rename (D4).** The brief gives the renamed profile's log exactly one new entry (`renamed`) and closes the old name's log with a `deleted` entry, copying nothing. If the operator wants `profile log NEW` to show the old history too, the log of OLD is copied under NEW instead, which changes D4 and the load check. Default: as D4.
 4. **"Raised once per episode" (D10).** The brief reads it as the engine reads it: once per pass per drifted pane, and again in every later pass while the difference stands. If the operator wants a drift reported once and then muted until it clears, that needs a stored marker on a frozen record and a write by doctor, which is a contract amendment of its own. Default: as D10.
 
+**Decided at the launch (2026-10-11, the main session, under the standing rule to decide and report; the operator can overrule at the plan check).** (1) Rigor `second-opinion`, as the brief says (D12): the two-file transaction, the new finding kind and the new file format justify the outside diff gate. The brief gate is skipped (see the launch reason); A's plan check reviews the brief. (2) One story, as the issue has it. (3) No: `profile log NEW` does not carry the old history (D4). (4) Yes: "once per episode" is read as once per pass per drifted pane (D10), which is what the engine's own docs promise.
+
 ## Not verified
 
 - No test, build, clippy or lint was run for this brief: it prepares, it does not build. Every claim about behaviour is read from the code at `bda1069` (the excerpts), not executed.
