@@ -14,8 +14,8 @@ use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 
 use crate::launch::rig::{
-    agent, argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name,
-    Calls, Rig, Seed, PANE, PORT, STEP,
+    agent, argv, assert_untouched, assert_untouched_after_missing_record, data_of, error_of,
+    launch_spec, name, occurrences, profile_name, Calls, Rig, Seed, PANE, PORT, STEP,
 };
 use crate::verb_harness::parse::assert_spec_flags_accepted;
 
@@ -554,7 +554,7 @@ fn relaunch_of_a_missing_pane_is_refused() {
     let run = rig.run(RELAUNCH, Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "pane-not-found");
-    assert_untouched(&run.calls);
+    assert_untouched_after_missing_record(&run.calls);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }

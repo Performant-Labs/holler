@@ -307,7 +307,7 @@ fn close_refuses_a_pane_with_no_record() {
         "the message names the pane: {:?}",
         both.text.err
     );
-    both.assert_untouched();
+    both.assert_untouched_after_missing_record();
 }
 
 /// `pane close` with no PANE is a usage error (exit 2) refused by the verb, touching

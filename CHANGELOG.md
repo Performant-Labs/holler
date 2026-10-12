@@ -50,7 +50,7 @@ fills this file in at release time.
   reports an unmanaged pane whose screen has not changed that long as the finding `unmanaged-stalled`. **Herdr 0.8.2 reports no
   time at which a screen last changed**, so the port carries `last_screen_change` (new `HerdrPort::observe_pane`) and the real
   adapter leaves it, and the idle time, empty rather than guess one: the idle time and `unmanaged-stalled` need a Herdr that
-  reports it, tracked as a follow-up. If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
+  reports it, tracked in [#837](https://github.com/Performant-Labs/holler/issues/837). If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
   kit gains `seed_unmanaged_pane`, and the roster (#648) is not changed here.
 - Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
   import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet

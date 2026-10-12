@@ -18,8 +18,6 @@
 //!
 //! [`HerdrPort::observe_pane`]: crate::ports::HerdrPort::observe_pane
 
-use std::collections::BTreeSet;
-
 use serde::Serialize;
 
 use crate::error::{PaneError, RefusalCode};
@@ -62,21 +60,32 @@ pub struct UnmanagedPane {
     pub(crate) herdr: HerdrPane,
 }
 
-/// The panes of `snapshot` that no record names: the one rule of "has no record", which
-/// `unregistered-herdr-pane` (whole-fleet reconcile passes) uses too. A record names a pane
-/// by Herdr session and pane id.
-pub(crate) fn unregistered<'a>(
+/// The panes of `snapshot` that no record names: **the one rule of "a pane Holler does not
+/// drive"**, public so that no story writes its own copy. `pane list`/`get`, the
+/// `pane-unmanaged` refusal and the `unregistered-herdr-pane` finding of whole-fleet reconcile
+/// passes call it, and so do #831 (a second harness kind) and #835 (import decides whether
+/// Holler drives a pane). A record names a pane by Herdr session and pane id.
+///
+/// Today "no record names it" is the only way a pane is undriveable, because
+/// `HarnessKind` has one variant. The other half of the story's wording, "or whose harness
+/// Holler cannot drive", has no case yet; #831 adds it here (a `HarnessKind` that is not
+/// drivable), so the rule stays in this one function.
+pub fn unregistered<'a>(
     snapshot: &'a HerdrSnapshot,
     records: &'a [Pane],
 ) -> impl Iterator<Item = &'a HerdrPane> + 'a {
-    let named: BTreeSet<(&str, &PaneId)> = records
-        .iter()
-        .map(|pane| (pane.herdr.session.as_str(), &pane.herdr.pane_id))
-        .collect();
     snapshot
         .panes
         .iter()
-        .filter(move |herdr| !named.contains(&(herdr.session.as_str(), &herdr.pane_id)))
+        .filter(move |herdr| is_unmanaged(herdr, records))
+}
+
+/// Whether `herdr` is a pane Holler does not drive, given every record: [`unregistered`] for
+/// one pane. The question #831 and #835 ask; see [`unregistered`] for who else calls it.
+pub fn is_unmanaged(herdr: &HerdrPane, records: &[Pane]) -> bool {
+    !records
+        .iter()
+        .any(|pane| pane.herdr.session == herdr.session && pane.herdr.pane_id == herdr.pane_id)
 }
 
 /// Every pane of the live Herdr session that no record names, sorted by workspace and
