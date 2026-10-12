@@ -124,3 +124,28 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
   - Clippy is clean, before and after the fix. Lint exits 0.
   - changelog-check, `docs_cli_test` (3), `wire_selftest` (3) and machete pass.
   - After the fix: `ports_test` passes 8 of 8, and `pane_verbs -- doctor` 71 of 71.
+
+## A (Phase 7, anti-duplication gate) — 2026-10-12T11:41-06:00
+- **Decided:**
+  - PASS, with 0 blocks and 3 warns (`handoff-A-dup.md`). F extended every object in the Reuse map and built no parallel path in production code.
+  - The plan review's W-1 is settled: each OpenCode route has one reader (`prompt::messages`, `server::agent_list`), and the default-agent rule is stated once (`server::as_default`).
+  - W-2 is carried as warn 2. #839 (S PASS at `d4ec665`, not merged) still sets two remedies outside the table, and it edits the same module-doc and `remedy`-doc lines. The second merge reconciles them and files the fold.
+  - Warn 1: `scratch/verbs.rs`'s `assert_end_state` copies `Scratch::findings` inline (T's RED commit). It is T's to fold, with no F respawn.
+  - Warn 3: the host adapter's `list-panes -s` builder now has four copies, and its method body three. That is the model the brief named, so the warn is for a follow-up.
+- **Assumed:**
+  - #839 lands its `findings.rs` as it is on `origin/issue-839-implementation` at `e57a7b5`.
+  - The `{report}` diagnostic is the reason `assert_end_state` does not call `findings()`. Its author did not say.
+- **Hedged:**
+  - Warn 1 is not a block: it is test code, it is not one of the helpers the overlay names, and acceptance 18's wording ("read as `Scratch::findings` reads one") describes the reading more than it requires the call.
+  - The duplicated "newest `max_turns`" slice (the adapter and the fake) is not flagged, because a fake models the port.
+- **Evidence:**
+  - Diffs read: `git show 8b6030e`; `git diff 6eff9cc HEAD -- crates/` (65 files); the T commits `a3a9e2b`, `4bd4e75` and `b5fc4bb`.
+  - Read in full: `agents.rs`, `observe.rs` (lines 1-300), `observe/agent.rs`, `agent_view.rs`, `tmux.rs`, `forwarding.rs`, `doctor/agent.rs`, `doctor/attach.rs`, `fake_harness_agent_test.rs`, `attached_test.rs` and `scratch/verbs.rs`.
+  - Commands:
+    - `grep` of every `HostPort`/`HarnessPort` impl;
+    - `grep` of `GET_MESSAGES`/`GET_AGENT` senders and `known(` callers;
+    - `grep` of the two new methods' call sites in `holler-pane`;
+    - `git diff 6eff9cc origin/issue-839-implementation -- crates/holler-pane/src/findings.rs`;
+    - `bash scripts/lint.sh` (exit 0);
+    - the privacy grep of the added lines.
+  - The outside diff gate r1 (`647-diff-result-r1.md`): PASS.
