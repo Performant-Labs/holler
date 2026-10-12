@@ -404,7 +404,8 @@ fn step_4(run: &Run) {
     let plan = run.apply(P, &["--dry-run"]);
     let b1 = plan.step(B1);
     assert_eq!(b1.row(), (Action::Relaunch, Outcome::Planned));
-    let why = format!("its harness server on port {} did not answer", run.port(B1));
+    // The engine's wording since #857 (`tx_apply/observe.rs`): the record's endpoint.
+    let why = format!("its harness at port {} did not answer", run.port(B1));
     assert!(
         b1.detail.as_deref().is_some_and(|d| d.contains(&why)),
         "{b1:?}"

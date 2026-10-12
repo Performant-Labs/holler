@@ -180,3 +180,30 @@ Run handoff directory `docs/handoffs/853`. F's entries first; T appends its own 
   > //! a pane only by splitting an existing one (the fake's split-only placement) and
   > //! against real Herdr, which creates a workspace with its root pane. After a close, a
   > ```
+
+## T (verify, GREEN)
+
+Facts in unchanged code that T's tests rely on and F's entries do not cover. Excerpts copied by T from source.
+
+- **Fact:** the steps are sorted with the stable `sort_by` on `cell_key`, over the specs in P's order, so two specs of
+  one cell keep P's order (`order.rs`'s `dup-b` before `dup-a`).
+  **Source:** `crates/holler-pane/src/tx_apply.rs:349`
+  **Verbatim excerpt:**
+  > ```rust
+  >     chosen.sort_by(|(a, _), (b, _)| cell_key(a).cmp(&cell_key(b)));
+  > ```
+
+- **Fact:** a relaunch after a `--take-over` whose act fails or refuses puts the take-over note in the step's detail,
+  which `refused.rs`'s `an_acted_refusal_after_a_take_over_carries_its_note` reads as `joined "<P>" before the
+  relaunch`.
+  **Source:** `crates/holler-pane/src/tx_apply/run.rs:123-129`
+  **Verbatim excerpt:**
+  > ```rust
+  >     if let Err(failure) = tx_launch::relaunch(cx.ports, &request, cx.options) {
+  >         let note = moved.map(|from| {
+  >             let (from, to) = (quoted(from.as_str()), quoted(profile.as_str()));
+  >             format!(
+  >                 "{name} left profile {from} and joined {to} before the relaunch, and stays in {to}"
+  >             )
+  >         });
+  > ```

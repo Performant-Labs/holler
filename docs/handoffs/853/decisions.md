@@ -155,8 +155,8 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     ending with the reconcile step. That last part confirms A warn 3 (an acted refusal) on real Herdr.
   - **Incident, no harm:** while looking for a 0.9.1 binary I ran `--version` on every executable named `herdr*` on
     the disk. That ran four `scripts/spikes/herdr-*.sh` scripts. Each starts and tears down its own scratch server
-    (one printed `target proven`). No spike process was left. The operator's live Herdr servers (session `jupiter`, 15
-    h old, and `herdr-jupiter`, 20 days old) were not touched.
+    (one printed `target proven`). No spike process was left. The operator's two live Herdr servers (one 15 h old, one
+    20 days old; names withheld, as this repo is public) were not touched.
 
 ## F, implementation (the script's phase 6): 2026-10-12T05:58-06:00
 
@@ -217,3 +217,33 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     suite's header and cases, `docs_pane_control_test.rs`, and the guide's sections 3, 6 and 9.
   - **Searched:** every statement of the old order and the old exit rule across `crates`, `docs`, `scripts`,
     `README.md` and `CHANGELOG.md`; the remaining ones are in `docs/handoffs/` (history) and #664's CHANGELOG entry.
+
+## T, verify tests (GREEN): 2026-10-12T06:00-06:20
+
+- **Decided:** GREEN, with no blocking issue; ready for S (no UI surface, so U is N/A). See handoff-T-green.md.
+  - **Repaired one test.** `profile_apply_scenario/scenario.rs:407` (step 4) expected `its harness server on port N
+    did not answer`, but since #857 (`b76f4d2`, on `main` before this branch) the engine says `its harness at port N
+    did not answer`. That opt-in assertion had been stale on `main`, and it stopped the scenario before step 5, which
+    is this story's exit-3 change on real state. I matched the engine's text. No production code changed.
+  - **Redacted my RED entry's incident bullet**, at F's flag: the operator's live Herdr session names, which are
+    machine-derived, are replaced with a neutral description, since this repo is public. It is my own entry.
+  - **Added two evidence entries** for unchanged code that the tests rely on: the stable sort and the take-over note's
+    wording.
+- **Assumed:**
+  - The 3 `interrupt_test` failures in the first workspace run are a load flake, not this change. The hub logged
+    `conn_liveness_expired` 6 ms after connect while clippy ran at the same time. The diff touches no hub, body, proto
+    or test-support code, and three solo reruns and a clean full rerun all passed.
+- **Hedged:**
+  - "Workspaces keep their order" is workspace-name order, as before #853. This is flagged as advisory, not a block.
+- **Evidence:**
+  - **Ran:**
+    - the workspace verify command with `--no-fail-fast`: 167 binaries, 2594 passed, 0 failed;
+    - clippy on the workspace: clean;
+    - `lint.sh`, `changelog-check.sh` and `cargo machete`: ok;
+    - `docs_cli_test`, `docs_pane_control_test`, `cli_surface_test` and `wire_selftest`: ok;
+    - the opted-in `profile_apply_scenario` (`grid`, `probe`, `scenario`) on Herdr 0.9.1: all ok, with no process left
+      behind;
+    - three local removal checks (the old `cell_key`, `refused()` disabled, the `acted` filter dropped), which failed 8,
+      8 and 6 tests. Each was restored, with an empty `git diff` against HEAD.
+  - **Read:** handoff-F.md, the production diff `0064fac..07a576c`, `evidence.md`, `tx_apply/observe.rs:118-135`,
+    `tx_apply/run.rs:118-130` and `.github/workflows/ci.yml`.
