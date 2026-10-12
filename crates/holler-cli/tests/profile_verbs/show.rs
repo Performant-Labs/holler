@@ -3,7 +3,8 @@
 //! read and never run.
 
 use holler_pane::{
-    Argv, GridPos, HerdrPane, Pane, PaneError, ProbeResult, ProfileName, ProfileSpec, ProfileStore,
+    AgentKey, Argv, GridPos, HerdrPane, Pane, PaneError, ProbeResult, ProfileName, ProfileSpec,
+    ProfileStore,
 };
 use holler_pane_testkit::fault::Fault;
 use serde_json::{json, Value};
@@ -212,6 +213,45 @@ fn show_prints_command_and_check_as_argv_arrays() {
             "spec": ["opencode", "serve"],
             "live": ["opencode", "serve", "--port 1"],
         })
+    );
+}
+
+/// #644 part 2: `profile show` lists `opencode_agent` in a spec, the key or `(default)` for
+/// none, and reports a live pane whose agent differs from its spec as a difference of it.
+#[test]
+fn show_lists_the_agent_and_reports_an_agent_difference() {
+    let seed = || {
+        let mut with_agent = matching_spec("demo-c1r1");
+        with_agent.opencode_agent = Some(AgentKey::parse("feature-implementor").unwrap());
+        rig_of(
+            vec![member("demo-c1r1", NAME), member("demo-c2r1", NAME)],
+            vec![with_agent, matching_spec("demo-c2r1")],
+        )
+    };
+    let both = run_both(seed, &["profile", "show", NAME]);
+    assert_eq!(both.text.code, 0, "{:?}", both.text);
+    let out = &both.text.out;
+
+    let c1 = block(out, "spec demo-c1r1");
+    assert!(
+        c1.contains(&"  opencode_agent: feature-implementor"),
+        "{c1:?}"
+    );
+    let c2 = block(out, "spec demo-c2r1");
+    assert!(c2.contains(&"  opencode_agent: (default)"), "{c2:?}");
+    assert_eq!(
+        block(out, "pane demo-c1r1: differs"),
+        vec![
+            "  opencode_agent: spec feature-implementor, live (default)",
+            "  probe: none",
+        ]
+    );
+    assert!(out.lines().any(|l| l == "pane demo-c2r1: matches"), "{out}");
+
+    let data = &both.envelope.data;
+    assert_eq!(
+        row(data, "demo-c1r1")["differences"],
+        json!([{"field": "opencode_agent", "spec": "feature-implementor", "live": null}])
     );
 }
 

@@ -25,6 +25,7 @@
 
 use clap::Args;
 use holler_pane::findings::quoted;
+use holler_pane::unmanaged;
 use holler_pane::{PaneError, PaneName, Ports, Profile, ProfileName, SpecEdit};
 use serde::Serialize;
 
@@ -170,9 +171,7 @@ fn close_live(
         .pane_store
         .get(&name)
         .and_then(|record| {
-            record.ok_or_else(|| PaneError::PaneNotFound {
-                what: name.to_string(),
-            })
+            record.ok_or_else(|| unmanaged::missing(ports, name.as_str()))
         })
         .map_err(|error| ErrorBody::from(&error))?;
     let profile = profile.map(|profile| profile.name);

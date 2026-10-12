@@ -1,6 +1,7 @@
 //! The fixtures the fakes' tests and the conformance suites build their records from,
 //! all valid, deterministic and harmless: `sample_pane` (a `Pane`), `sample_spec` (a
-//! `ProfileSpec`) and `sample_profile` (a `Profile` of sample specs).
+//! `ProfileSpec`) and `sample_profile` (a `Profile` of sample specs). `seed_unmanaged_pane`
+//! (#832) puts a Herdr pane that no record names into a `FakeHerdr`.
 //!
 //! A sample spec places, configures and runs its pane as the sample pane of the same
 //! name is placed, configured and run (one workspace, grid cell, directory, harness,
@@ -12,8 +13,11 @@ use holler_pane::pane::{
 };
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::{
-    GridPos, HerdrPane, Pane, PaneError, PaneId, PaneName, Profile, ProfileName, ProfileSpec,
+    GridPos, HerdrPane, HerdrPort, HerdrSpec, Pane, PaneError, PaneId, PaneName, PaneObservation,
+    Profile, ProfileName, ProfileSpec,
 };
+
+use crate::herdr::FakeHerdr;
 
 /// The harness port of every sample pane.
 const SAMPLE_PORT: u16 = 48100;
@@ -48,6 +52,7 @@ pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
             workspace: SCRATCH.to_owned(),
             pane_id: PaneId::new(format!("{SCRATCH}:{name}")),
             grid: SAMPLE_GRID,
+            label: None,
         },
         host: HostInfo {
             name: "localhost".to_owned(),
@@ -149,4 +154,42 @@ fn sample_context() -> ContextCeilings {
         soft: 100_000,
         hard: 150_000,
     }
+}
+
+/// The fixture of #832: one **unmanaged** pane in `herdr`'s scratch workspace, at `grid`.
+/// No record names it, it runs something no adapter knows (a hand-set-up session whose
+/// screen shows one status line and never changes), and it is labelled `label` and works in
+/// `cwd`. `last_screen_change` is what `observe_pane` reports for it: `None` is a Herdr
+/// that reports no time, as the real adapter does for Herdr 0.8.2.
+///
+/// The caller declares the workspace first (`FakeHerdr::with_workspace("scratch", ..)`,
+/// the name every sample pane uses). Returns the pane as `snapshot` lists it, label
+/// included.
+pub fn seed_unmanaged_pane(
+    herdr: &FakeHerdr,
+    grid: GridPos,
+    label: &str,
+    cwd: &str,
+    last_screen_change: Option<i64>,
+) -> Result<HerdrPane, PaneError> {
+    let placed = herdr.ensure_pane(&HerdrSpec {
+        session: SCRATCH.to_owned(),
+        workspace: SCRATCH.to_owned(),
+        grid,
+    })?;
+    herdr.rename(&placed.pane_id, label)?;
+    herdr.print(&placed.pane_id, "waiting for the seeding to finish...\n")?;
+    let mut observation = PaneObservation::default().with_cwd(cwd);
+    if let Some(at_ms) = last_screen_change {
+        observation = observation.with_last_screen_change(at_ms);
+    }
+    herdr.set_observation(&placed.pane_id, observation)?;
+    herdr
+        .snapshot()?
+        .panes
+        .into_iter()
+        .find(|pane| pane.pane_id == placed.pane_id)
+        .ok_or_else(|| PaneError::PaneNotFound {
+            what: placed.pane_id.as_str().to_owned(),
+        })
 }

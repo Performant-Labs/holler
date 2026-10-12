@@ -6,6 +6,12 @@
 //! (AC 35). Each test file that needs it declares `mod wire_herdr;`, and uses a part of
 //! it, so the rest would trip `dead_code`.
 //!
+//! A pane may carry a label (#808), set by [`WireHerdr::rename`] as the outside world's
+//! `pane.rename` sets one (spike section 4, "Rename (label)"; the fake does not serve that
+//! method, which the adapter never calls). Every `PaneInfo` it sends carries the pane's
+//! label as set, `""` included, and leaves the key out for a pane with none (spike: absent
+//! optional fields are omitted, not null).
+//!
 //! What the spike did not verify is marked INFERRED: closing a tab's last pane, the
 //! `tab_not_found` code, the ratio range, and `pane_not_found` for `send_text`,
 //! `send_keys` and `read` of a pane the fake does not hold (conformance case 9 needs it).
@@ -56,6 +62,8 @@ struct State {
     last_workspace: u64,
     /// Each live pane's screen, by pane id.
     screens: BTreeMap<String, String>,
+    /// Each labelled live pane's label, as set (`""` included), by pane id (#808).
+    labels: BTreeMap<String, String>,
     /// Every request line received, parsed (a line that is not JSON as a string).
     requests: Vec<Value>,
 }
@@ -102,6 +110,7 @@ impl WireHerdr {
                 workspaces: Vec::new(),
                 last_workspace: 0,
                 screens: BTreeMap::new(),
+                labels: BTreeMap::new(),
                 requests: Vec::new(),
             }),
         }
@@ -143,6 +152,22 @@ impl WireHerdr {
             .split(target.as_str(), direction, 0.5)
             .expect("split: no pane of that id");
         PaneId::new(new)
+    }
+
+    /// The outside world labels `pane` (Herdr's `pane.rename`, #808): every `PaneInfo` of it
+    /// carries `label` from now on, `""` included. `pane-not-found` for a pane the fake does
+    /// not hold.
+    pub fn rename(&self, pane: &PaneId, label: &str) -> Result<(), PaneError> {
+        let mut state = self.lock();
+        if !state.screens.contains_key(pane.as_str()) {
+            return Err(PaneError::PaneNotFound {
+                what: pane.as_str().to_owned(),
+            });
+        }
+        state
+            .labels
+            .insert(pane.as_str().to_owned(), label.to_owned());
+        Ok(())
     }
 
     /// The grid tab's root (the tab with the lowest `number`) of the first workspace
@@ -301,7 +326,7 @@ impl State {
             for tab in &workspace.tabs {
                 tabs.push(tab_json(workspace, tab));
                 for pane in tab.root.panes() {
-                    panes.push(pane_json(workspace, tab, &pane));
+                    panes.push(pane_json(workspace, tab, &pane, &self.labels));
                 }
             }
         }
@@ -335,7 +360,7 @@ impl State {
         json!({"type": "workspace_created",
             "workspace": workspace_json(workspace, w + 1),
             "tab": tab_json(workspace, tab),
-            "root_pane": pane_json(workspace, tab, &root)})
+            "root_pane": pane_json(workspace, tab, &root, &self.labels)})
     }
 
     fn pane_split(&mut self, params: &Map<String, Value>) -> Result<Value, Fault> {
@@ -360,7 +385,8 @@ impl State {
         let new = self.split(target, direction, ratio)?;
         let (w, t) = self.locate(&new).ok_or_else(|| not_found(&new))?;
         let workspace = &self.workspaces[w];
-        Ok(json!({"type": "pane_info", "pane": pane_json(workspace, &workspace.tabs[t], &new)}))
+        let info = pane_json(workspace, &workspace.tabs[t], &new, &self.labels);
+        Ok(json!({"type": "pane_info", "pane": info}))
     }
 
     fn send_text(&mut self, params: &Map<String, Value>) -> Result<Value, Fault> {
@@ -425,6 +451,7 @@ impl State {
             self.workspaces.remove(w);
         }
         self.screens.remove(&pane);
+        self.labels.remove(&pane);
         Ok(ok())
     }
 
@@ -600,9 +627,20 @@ fn tab_json(workspace: &Workspace, tab: &Tab) -> Value {
         "pane_count": tab.root.panes().len(), "agent_status": "idle"})
 }
 
-fn pane_json(workspace: &Workspace, tab: &Tab, pane: &str) -> Value {
-    json!({"pane_id": pane, "workspace_id": workspace.id, "tab_id": tab.id,
-        "focused": false, "cwd": "/scratch", "agent_status": "idle", "revision": 0})
+/// A `PaneInfo`: with the pane's `label` when it has one (`""` included), and no `label`
+/// key when it has none.
+fn pane_json(
+    workspace: &Workspace,
+    tab: &Tab,
+    pane: &str,
+    labels: &BTreeMap<String, String>,
+) -> Value {
+    let mut info = json!({"pane_id": pane, "workspace_id": workspace.id, "tab_id": tab.id,
+        "focused": false, "cwd": "/scratch", "agent_status": "idle", "revision": 0});
+    if let Some(label) = labels.get(pane) {
+        info["label"] = json!(label);
+    }
+    info
 }
 
 fn ok() -> Value {

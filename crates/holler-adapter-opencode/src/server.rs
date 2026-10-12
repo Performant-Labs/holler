@@ -1,47 +1,140 @@
-//! Starting a pane's OpenCode server (`serve`) and asking a server whether it is healthy
-//! (`health`, and `serve`'s own checks).
+//! A pane's OpenCode server: the argv that starts it (`serve_command`), whether the running
+//! one honours its spec (`verify_serving`), and whether a server is healthy (`health`).
 //!
-//! `serve` alone owns the `Child` it spawns until it returns. Its boot poll checks
-//! `try_wait` after each health try, so a child that exits first is reaped there. On the
-//! deadline it kills the child's process group and then waits on the child itself. Only on
-//! success does the `Child` move to a detached thread, which is then its one owner and waits
-//! on it once. So every child is reaped exactly once, and the server is never killed by the
-//! adapter once it is up: it outlives the CLI that started it.
+//! The adapter starts no server (#802). The host adapter's `run` starts the argv in the
+//! pane's tmux session, in the pane spec's directory, and its `stop_owned` stops it; the
+//! launch engine waits for its health. So nothing here spawns, waits on or signals a
+//! process.
+//!
+//! The pane's OpenCode agent is the server's `default_agent`, set once, when it starts
+//! (#642 part 3). `opencode serve` has no agent option, so the argv sets it through
+//! `OPENCODE_CONFIG_CONTENT`, which OpenCode merges over every config file. OpenCode does not
+//! refuse an unusable default agent at start (a server started with a subagent, a hidden agent
+//! or an unknown key answers healthy), so the running server is asked before any session is
+//! made on it.
 
-use std::os::unix::process::CommandExt;
-use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use holler_pane::{PaneError, PaneName};
-use serde_json::Value;
+use holler_pane::error::RefusalCode;
+use holler_pane::{AgentKey, Argv, PaneError, ServeSpec};
+use serde_json::{json, Value};
 
-use crate::http::{self, HttpError, Reply};
-use crate::{budget, deadline_after, excerpt, exec, json_of, one_line};
-use crate::{OpenCodeConfig, ProcessEnv, OP_SERVE};
+use crate::http::{self, Reply};
+use crate::{json_of, string_at, Call, OpenCodeConfig, OpenCodeHarness};
+use crate::{GET_AGENT, GET_CONFIG, OP_VERIFY_SERVING};
+
+/// `agent-unusable`: `verify_serving` of a spec whose agent the running server does not run
+/// as its default: the variable did not reach the server, or OpenCode has no agent of that
+/// name, or the agent is a subagent or hidden, which OpenCode refuses as a default agent.
+/// The adapter's own open code (#642 part 3), distinct from `agent-unsupported`, which stays
+/// the answer of a harness that cannot apply an agent at all. Refusal, exit 3.
+pub const AGENT_UNUSABLE: RefusalCode = RefusalCode::from_static("agent-unusable");
 
 /// The route a health check asks.
 const HEALTH: &str = "/global/health";
 
-/// The least time from the start of one of `serve`'s boot health tries to the start of the
-/// next (the brief: every 100-200 ms). A try that takes longer, up to `boot_try` when its GET
-/// hangs in the boot race, is followed at once.
-const BOOT_INTERVAL: Duration = Duration::from_millis(150);
+/// The variable whose JSON OpenCode merges over every config file: the server's
+/// `default_agent` travels in it.
+const CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
 
-/// How long the `kill` of a server that never came up may take.
-const KILL_BOUND: Duration = Duration::from_secs(1);
+/// `HarnessPort::serve_command`: `<env prefix> <opencode_bin> serve --port P --hostname
+/// 127.0.0.1 <serve_args>`. The prefix is the TUI's ([`crate::ProcessEnv::prefix`]) for a
+/// spec without an agent, and the TUI's plus the one pair [`default_agent`] for a spec with
+/// one ([`crate::ProcessEnv::prefix_with`]), after the prefix's own words, so the pair
+/// replaces a same-named configured pair and an inherited value. The server listens on the
+/// loopback address only, and the pane's name is not on the argv: the host runs it in the
+/// pane's own tmux session and directory. Pure: it reads the configuration and the spec and
+/// nothing else.
+pub(crate) fn serve_command(
+    config: &OpenCodeConfig,
+    port: u16,
+    spec: &ServeSpec,
+) -> Result<Argv, PaneError> {
+    let pairs: Vec<(String, String)> = spec.agent.iter().map(default_agent).collect();
+    let mut argv = config.env.prefix_with(&pairs);
+    argv.extend([
+        config.bin()?.to_owned(),
+        "serve".to_owned(),
+        "--port".to_owned(),
+        port.to_string(),
+        "--hostname".to_owned(),
+        "127.0.0.1".to_owned(),
+    ]);
+    argv.extend(config.serve_args.iter().cloned());
+    Ok(Argv::new(argv))
+}
 
-/// `HarnessPort::serve`: start the server for `name` on `port` and return its pid, which is
-/// also its process group id.
-pub(crate) fn serve(config: &OpenCodeConfig, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-    let deadline = deadline_after(config.timeouts.call);
-    refuse_a_held_port(port, budget(config.timeouts.health, deadline))?;
-    let dir = (config.workdir)(name)?;
-    let mut child = start(config, port, &dir)?;
-    wait_until_up(&mut child, name, port, deadline, config.timeouts.boot_try)?;
-    let pid = child.id();
-    reap_when_it_exits(child);
-    Ok(pid)
+/// The pair that makes `key` the server's default agent: `OPENCODE_CONFIG_CONTENT` holding the
+/// compact JSON `{"default_agent":KEY}`, and nothing else: never an agent's definition, since
+/// tmux refuses a command of about 20,000 bytes.
+fn default_agent(key: &AgentKey) -> (String, String) {
+    let content = json!({ "default_agent": key.as_str() });
+    (CONFIG_CONTENT.to_owned(), content.to_string())
+}
+
+/// `HarnessPort::verify_serving`. A spec without an agent is `Ok` with nothing sent: its argv
+/// applies none, so the server keeps its own default. For a spec with `key`, within one
+/// call's bound, in this order: `GET /config` must answer an object whose `default_agent` is
+/// `key`, which proves the variable reached the server (a server it did not reach runs as
+/// `build`, which cannot dispatch subagents); then `GET /agent` must list `key` as an agent
+/// OpenCode takes as a default ([`usable`]). A server that does not is [`AGENT_UNUSABLE`], in
+/// one line naming the key and the reason and quoting no reply. A reply that is not the JSON
+/// a step needs (the web app's page answers an unserved route with a `200`) is `unavailable`.
+pub(crate) fn verify_serving(
+    harness: &OpenCodeHarness,
+    port: u16,
+    spec: &ServeSpec,
+) -> Result<(), PaneError> {
+    let Some(key) = &spec.agent else {
+        return Ok(());
+    };
+    let key = key.as_str();
+    let call = harness.call(port, OP_VERIFY_SERVING);
+    let reply = call.send(GET_CONFIG, GET_CONFIG.label, None)?;
+    let config = json_of(&reply)
+        .filter(Value::is_object)
+        .ok_or_else(|| call.unexpected(GET_CONFIG, &reply, "an object"))?;
+    if string_at(Some(&config), "default_agent") != Some(key) {
+        return Err(unusable(format!("the server's default agent is not {key}")));
+    }
+    let reply = call.send(GET_AGENT, GET_AGENT.label, None)?;
+    let agents = json_of(&reply);
+    match agents.as_ref().and_then(Value::as_array) {
+        Some(agents) => usable(&call, &reply, agents, key),
+        None => Err(call.unexpected(GET_AGENT, &reply, "a list of agents")),
+    }
+}
+
+/// Whether the `GET /agent` list `agents` holds `key` as an agent OpenCode takes as a default
+/// agent. That is OpenCode's own rule, which refuses a missing agent, one whose `mode` is
+/// `subagent` and a hidden one, and nothing else: `primary` and `all` (what an agent defined in
+/// a config without a `mode` gets) both pass. `hidden` counts only when it is `true`, since
+/// OpenCode leaves it out otherwise. An element named `key` with no string `mode` is not the
+/// JSON the step needs: `unavailable`.
+fn usable(call: &Call, reply: &Reply, agents: &[Value], key: &str) -> Result<(), PaneError> {
+    let Some(agent) = agents
+        .iter()
+        .find(|agent| string_at(Some(agent), "name") == Some(key))
+    else {
+        return Err(unusable(format!("no agent named {key}")));
+    };
+    match string_at(Some(agent), "mode") {
+        None => Err(call.unexpected(GET_AGENT, reply, "agents with a string mode")),
+        Some("subagent") => Err(unusable(format!("agent {key} is a subagent"))),
+        Some(_) if agent.get("hidden") == Some(&Value::Bool(true)) => {
+            Err(unusable(format!("agent {key} is hidden")))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// [`AGENT_UNUSABLE`] with `message`, which names the key (a name, never a secret: I7) and the
+/// reason, and quotes no reply.
+fn unusable(message: String) -> PaneError {
+    PaneError::Refused {
+        code: AGENT_UNUSABLE,
+        message,
+    }
 }
 
 /// Whether the server on `port` answers `GET /global/health` with `{"healthy": true}`
@@ -60,130 +153,4 @@ fn is_healthy(reply: &Reply) -> bool {
         .and_then(|health| health.get("healthy"))
         .and_then(Value::as_bool)
         == Some(true)
-}
-
-/// `serve`'s first step, one health GET. Only a refusal (nothing listens) lets `serve` go
-/// on. A server that answers holds the port, and `serve` never adopts one (decision 2); a
-/// frozen one is `timeout`.
-fn refuse_a_held_port(port: u16, within: Duration) -> Result<(), PaneError> {
-    let what = match http::request(port, "GET", HEALTH, None, within) {
-        Err(HttpError::Refused) => return Ok(()),
-        Err(HttpError::TimedOut) => return Err(timeout()),
-        Ok(reply) if is_healthy(&reply) => {
-            format!("port {port} is in use: a harness server already answers there")
-        }
-        Ok(reply) => format!(
-            "port {port} is in use: GET {HEALTH} answered {}, not a healthy harness server: \"{}\"",
-            reply.status,
-            excerpt(&reply.body)
-        ),
-        Err(HttpError::Garbled(why)) => {
-            format!("cannot serve port {port}: GET {HEALTH}: {}", one_line(&why))
-        }
-    };
-    Err(PaneError::Unavailable { what })
-}
-
-/// Spawn `<opencode_bin> serve --port P --hostname 127.0.0.1 <serve_args>` in `dir`, in a
-/// process group of its own (so its pgid is its pid), with stdin, stdout and stderr null
-/// and the environment `config.env` gives.
-fn start(config: &OpenCodeConfig, port: u16, dir: &Path) -> Result<Child, PaneError> {
-    let port_arg = port.to_string();
-    let mut command = Command::new(&config.opencode_bin);
-    command
-        .args([
-            "serve",
-            "--port",
-            port_arg.as_str(),
-            "--hostname",
-            "127.0.0.1",
-        ])
-        .args(&config.serve_args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0);
-    if let ProcessEnv::Isolated(vars) = &config.env {
-        command.env_clear().envs(vars.iter().map(|(k, v)| (k, v)));
-    }
-    command.spawn().map_err(|error| PaneError::Unavailable {
-        what: one_line(&format!(
-            "cannot start the harness server {} in {}: {error}",
-            config.opencode_bin.display(),
-            dir.display()
-        )),
-    })
-}
-
-/// Ask the fresh server whether it is healthy, one `GET /global/health` of at most
-/// `boot_try` per try, the tries starting at least [`BOOT_INTERVAL`] apart, until it is or
-/// `deadline` passes. Nothing else is sent before the first healthy answer: a request sent
-/// while the server boots can be accepted and never answered
-/// (opencode-pane-spike.md:198-201).
-fn wait_until_up(
-    child: &mut Child,
-    name: &PaneName,
-    port: u16,
-    deadline: Instant,
-    boot_try: Duration,
-) -> Result<(), PaneError> {
-    loop {
-        let tried = Instant::now();
-        let up = healthy(port, budget(boot_try, deadline));
-        // A healthy answer counts only while the child still runs: it must be this server's.
-        match child.try_wait() {
-            Ok(None) if up => return Ok(()),
-            Ok(None) => {}
-            Ok(Some(status)) => return Err(exited(name, port, status)),
-            Err(error) => {
-                stop(child);
-                return Err(PaneError::Unavailable {
-                    what: one_line(&format!(
-                        "cannot watch the harness server for {name} on port {port}: {error}"
-                    )),
-                });
-            }
-        }
-        let next = tried + BOOT_INTERVAL;
-        if next >= deadline {
-            stop(child);
-            return Err(timeout());
-        }
-        std::thread::sleep(next.saturating_duration_since(Instant::now()));
-    }
-}
-
-/// What `serve` answers when the server exits before it is healthy (`try_wait` has reaped
-/// it).
-fn exited(name: &PaneName, port: u16, status: ExitStatus) -> PaneError {
-    PaneError::Unavailable {
-        what: format!(
-            "the harness server for {name} on port {port} exited before it answered ({status})"
-        ),
-    }
-}
-
-/// Kill what `serve` started and reap it: SIGKILL its process group (the server's own
-/// children too), then the child itself in case the group kill failed, then wait on it.
-fn stop(child: &mut Child) {
-    let _ = exec::kill_group(child.id(), OP_SERVE, KILL_BOUND);
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-/// Hand a server that is up to a detached thread that waits on it once, so a long-lived
-/// caller keeps no zombie. Nothing kills the server here.
-fn reap_when_it_exits(mut child: Child) {
-    let _ = std::thread::Builder::new()
-        .name("opencode-serve-reaper".to_owned())
-        .spawn(move || {
-            let _ = child.wait();
-        });
-}
-
-fn timeout() -> PaneError {
-    PaneError::Timeout {
-        op: OP_SERVE.to_owned(),
-    }
 }

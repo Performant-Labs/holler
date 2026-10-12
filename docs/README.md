@@ -34,5 +34,6 @@ Index of everything under `docs/`.
 ## Guidance
 
 - [**orchestrating.md**](orchestrating.md) — the orchestrator pattern: dispatch with `say`, don't poll `roster`, block on a deterministic `wait`, redirect with `interrupt`, resolve with `answer` (issue #142).
+- [**pane-control.md**](pane-control.md) — the operator guide for `holler pane` and `holler profile`: the rule that only pane verbs change a pane, every verb, reading `pane list` and `doctor`, profiles and `profile apply`, grid notation, the JSON envelope and exit codes, the migration and cutover from the launcher's files, and the rollback to `scripts/pane-restart` (epic #633, issue #652).
 - [**guidance-effective-agent-monitoring.md**](guidance-effective-agent-monitoring.md) — how to monitor a body/agent effectively (operating guidance, not a protocol or an ADR).
 - [**setup-wizard.md**](setup-wizard.md) — watching multiple attach-mode sessions in one local [Herdr](https://herdr.dev) workspace: plain `opencode attach` panes (not `herdr-mirror`), and the config-driven setup wizard (installs Herdr itself, then optionally configures and launches a workspace) that automates it.

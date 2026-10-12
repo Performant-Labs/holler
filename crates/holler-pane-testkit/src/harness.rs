@@ -5,19 +5,22 @@
 //! The fake passes the `HarnessPort` conformance suite
 //! ([`crate::conformance::harness`]). What only the fake has is fault injection
 //! ([`FakeHarness::faults`]), switches for two quirks of raw OpenCode ([`Quirk`]), a data
-//! directory per port, the scenarios the port cannot cause (a frozen or killed server, a
-//! session another client creates or deletes, a person moving the TUI, a TUI that exits)
-//! and the inspection of servers, TUIs and aborts.
+//! directory per port, the scenarios the port cannot cause (a server started from the argv
+//! `serve_command` built, a frozen or killed server, a session another client creates or
+//! deletes, a person moving the TUI, a TUI that exits) and the inspection of servers, the
+//! specs asked for, TUIs and aborts.
 //!
-//! The host and harness fakes share no state. `FakeHost::stop_owned` does not stop a
-//! server of this fake, and a harness pid is never in `FakeHost::ps`. A test that needs
-//! the two to agree drives both, e.g. with a `HostPort` wrapper whose `stop_owned` also
-//! calls [`FakeHarness::kill`].
+//! The host and harness fakes share no state: `FakeHost::run` of a server's argv starts no
+//! server of this fake, `FakeHost::stop_owned` stops none, and `FakeHost::ps` never lists a
+//! harness pid. A test that needs the two to agree (#802: the server is a process of the
+//! pane's tmux session) drives both with a `HostPort` wrapper whose `run` also calls
+//! [`FakeHarness::start_server`] and whose `stop_owned` also calls [`FakeHarness::kill`].
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::error::RefusalCode;
+use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 
 use crate::fault::{FaultSwitch, PortOp};
 
@@ -27,11 +30,23 @@ const DEFAULT_DIR: &str = "default";
 /// The first pid the fake mints; later ones count up from it.
 const FIRST_PID: u32 = 20_000;
 
+/// The program of every argv [`FakeHarness::serve_command`] builds, which no real program
+/// is, and its flags, each followed by its value: [`FakeHarness::start_server`] reads them.
+const SERVER_PROGRAM: &str = "holler-fake-harness-server";
+const PANE_FLAG: &str = "--pane";
+const PORT_FLAG: &str = "--port";
+const AGENT_FLAG: &str = "--agent";
+
+/// `agent-mismatch`: the fake's [`HarnessPort::verify_serving`] of a spec whose agent is not
+/// the one the running server was started with. The fake's own open code: a refusal, exit 3.
+pub const AGENT_MISMATCH: RefusalCode = RefusalCode::from_static("agent-mismatch");
+
 /// A method of the `HarnessPort` port, as a fault targets it and the call log records
 /// it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HarnessOp {
-    Serve,
+    ServeCommand,
+    VerifyServing,
     Health,
     CreateSession,
     ListSessions,
@@ -44,7 +59,8 @@ pub enum HarnessOp {
 impl PortOp for HarnessOp {
     fn as_str(self) -> &'static str {
         match self {
-            HarnessOp::Serve => "harness.serve",
+            HarnessOp::ServeCommand => "harness.serve_command",
+            HarnessOp::VerifyServing => "harness.verify_serving",
             HarnessOp::Health => "harness.health",
             HarnessOp::CreateSession => "harness.create_session",
             HarnessOp::ListSessions => "harness.list_sessions",
@@ -84,10 +100,12 @@ pub enum ServerState {
 /// What [`FakeHarness::server`] reports about the server on a port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerView {
-    /// The pane it was served for.
+    /// The pane it was started for.
     pub name: PaneName,
     pub pid: u32,
     pub state: ServerState,
+    /// The agent its argv named, which it runs as (`None`: the server's default).
+    pub agent: Option<AgentKey>,
 }
 
 /// What [`FakeHarness::tui`] reports about the TUI in a pane.
@@ -101,7 +119,8 @@ pub struct TuiView {
 
 /// An in-memory `HarnessPort` modelled on the OpenCode spike.
 ///
-/// It holds the servers by port, a data directory per port, the sessions of each data
+/// It holds the servers by port (each with the agent it runs as), the specs
+/// `serve_command` was asked for, a data directory per port, the sessions of each data
 /// directory in creation order, the TUI of each pane, the quirks that are on and the
 /// aborts the servers acknowledged. Every port shares the data directory `"default"`,
 /// as the live fleet's servers share one (opencode-pane-spike.md:75-77), until
@@ -109,16 +128,18 @@ pub struct TuiView {
 ///
 /// A call that *reaches* a port goes on when the server there runs. When the server is
 /// frozen, the call answers `timeout` with the method's [`HarnessOp`] as its `op`, the
-/// shape a wedged port answers; when it was killed or never served, the call answers
+/// shape a wedged port answers; when it was killed or never started, the call answers
 /// `unavailable` ("the harness server on port N"). Each method, in check order:
 ///
-/// - `serve(name, port)`: on a frozen server, `timeout`; on one running for `name`, its
-///   pid (idempotent); on one running for another pane, `unavailable` (the port is in
-///   use). Otherwise it starts a server with a new pid, counted from 20 000 and never
-///   reused. It creates no session: a fresh server has none
-///   (opencode-pane-spike.md:69-70).
+/// - `serve_command(name, port, spec)`: pure. It records `spec`
+///   ([`FakeHarness::serve_specs`]) and returns an argv that describes the server,
+///   `holler-fake-harness-server --pane <name> --port <port>`, then `--agent <key>` when
+///   the spec has one. It starts nothing; [`FakeHarness::start_server`] starts the server
+///   such an argv describes, as a host's `run` would.
+/// - `verify_serving(port, spec)` reaches the port. `Ok` when `spec.agent` is the agent the
+///   running server was started with; otherwise the fake's refusal [`AGENT_MISMATCH`].
 /// - `health(port)`: `true` when the server runs, `false` when it is frozen, killed or
-///   never served, as a timed request that times out or is refused would tell.
+///   never started, as a timed request that times out or is refused would tell.
 /// - `create_session(port)` and `list_sessions(port)` reach the port, then mint an id
 ///   (`ses_` and 26 hex digits, 30 characters; treat it as opaque) in the port's data
 ///   directory, or list that directory's sessions in creation order.
@@ -150,6 +171,8 @@ pub struct FakeHarness {
 #[derive(Default)]
 struct World {
     servers: HashMap<u16, ServerView>,
+    /// Every spec `serve_command` was asked for, oldest first.
+    serve_specs: Vec<ServeSpec>,
     /// The ports given a data directory of their own.
     dirs: HashMap<u16, String>,
     /// The session ids of each data directory, in creation order.
@@ -196,21 +219,32 @@ impl FakeHarness {
         self.lock().dirs.insert(port, dir.to_owned());
     }
 
+    /// Start the server `argv` describes, as a host's `run` of it would; `None`, starting
+    /// nothing, for any argv `serve_command` does not build. On the argv's port: a frozen
+    /// server is `timeout` (it holds the port); one running for the argv's pane answers its
+    /// pid and keeps its agent (idempotent); one running for another pane is `unavailable`
+    /// (the port is in use). Otherwise a server starts for that pane with the argv's agent, a
+    /// new pid (from 20 000, never reused) and no session (opencode-pane-spike.md:69-70).
+    pub fn start_server(&self, argv: &Argv) -> Option<Result<u32, PaneError>> {
+        let (name, port, agent) = described(argv)?;
+        Some(self.lock().start(name, port, agent))
+    }
+
     /// SIGSTOP the server on `port`: it is frozen. `unavailable` when no server was
-    /// ever served on `port`, or it was killed.
+    /// ever started on `port`, or it was killed.
     pub fn freeze(&self, port: u16) -> Result<(), PaneError> {
         self.lock().signal(port, ServerState::Frozen)
     }
 
     /// SIGCONT the server on `port`: it runs again. `unavailable` when no server was
-    /// ever served on `port`, or it was killed.
+    /// ever started on `port`, or it was killed.
     pub fn thaw(&self, port: u16) -> Result<(), PaneError> {
         self.lock().signal(port, ServerState::Running)
     }
 
     /// SIGKILL the server on `port`: it is dead, its sessions stay in the data
     /// directory, and a TUI attached to it keeps its screen. `Ok` on a server already
-    /// killed; `unavailable` when no server was ever served on `port`.
+    /// killed; `unavailable` when no server was ever started on `port`.
     pub fn kill(&self, port: u16) -> Result<(), PaneError> {
         self.lock().signal(port, ServerState::Killed)
     }
@@ -251,10 +285,15 @@ impl FakeHarness {
             .ok_or_else(|| no_tui(pane))
     }
 
-    /// The server last served on `port`, or `None` when none ever was. A launch test
-    /// (#644) reads it to see which pane's server runs on a port, with which pid.
+    /// The server last started on `port`, or `None` when none ever was. A launch test
+    /// (#644) reads it to see which pane's server runs on a port, with which pid and agent.
     pub fn server(&self, port: u16) -> Option<ServerView> {
         self.lock().servers.get(&port).cloned()
+    }
+
+    /// Every spec a successful `serve_command` was asked for, oldest first (#802).
+    pub fn serve_specs(&self) -> Vec<ServeSpec> {
+        self.lock().serve_specs.clone()
     }
 
     /// The TUI in `pane`, or `None` when there is none.
@@ -279,9 +318,29 @@ impl Default for FakeHarness {
 }
 
 impl HarnessPort for FakeHarness {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        self.faults.enter(HarnessOp::Serve)?;
-        self.lock().serve(name, port)
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        self.faults.enter(HarnessOp::ServeCommand)?;
+        self.lock().serve_specs.push(spec.clone());
+        Ok(description(name, port, spec.agent.as_ref()))
+    }
+
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.faults.enter(HarnessOp::VerifyServing)?;
+        let world = self.lock();
+        world.reach(port, HarnessOp::VerifyServing)?;
+        let running = world.servers.get(&port).and_then(|s| s.agent.as_ref());
+        if running == spec.agent.as_ref() {
+            return Ok(());
+        }
+        Err(PaneError::Refused {
+            code: AGENT_MISMATCH,
+            message: format!("the server on port {port} does not run the agent the spec asks for"),
+        })
     }
 
     fn health(&self, port: u16) -> Result<bool, PaneError> {
@@ -370,26 +429,32 @@ impl World {
         }
     }
 
-    /// `serve`'s work, past the fault switch.
-    fn serve(&mut self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
+    /// `start_server`'s work, once the argv was read as a server's.
+    fn start(
+        &mut self,
+        name: PaneName,
+        port: u16,
+        agent: Option<AgentKey>,
+    ) -> Result<u32, PaneError> {
         if let Some(server) = self.servers.get(&port) {
             match server.state {
-                ServerState::Running if server.name == *name => return Ok(server.pid),
+                ServerState::Running if server.name == name => return Ok(server.pid),
                 ServerState::Running => {
                     return Err(PaneError::Unavailable {
                         what: format!("port {port} is in use by the server of {}", server.name),
                     })
                 }
-                ServerState::Frozen => return Err(frozen(HarnessOp::Serve)),
+                ServerState::Frozen => return Err(frozen(HarnessOp::ServeCommand)),
                 ServerState::Killed => {}
             }
         }
         let pid = FIRST_PID + self.pids_minted;
         self.pids_minted += 1;
         let server = ServerView {
-            name: name.clone(),
+            name,
             pid,
             state: ServerState::Running,
+            agent,
         };
         self.servers.insert(port, server);
         Ok(pid)
@@ -470,6 +535,38 @@ impl World {
         tui.shown = session.map(str::to_owned);
         Ok(())
     }
+}
+
+/// The argv `serve_command` builds: the fake's program, the pane, the port, and the agent
+/// when there is one, each value an element of its own.
+fn description(name: &PaneName, port: u16, agent: Option<&AgentKey>) -> Argv {
+    let mut argv = vec![
+        SERVER_PROGRAM.to_owned(),
+        PANE_FLAG.to_owned(),
+        name.as_str().to_owned(),
+        PORT_FLAG.to_owned(),
+        port.to_string(),
+    ];
+    if let Some(agent) = agent {
+        argv.extend([AGENT_FLAG.to_owned(), agent.as_str().to_owned()]);
+    }
+    Argv::new(argv)
+}
+
+/// The pane, port and agent of an argv [`description`] built; `None` for any other argv.
+fn described(argv: &Argv) -> Option<(PaneName, u16, Option<AgentKey>)> {
+    let [program, pane_flag, pane, port_flag, port, rest @ ..] = argv.as_slice() else {
+        return None;
+    };
+    if program != SERVER_PROGRAM || pane_flag != PANE_FLAG || port_flag != PORT_FLAG {
+        return None;
+    }
+    let agent = match rest {
+        [] => None,
+        [flag, key] if flag == AGENT_FLAG => Some(AgentKey::parse(key).ok()?),
+        _ => return None,
+    };
+    Some((PaneName::parse(pane).ok()?, port.parse().ok()?, agent))
 }
 
 /// What a call of `op` answers when the server it reaches is frozen: the `timeout` a

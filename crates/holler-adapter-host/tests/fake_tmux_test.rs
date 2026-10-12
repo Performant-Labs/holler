@@ -63,12 +63,12 @@ const MEMBER_UNTIL_KILL: &str = r#"case "$*" in
 *) exit 0 ;;
 esac"#;
 
-/// Call `op` on `C1`; `run` runs `sleep 30`, `ensure_session` works in `cwd`.
+/// Call `op` on `C1`; `run` runs `sleep 30` and `ensure_session` works, in `cwd`.
 fn call(host: &dyn HostPort, op: HostOp, cwd: &str) -> Result<(), PaneError> {
     let n = name(C1);
     match op {
         HostOp::EnsureSession => host.ensure_session(&n, cwd),
-        HostOp::Run => host.run(&n, &argv(&["sleep", "30"])),
+        HostOp::Run => host.run(&n, cwd, &argv(&["sleep", "30"])),
         HostOp::StopOwned => host.stop_owned(&n),
         HostOp::Ps => host.ps(&n).map(|_| ()),
     }
@@ -131,7 +131,7 @@ fn a_missing_session_is_pane_not_found_for_run_and_ps_and_ok_for_stop() {
             matches!(ps, Err(PaneError::PaneNotFound { .. })),
             "ps, {err:?}: {ps:?}"
         );
-        let run = host.run(&name(C1), &argv(&["sleep", "30"]));
+        let run = host.run(&name(C1), &fake.dir_str(), &argv(&["sleep", "30"]));
         assert!(
             matches!(run, Err(PaneError::PaneNotFound { .. })),
             "run, {err:?}: {run:?}"
@@ -151,7 +151,14 @@ fn other_tmux_failures_are_unavailable_with_its_line_and_never_the_argv_or_cwd()
         let host = host(&fake);
         let results = [
             ("ps", host.ps(&name(C1)).map(|_| ())),
-            ("run", host.run(&name(C1), &argv(&["prog", SENTINEL_ARGV]))),
+            (
+                "run",
+                host.run(
+                    &name(C1),
+                    &cwd.to_string_lossy(),
+                    &argv(&["prog", SENTINEL_ARGV]),
+                ),
+            ),
             ("stop_owned", host.stop_owned(&name(C1))),
             (
                 "ensure_session",
@@ -169,24 +176,19 @@ fn other_tmux_failures_are_unavailable_with_its_line_and_never_the_argv_or_cwd()
 
 // --- AC 6d: the argv passes exactly, in three spawns ---
 
+/// #802: the session's existence is read first (so `run` checks the session before the
+/// argv), then `new-window` starts the program in the directory `run` was given (`-c <cwd>`,
+/// no longer the session's own), then the tag.
 #[test]
 fn run_passes_the_argv_exactly_in_three_tmux_calls() {
     let fake = Fake::new(&run_ok());
     let sock = fake.sock_str();
+    let cwd = fake.dir_str();
     let given = ["prog", "a b", "$(id);x", "-t"];
-    assert_eq!(host(&fake).run(&name(C1), &argv(&given)), Ok(()));
+    assert_eq!(host(&fake).run(&name(C1), &cwd, &argv(&given)), Ok(()));
     let calls = fake.calls();
     assert_eq!(calls.len(), 3, "the read, new-window, the tag: {calls:?}");
-    let read = [
-        "-S",
-        &sock,
-        "list-panes",
-        "-t",
-        "=demo-c1r1:",
-        "-F",
-        "#{session_path}",
-    ];
-    assert_eq!(calls[0], args(&read));
+    assert_eq!(subcommand(&calls[0]), "list-panes", "the read: {calls:?}");
     let mut window = args(&[
         "-S",
         &sock,
@@ -196,7 +198,7 @@ fn run_passes_the_argv_exactly_in_three_tmux_calls() {
         "-F",
         "#{pane_pid} #{window_id}",
         "-c",
-        "#{session_path}",
+        &cwd,
         "-t",
         "=demo-c1r1:",
         "--",
@@ -235,7 +237,10 @@ fn run_passes_the_argv_exactly_in_three_tmux_calls() {
 #[test]
 fn run_prefixes_a_one_element_argv_with_env() {
     let fake = Fake::new(&run_ok());
-    assert_eq!(host(&fake).run(&name(C1), &argv(&["prog"])), Ok(()));
+    assert_eq!(
+        host(&fake).run(&name(C1), &fake.dir_str(), &argv(&["prog"])),
+        Ok(())
+    );
     let window = &fake.calls()[1];
     assert_eq!(
         window[window.len() - 4..],
@@ -248,7 +253,10 @@ fn run_prefixes_a_one_element_argv_with_env() {
 fn run_escapes_a_trailing_semicolon_in_every_element() {
     let fake = Fake::new(&run_ok());
     let given = ["prog", "x;", "y\\;", ";", "kill-server"];
-    assert_eq!(host(&fake).run(&name(C1), &argv(&given)), Ok(()));
+    assert_eq!(
+        host(&fake).run(&name(C1), &fake.dir_str(), &argv(&given)),
+        Ok(())
+    );
     let window = &fake.calls()[1];
     let program = window.iter().position(|a| a == "env").unwrap() + 2;
     let escaped = ["prog", "x\\;", "y\\\\;", "\\;", "kill-server"];
@@ -276,7 +284,7 @@ exit 0"#
         "the new-session path"
     );
     assert_eq!(host.ensure_session(&n, "."), Ok(()), "the has-session path");
-    assert_eq!(host.run(&n, &argv(&["prog"])), Ok(()));
+    assert_eq!(host.run(&n, &fake.dir_str(), &argv(&["prog"])), Ok(()));
     assert_eq!(host.ps(&n), Ok(vec![101]));
     assert_eq!(host.stop_owned(&n), Ok(()));
     let calls = fake.calls();
@@ -437,7 +445,11 @@ fn ensure_session_escapes_the_cwd_for_tmux() {
 #[test]
 fn run_refuses_an_assignment_as_argv0_without_echoing_it() {
     let fake = Fake::new(SAY_DIR);
-    let result = host(&fake).run(&name(C1), &argv(&["HLR_SENTINEL_641=s3cr3t", "x"]));
+    let result = host(&fake).run(
+        &name(C1),
+        &fake.dir_str(),
+        &argv(&["HLR_SENTINEL_641=s3cr3t", "x"]),
+    );
     let Err(error @ PaneError::Usage { .. }) = result else {
         panic!("expected Usage, got {result:?}");
     };
@@ -455,48 +467,98 @@ fn run_refuses_an_assignment_as_argv0_without_echoing_it() {
     assert_eq!(subcommand(&calls[0]), "list-panes");
 
     let fake = Fake::new(&answer("", "can't find session: demo-c1r1\n", 1));
-    let result = host(&fake).run(&name(C1), &argv(&["HLR_SENTINEL_641=s3cr3t"]));
+    let result = host(&fake).run(
+        &name(C1),
+        &fake.dir_str(),
+        &argv(&["HLR_SENTINEL_641=s3cr3t"]),
+    );
     assert!(
         matches!(result, Err(PaneError::PaneNotFound { .. })),
         "{result:?}"
     );
 }
 
+/// #802 (decision 6, plan review W-1): `run` starts nothing unless its directory is an
+/// absolute path to an existing directory: an empty, relative or missing one is `usage`,
+/// before any `new-window` (tmux would start the program in `$HOME`), and the message does
+/// not echo it.
 #[test]
-fn run_refuses_a_session_directory_that_is_relative_missing_or_empty() {
-    let reads = [
-        "printf 'hlr-rel-641\\n'",
-        "printf '%s\\n' \"$D/hlr-gone-641\"",
-        "exit 0",
-    ];
-    for read in reads {
-        let fake = Fake::new(read);
-        let what = unavailable(host(&fake).run(&name(C1), &argv(&["prog"])), read);
+fn run_refuses_a_cwd_that_is_empty_relative_or_missing() {
+    let fake = Fake::new(&run_ok());
+    let missing = fake.path("hlr-gone-802").to_string_lossy().into_owned();
+    for cwd in ["", "hlr-rel-802", "./hlr-rel-802", missing.as_str()] {
+        let result = host(&fake).run(&name(C1), cwd, &argv(&["prog"]));
+        let Err(error @ PaneError::Usage { .. }) = &result else {
+            panic!("{cwd:?}: expected usage, got {result:?}");
+        };
+        let text = format!("{error} {error:?}");
         assert!(
-            !what.contains("hlr-rel-641") && !what.contains("hlr-gone-641"),
-            "{what:?}"
+            !text.contains("hlr-rel-802") && !text.contains("hlr-gone-802"),
+            "{cwd:?}: {text}"
+        );
+    }
+    let windows = fake
+        .calls()
+        .iter()
+        .filter(|c| subcommand(c) == "new-window")
+        .count();
+    assert_eq!(windows, 0, "no window was made: {:?}", fake.calls());
+}
+
+/// #802 AC 4: the directory reaches `new-window -c` escaped like every value the adapter did
+/// not write: `#` doubled (no format expansion) and a trailing `;` escaped.
+#[test]
+fn run_escapes_the_cwd_for_tmux() {
+    for (dir, recorded) in [
+        ("p#S", "p##S"),
+        ("q;", "q\\;"),
+        ("#(touch x)", "##(touch x)"),
+    ] {
+        let fake = Fake::new(&run_ok());
+        // The expected `-c` below joins the fixture's own prefix unescaped, so the prefix
+        // must hold nothing the escape would change (diff gate W-3).
+        assert!(
+            !fake.dir_str().contains(['#', ';']),
+            "fixture prefix {:?}",
+            fake.dir_str()
+        );
+        let cwd = fake.path(dir);
+        fs::create_dir(&cwd).unwrap();
+        let given = cwd.to_string_lossy().into_owned();
+        assert_eq!(
+            host(&fake).run(&name(C1), &given, &argv(&["prog"])),
+            Ok(()),
+            "{dir}"
         );
         let calls = fake.calls();
-        assert_eq!(
-            calls.len(),
-            1,
-            "{read}: the read, and no new-window: {calls:?}"
-        );
-        assert_eq!(subcommand(&calls[0]), "list-panes");
+        let window = calls
+            .iter()
+            .find(|c| subcommand(c) == "new-window")
+            .unwrap_or_else(|| panic!("{dir}: no new-window: {calls:?}"));
+        let want = format!("{}/{recorded}", fake.dir_str());
+        assert_eq!(flag_value(window, "-c"), Some(want.as_str()), "{dir}");
     }
 }
 
+/// `run`'s documented order (#802 narrowing 5, diff gate NV-2): the session, then the argv,
+/// then `cwd`. Every call below breaks all three, so each answer names the first check.
 #[test]
-fn run_checks_the_session_before_the_argv() {
+fn run_checks_the_session_then_the_argv_then_the_cwd() {
     let fake = Fake::new(&answer("", "can't find session: demo-c1r1\n", 1));
-    let result = host(&fake).run(&name(C1), &argv(&[]));
+    let result = host(&fake).run(&name(C1), "", &argv(&[]));
     assert!(
         matches!(result, Err(PaneError::PaneNotFound { .. })),
-        "{result:?}"
+        "a missing session comes before a bad argv and cwd: {result:?}"
     );
     let fake = Fake::new(SAY_DIR);
-    let result = host(&fake).run(&name(C1), &argv(&[]));
-    assert!(matches!(result, Err(PaneError::Usage { .. })), "{result:?}");
+    let result = host(&fake).run(&name(C1), "", &argv(&[]));
+    let Err(PaneError::Usage { message }) = &result else {
+        panic!("expected usage, got {result:?}");
+    };
+    assert!(
+        message.contains("argv") && !message.contains("directory"),
+        "a bad argv comes before a bad cwd: {message}"
+    );
     assert_eq!(fake.calls().len(), 1, "{:?}", fake.calls());
 }
 
@@ -635,7 +697,7 @@ fn a_window_gone_before_its_tag_is_ok_and_signals_nothing() {
     for stderr in ["can't find window: @7\n", "no such window: @7\n"] {
         let fake = tag_fails(stderr);
         assert_eq!(
-            host(&fake).run(&name(C1), &argv(&["prog"])),
+            host(&fake).run(&name(C1), &fake.dir_str(), &argv(&["prog"])),
             Ok(()),
             "{stderr:?}"
         );
@@ -647,7 +709,7 @@ fn a_window_gone_before_its_tag_is_ok_and_signals_nothing() {
 fn a_failed_tag_kills_the_untagged_process() {
     let fake = tag_fails("lost server: protocol error\n");
     unavailable(
-        host(&fake).run(&name(C1), &argv(&["prog"])),
+        host(&fake).run(&name(C1), &fake.dir_str(), &argv(&["prog"])),
         "the tag failed",
     );
     assert_eq!(fake.kills(), ["-s KILL -- -4242"]);
@@ -666,7 +728,10 @@ fn a_malformed_or_out_of_range_new_window_answer_is_unavailable_and_goes_no_furt
     ];
     for out in answers {
         let fake = Fake::new(&queue(&[SAY_DIR.to_owned(), answer(out, "", 0)]));
-        unavailable(host(&fake).run(&name(C1), &argv(&["prog"])), out);
+        unavailable(
+            host(&fake).run(&name(C1), &fake.dir_str(), &argv(&["prog"])),
+            out,
+        );
         assert_eq!(
             fake.calls().len(),
             2,

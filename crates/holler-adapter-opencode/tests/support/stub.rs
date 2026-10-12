@@ -135,7 +135,7 @@ impl Stub {
     /// The next `method path` only answers `status` with a JSON body; later ones answer as
     /// [`Stub::json`] set it, or OpenCode's 404 (a session that goes away between two
     /// requests).
-    #[allow(dead_code)] // #642: used by attach_test.rs only
+    #[allow(dead_code)] // #642: not every test crate uses it
     pub fn json_once(&self, method: &str, path: &str, status: u16, body: &str) {
         let canned = Canned {
             status,

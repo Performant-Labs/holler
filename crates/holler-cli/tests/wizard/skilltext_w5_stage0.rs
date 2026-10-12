@@ -17,7 +17,7 @@ fn flat(rel: &str) -> String {
 }
 
 fn stage0() -> String {
-    let text = flat("agent-skills/setup-wizard/SKILL.md");
+    let text = flat("agent-skills/herdr-setup/SKILL.md");
     let from = text.find("## Stage 0").expect("no Stage 0");
     let rest = &text[from..];
     let to = rest.find("## Stage 1 ").expect("no Stage 1");
@@ -32,7 +32,7 @@ fn stage0_asks_the_new_question() {
 #[test]
 fn old_wording_is_gone_everywhere() {
     for rel in [
-        "agent-skills/setup-wizard/SKILL.md",
+        "agent-skills/herdr-setup/SKILL.md",
         "docs/setup-wizard.md",
         "README.md",
     ] {
@@ -56,7 +56,7 @@ fn stage0_keeps_its_other_rules() {
 
 #[test]
 fn frontmatter_docs_and_readme_use_the_new_question() {
-    let skill = flat("agent-skills/setup-wizard/SKILL.md");
+    let skill = flat("agent-skills/herdr-setup/SKILL.md");
     let front = &skill[..skill.find("# Herdr: M local").unwrap()];
     assert!(front.contains(NEW));
     assert!(flat("docs/setup-wizard.md").contains(&format!("\"{NEW}\"")));

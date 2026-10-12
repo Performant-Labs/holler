@@ -1,6 +1,6 @@
 //! Setup wizard story #729 (epic #726): the per-instance process ledger, `ledger.sh`.
 //!
-//! Runs `agent-skills/setup-wizard/lib/ledger.sh` with `std::process::Command` in temp
+//! Runs `agent-skills/herdr-setup/lib/ledger.sh` with `std::process::Command` in temp
 //! directories. `holler`, `opencode` and `tailscale` are fakes placed first on `PATH`; every
 //! state directory is a fresh temp directory, every process is a throwaway `sleep` started by
 //! a test, and is killed by the pid the ledger recorded (never by name).
@@ -22,7 +22,7 @@ fn repo_root() -> PathBuf {
 const LEDGER_REL: &str = "herdr/setup/wizard-ledger.toml";
 
 fn ledger_sh() -> PathBuf {
-    repo_root().join("agent-skills/setup-wizard/lib/ledger.sh")
+    repo_root().join("agent-skills/herdr-setup/lib/ledger.sh")
 }
 
 /// A scratch world: fakes on `PATH`, plus every pid a test started (killed on drop).

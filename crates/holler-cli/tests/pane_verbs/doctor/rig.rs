@@ -19,7 +19,7 @@ use holler_pane::pane::PaneRole;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
     Actor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane, PaneId, PaneName,
-    PaneStore, Ports, ProfileName,
+    PaneStore, Ports, ProfileName, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -55,6 +55,9 @@ pub struct Seed {
     pub profile: Option<&'static str>,
     /// A data directory of the pane's server's own (default: the shared `"default"`).
     pub data_dir: Option<&'static str>,
+    /// Whether the rig stores a record for the pane (default). An unrecorded seed is a live
+    /// pane with no record: what `pane import` (#650) finds before the cutover.
+    pub recorded: bool,
 }
 
 impl Seed {
@@ -66,7 +69,14 @@ impl Seed {
             role: PaneRole::Agent,
             profile: None,
             data_dir: None,
+            recorded: true,
         }
+    }
+
+    /// A live pane the rig stores no record for (#650).
+    pub fn unrecorded(mut self) -> Self {
+        self.recorded = false;
+        self
     }
 
     pub fn orchestrator(mut self) -> Self {
@@ -130,7 +140,9 @@ impl Rig {
         for (index, seed) in seeds.iter().enumerate() {
             let port = FIRST_PORT + u16::try_from(index).expect("a small fleet");
             let made = make_live(&herdr, &host, &harness, seed, port);
-            records.push(record_of(seed, &made));
+            if seed.recorded {
+                records.push(record_of(seed, &made));
+            }
             live.insert(seed.name, made);
         }
         let actor = Actor::parse("doctor-test").expect("an actor");
@@ -214,7 +226,7 @@ impl Rig {
     pub fn attach_foreign_tui(&self, name: &str) -> String {
         let bare = PaneName::parse("bare-opencode").expect("a pane name");
         self.harness.set_data_dir(FOREIGN_PORT, "foreign");
-        self.harness.serve(&bare, FOREIGN_PORT).expect("serve");
+        start_server(&self.harness, &bare, FOREIGN_PORT);
         let foreign = self
             .harness
             .create_session(FOREIGN_PORT)
@@ -285,6 +297,7 @@ pub fn whole(fix: bool) -> ReconcileRequest<'static> {
         pane: None,
         fix,
         now_ms: NOW,
+        unmanaged_stalled_after_secs: None,
     }
 }
 
@@ -370,7 +383,7 @@ fn make_live(
     if let Some(dir) = seed.data_dir {
         harness.set_data_dir(port, dir);
     }
-    harness.serve(&name, port).expect("serve");
+    start_server(harness, &name, port);
     let session = harness.create_session(port).expect("a session");
     harness
         .attach_tui(&pane.pane_id, port, &session)
@@ -381,6 +394,18 @@ fn make_live(
         port,
         session,
     }
+}
+
+/// Start a harness server on `port` for `name` (setup): the argv `serve_command` builds,
+/// started by the fake's scenario method, as a host's `run` would (#802).
+fn start_server(harness: &FakeHarness, name: &PaneName, port: u16) {
+    let argv = harness
+        .serve_command(name, port, &ServeSpec::default())
+        .expect("serve_command");
+    harness
+        .start_server(&argv)
+        .expect("the fake harness's own argv")
+        .expect("start the server");
 }
 
 fn record_of(seed: &Seed, live: &Live) -> Pane {

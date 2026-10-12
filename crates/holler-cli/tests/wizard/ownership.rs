@@ -1,7 +1,7 @@
 //! #731: the wizard stops, restarts or reports a process only when the instance's own ledger
 //! recorded it and its recorded identity still matches (epic #726).
 //!
-//! Drives `agent-skills/setup-wizard/lib/stop-owned.sh` with a FAKE `ledger.sh` placed in a temp
+//! Drives `agent-skills/herdr-setup/lib/stop-owned.sh` with a FAKE `ledger.sh` placed in a temp
 //! directory and named by `WIZARD_LIB` (the real one belongs to #729). The fake answers
 //! `owns <state_dir> <pid>` and `list <state_dir>` from a plain table kept in the state
 //! directory. A fake `lsof` first on `PATH` reports which pid holds a planned port.
@@ -165,7 +165,7 @@ fn write_exec(p: &Path, body: &str) {
 
 fn script() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../agent-skills/setup-wizard/lib/stop-owned.sh")
+        .join("../../agent-skills/herdr-setup/lib/stop-owned.sh")
 }
 
 fn text(o: &Output) -> String {
@@ -556,7 +556,7 @@ fn restart_prints_the_recorded_command_when_the_session_field_is_empty() {
 /// printed note) until that story's file is in this tree.
 fn real_ledger_lib(env: &Env) -> Option<PathBuf> {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../agent-skills/setup-wizard/lib/ledger.sh");
+        .join("../../agent-skills/herdr-setup/lib/ledger.sh");
     if !src.exists() {
         eprintln!(
             "note: ledger.sh not in this tree yet ({}); skipping",

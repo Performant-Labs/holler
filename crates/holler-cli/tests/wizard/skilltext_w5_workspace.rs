@@ -1,6 +1,6 @@
 //! #810: a named workspace (`workspace` config key), epic #769.
 //!
-//! Plain text assertions over `agent-skills/setup-wizard/SKILL.md` and `docs/setup-wizard.md`.
+//! Plain text assertions over `agent-skills/herdr-setup/SKILL.md` and `docs/setup-wizard.md`.
 //! Nothing here runs a script or touches a host.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // #810
@@ -28,7 +28,7 @@ fn between(text: &str, start: &str, end: &str) -> String {
 }
 
 fn skill() -> String {
-    flat("agent-skills/setup-wizard/SKILL.md")
+    flat("agent-skills/herdr-setup/SKILL.md")
 }
 
 fn has_all(what: &str, text: &str, needles: &[&str]) {

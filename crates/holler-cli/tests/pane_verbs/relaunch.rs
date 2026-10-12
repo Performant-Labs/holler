@@ -11,10 +11,11 @@ use holler_pane::{GridPos, HarnessPort, Pane, PaneError, ProfileSpec};
 use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
+use holler_pane_testkit::host::HostOp;
 
 use crate::launch::rig::{
-    agent, argv, assert_untouched, data_of, error_of, launch_spec, name, occurrences, profile_name,
-    Calls, Rig, Seed, PANE, PORT, STEP,
+    agent, argv, assert_untouched, assert_untouched_after_missing_record, data_of, error_of,
+    launch_spec, name, occurrences, profile_name, Calls, Rig, Seed, PANE, PORT, STEP,
 };
 use crate::verb_harness::parse::assert_spec_flags_accepted;
 
@@ -64,7 +65,7 @@ fn relaunch_fails_on_a_stale_generation() {
         role: PaneRole::Orchestrator,
         ..rig.live(false)
     };
-    rig.after(HarnessOp::Serve, move |f, _| {
+    rig.after_server_start(move |f, _| {
         f.panes.concurrent_put(&theirs).unwrap();
     });
     let run = rig.run(RELAUNCH, Format::Json);
@@ -140,8 +141,11 @@ fn relaunch_refuses_a_pane_of_another_profile() {
     let run = rig.run(&relaunch_with(&["--profile", "demo"]), Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "pane-in-other-profile");
+    // #802: the plan's pure `serve_command` ran; nothing else of the harness did.
+    assert_eq!(run.calls.harness, [HarnessOp::ServeCommand]);
     let reads_only = Calls {
         herdr: Vec::new(),
+        harness: Vec::new(),
         ..run.calls.clone()
     };
     assert_untouched(&reads_only);
@@ -157,6 +161,39 @@ fn relaunch_without_grid_keeps_the_position() {
     let run = rig.run(RELAUNCH, Format::Json);
     data_of(&run);
     assert_eq!(rig.record(PANE).unwrap().herdr, before.herdr);
+    assert_no_close(&run.calls);
+    rig.assert_matches(&run, PANE);
+    rig.assert_no_keystroke();
+}
+
+/// #808 E9, constraint (c): a relaunch in place gets the pane already in the cell, which
+/// carries the label the outside world gave it (the setup wizard labels panes). The record it
+/// writes carries none: `herdr.label` is `None` and its JSON has no `label` key.
+#[test]
+fn relaunch_in_place_of_a_labelled_pane_records_no_label() {
+    let rig = Rig::new();
+    let before = rig.live(false);
+    rig.fakes.herdr.rename(&before.herdr.pane_id, PANE).unwrap();
+    let listed = rig.herdr_pane_at(R2C1).expect("a pane at r2c1");
+    assert_eq!(
+        listed.label.as_deref(),
+        Some(PANE),
+        "Herdr reports the label"
+    );
+    let run = rig.run(RELAUNCH, Format::Json);
+    data_of(&run);
+    let after = rig.record(PANE).unwrap();
+    assert_eq!(
+        after.herdr.pane_id, before.herdr.pane_id,
+        "relaunched in place"
+    );
+    assert_eq!(after.herdr.label, None, "the record carries no label");
+    let stored = serde_json::to_value(&after).unwrap();
+    assert!(
+        stored["herdr"].get("label").is_none(),
+        "no label key: {stored}"
+    );
+    assert_eq!(after.herdr, before.herdr);
     assert_no_close(&run.calls);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
@@ -485,16 +522,26 @@ fn relaunch_leaves_other_panes_alone() {
     rig.assert_no_keystroke();
 }
 
-/// AC 22: until #695, a server that survives the stop fails the relaunch loudly.
+/// AC 22 (#802 AC 8): a server that still answers after `stop_owned` (its TERM, grace and
+/// KILL; here, an unlinked host whose stop leaves the fake server running) fails the relaunch
+/// loudly, and is never adopted: no server argv is run and nothing is recorded.
 #[test]
 fn relaunch_fails_when_the_old_server_survives() {
     let rig = Rig::new().unlinked();
     let before = rig.live(false);
+    let runs_before = rig.fakes.host.runs();
     let run = rig.run(RELAUNCH, Format::Json);
     assert_eq!(run.code, 1, "{run:?}");
     let (code, message) = error_of(&run);
     assert_eq!(code, "unavailable");
     assert!(message.contains("still answers"), "{message}");
+    assert!(!message.contains("#695"), "#695 is closed: {message}");
+    assert_eq!(rig.fakes.host.runs(), runs_before, "nothing new was run");
+    assert!(
+        !run.calls.host.contains(&HostOp::Run),
+        "{:?}",
+        run.calls.host
+    );
     assert_eq!(rig.record(PANE).unwrap().generation, before.generation);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
@@ -507,7 +554,7 @@ fn relaunch_of_a_missing_pane_is_refused() {
     let run = rig.run(RELAUNCH, Format::Json);
     assert_eq!(run.code, 3, "{run:?}");
     assert_eq!(error_of(&run).0, "pane-not-found");
-    assert_untouched(&run.calls);
+    assert_untouched_after_missing_record(&run.calls);
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
@@ -544,7 +591,7 @@ fn relaunch_without_agent_keeps_the_stored_key() {
     theirs.opencode_agent = Some(agent("orchestrator"));
     rig.fakes.panes.concurrent_put(&theirs).unwrap();
     let run = rig.run(RELAUNCH, Format::Json);
-    data_of(&run);
+    let data = data_of(&run);
     assert_eq!(
         rig.record(PANE)
             .unwrap()
@@ -553,6 +600,8 @@ fn relaunch_without_agent_keeps_the_stored_key() {
             .map(|key| key.as_str()),
         Some("orchestrator")
     );
+    // #644 part 2: the result reports the agent the pane was recorded with.
+    assert_eq!(data["agent"], "orchestrator", "{data}");
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }
@@ -568,7 +617,7 @@ fn relaunch_with_agent_replaces_the_stored_key() {
         &relaunch_with(&["--agent", "feature-implementor"]),
         Format::Json,
     );
-    data_of(&run);
+    let data = data_of(&run);
     assert_eq!(
         rig.record(PANE)
             .unwrap()
@@ -577,6 +626,8 @@ fn relaunch_with_agent_replaces_the_stored_key() {
             .map(|key| key.as_str()),
         Some("feature-implementor")
     );
+    // #644 part 2: the result reports the agent the pane was recorded with.
+    assert_eq!(data["agent"], "feature-implementor", "{data}");
     rig.assert_matches(&run, PANE);
     rig.assert_no_keystroke();
 }

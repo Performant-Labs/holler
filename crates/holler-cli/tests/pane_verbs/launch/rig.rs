@@ -5,20 +5,25 @@
 //! `crate::launch::rig`. It builds on #643's `crate::list::Rig` (its fakes, unchanged, with a
 //! Herdr workspace `main` of 3 by 3) and adds only what a live verb needs:
 //!
-//! - a **linked host**: `stop_owned(name)` also kills the harness server of every rig port that
-//!   was served for `name`, as the test kit recommends (its host and harness fakes share no
-//!   state);
-//! - **harness hooks**: a test closure run once, right after a named `HarnessPort` method
-//!   returns (to freeze a server after `serve`, vanish a Herdr pane at `attach_tui`, make another
-//!   writer move a record or a profile, or panic);
+//! - a **linked host** (#802): `run` hands the argv to the fake harness's scenario method
+//!   `start_server`, so the argv `serve_command` built starts a fake server when the host runs
+//!   it (any other argv starts none), and `stop_owned(name)` also kills the harness server of
+//!   every rig port that runs for `name`, when linked. The two fakes still share no state;
+//!   this wrapper is what links them;
+//! - **hooks**: a test closure run once, right after a named `HarnessPort` method returns, or
+//!   right after the host ran a server argv ([`Rig::after_server_start`]): to freeze a server
+//!   once it started, vanish a Herdr pane at `attach_tui`, make another writer move a record
+//!   or a profile, or panic;
 //! - #663's real `StoreScope` in place of the fake scope (AC 16k);
+//! - a **displacing Herdr** (#808 E11, `launch/displaced.rs`): the verb's `HerdrPort` is the
+//!   fake behind a wrapper whose `snapshot` reports one pane elsewhere once a test arms it;
 //! - a **call-log span** (`Calls`, as in doctor's rig): `run` returns the calls the verb run made
 //!   and nothing else, so a test's own setup and post-run reads are never asserted;
 //! - the checks every case ends with: `assert_matches` (AC 2), `assert_no_keystroke` (I4) and
 //!   `assert_untouched` (nothing live, no store write).
 
 use std::ops::Deref;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use holler_cli::output::Format;
 use holler_cli::pane::profile_scope::StoreScope;
@@ -30,7 +35,7 @@ use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
     Actor, AgentKey, Argv, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
     PaneError, PaneId, PaneName, PaneStore, Ports, Profile, ProfileLogEntry, ProfileName,
-    ProfileScope, ProfileSpec, ProfileStore,
+    ProfileScope, ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -41,6 +46,7 @@ use holler_pane_testkit::pane_store::PaneStoreOp;
 use holler_pane_testkit::prober::ProbeCall;
 use holler_pane_testkit::profile_store::ProfileStoreOp;
 
+use super::displaced::{Armed, Displace, DisplacingHerdr};
 use crate::list::Rig as Fakes;
 use crate::verb_harness::{run_verb_with, Outcome};
 
@@ -168,15 +174,25 @@ impl Default for Seed {
     }
 }
 
-/// What a hooked harness method was called with.
+/// What a hooked harness method was called with (for a server start, the port of the
+/// server the argv started, when it started one).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Called {
     pub pane: Option<PaneId>,
     pub port: Option<u16>,
 }
 
-/// A test closure run once, after a named harness method returns.
+/// A test closure run once, after a named harness method returns or a server argv ran.
 pub(crate) type Hook = Box<dyn FnOnce(&Fakes, &Called) + Send>;
+
+/// Where a hook fires: after a harness method, or after the host ran a server argv.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum On {
+    Harness(HarnessOp),
+    ServerStart,
+}
+
+type Hooks = Mutex<Vec<(On, Hook)>>;
 
 /// The calls made through every port, oldest first.
 #[derive(Debug, Clone, Default)]
@@ -213,7 +229,9 @@ pub(crate) struct Rig {
     pub linked: bool,
     /// #663's `StoreScope` over the rig's two stores, in place of the fake scope (AC 16k).
     pub real_scope: Option<StoreScope>,
-    hooks: Mutex<Vec<(HarnessOp, Hook)>>,
+    hooks: Hooks,
+    /// The pane the verb's snapshots report displaced, once armed (#808 E11).
+    displaced: Arc<Armed>,
 }
 
 impl Rig {
@@ -235,6 +253,7 @@ impl Rig {
             linked: true,
             real_scope: None,
             hooks: Mutex::new(Vec::new()),
+            displaced: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -255,18 +274,44 @@ impl Rig {
 
     /// Run `hook` once, right after the next call of `op` returns.
     pub fn after(&self, op: HarnessOp, hook: impl FnOnce(&Fakes, &Called) + Send + 'static) {
+        self.arm(On::Harness(op), Box::new(hook));
+    }
+
+    /// Run `hook` once, right after the host next runs an argv that starts a harness server
+    /// (#802: the server is a process of the pane's tmux session, started by `run`).
+    pub fn after_server_start(&self, hook: impl FnOnce(&Fakes, &Called) + Send + 'static) {
+        self.arm(On::ServerStart, Box::new(hook));
+    }
+
+    fn arm(&self, on: On, hook: Hook) {
         self.hooks
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push((op, Box::new(hook)));
+            .push((on, hook));
     }
 
-    /// Call `f` with the ports a verb sees: the linked host, the hooked harness and the
-    /// chosen scope over the rig's fakes.
+    /// #808 E11: right after the next `attach_tui` returns, the verb's snapshots report the
+    /// pane it attached displaced (`how`), from then on. The fake itself never moves it, so
+    /// the rig's own reads (`herdr_panes`, `assert_matches`) still see it in place.
+    pub fn displace_after_attach(&self, how: Displace) {
+        let displaced = Arc::clone(&self.displaced);
+        self.after(HarnessOp::AttachTui, move |_, called| {
+            let pane = called.pane.clone().expect("attach_tui names its pane");
+            *displaced.lock().unwrap_or_else(PoisonError::into_inner) = Some((pane, how));
+        });
+    }
+
+    /// Call `f` with the ports a verb sees: the displacing Herdr, the linked host, the hooked
+    /// harness and the chosen scope over the rig's fakes.
     pub fn with_ports<R>(&self, f: impl FnOnce(Ports<'_>) -> R) -> R {
+        let herdr = DisplacingHerdr {
+            herdr: &self.fakes.herdr,
+            armed: &self.displaced,
+        };
         let host = LinkedHost {
             fakes: &self.fakes,
             linked: self.linked,
+            hooks: &self.hooks,
         };
         let harness = HookedHarness {
             fakes: &self.fakes,
@@ -279,7 +324,7 @@ impl Rig {
         f(Ports {
             pane_store: self.fakes.panes.as_ref(),
             profile_store: self.fakes.profiles.as_ref(),
-            herdr: &self.fakes.herdr,
+            herdr: &herdr,
             host: &host,
             harness: &harness,
             scope,
@@ -317,17 +362,26 @@ impl Rig {
     }
 
     /// A pane as a successful launch of `seed` leaves it (see [`Rig::live`]): a Herdr pane at
-    /// its cell, its tmux session (running its command), a server on its port, one session
-    /// the TUI shows, its record at generation 1, and, with a profile, P's spec for it.
+    /// its cell, its tmux session (running its command, then the server's argv), a server on
+    /// its port, one session the TUI shows, its record at generation 1 (with no pid, #802),
+    /// and, with a profile, P's spec for it.
     pub fn seed_live(&self, seed: &Seed) -> Pane {
         let f = &self.fakes;
         let pane = name(seed.pane);
         let herdr = self.place_herdr_pane(seed.grid.row, seed.grid.col);
         f.host.ensure_session(&pane, "/srv/demo").unwrap();
         if let Some(command) = &seed.command {
-            f.host.run(&pane, command).unwrap();
+            f.host.run(&pane, "/srv/demo", command).unwrap();
         }
-        let pid = f.harness.serve(&pane, seed.port).unwrap();
+        let server = f
+            .harness
+            .serve_command(&pane, seed.port, &ServeSpec::default())
+            .unwrap();
+        f.host.run(&pane, "/srv/demo", &server).unwrap();
+        f.harness
+            .start_server(&server)
+            .expect("the fake harness's own argv")
+            .unwrap();
         let sid = f.harness.create_session(seed.port).unwrap();
         f.harness
             .attach_tui(&herdr.pane_id, seed.port, &sid)
@@ -341,7 +395,7 @@ impl Rig {
             },
             harness: HarnessInfo {
                 port: seed.port,
-                pid: Some(pid),
+                pid: None,
                 health: Health::Healthy,
                 ..sample.harness.clone()
             },
@@ -415,9 +469,17 @@ impl Rig {
             .unwrap()
     }
 
-    /// Serve a harness server on `port` for `pane` (setup, through the port); its pid.
+    /// Start a harness server on `port` for `pane` (setup: `serve_command` through the port,
+    /// then the fake's scenario method, with no host session); its pid.
     pub fn serve(&self, pane: &str, port: u16) -> u32 {
-        self.fakes.harness.serve(&name(pane), port).unwrap()
+        let harness = &self.fakes.harness;
+        let argv = harness
+            .serve_command(&name(pane), port, &ServeSpec::default())
+            .unwrap();
+        harness
+            .start_server(&argv)
+            .expect("the fake harness's own argv")
+            .unwrap()
     }
 
     /// Every call made through every port so far.
@@ -496,8 +558,12 @@ impl Rig {
             .server(record.harness.port)
             .expect("a server on the record's port");
         assert_eq!(server.state, ServerState::Running, "{server:?}");
-        assert_eq!(Some(server.pid), record.harness.pid, "the recorded pid");
+        assert_eq!(record.harness.pid, None, "launch records no pid (#802)");
         assert_eq!(server.name.as_str(), pane, "the server is the pane's");
+        assert_eq!(
+            server.agent, record.opencode_agent,
+            "the server runs with the pane's agent (#802)"
+        );
         let shown = f.harness.tui(&record.herdr.pane_id).and_then(|t| t.shown);
         assert_eq!(
             shown, record.session_of_record,
@@ -511,8 +577,29 @@ impl Rig {
 }
 
 /// Nothing live was called and neither store was written, over `calls`.
+///
+/// **No Herdr call at all**: a pane that has a record costs no read of Herdr (#832). The one
+/// exception is [`assert_untouched_after_missing_record`].
 pub(crate) fn assert_untouched(calls: &Calls) {
-    assert_eq!(calls.herdr, vec![], "no Herdr call");
+    assert_untouched_with(calls, false);
+}
+
+/// [`assert_untouched`] for a refusal of a pane that has **no record**: the verb may read
+/// Herdr (`snapshot`) to tell an unmanaged pane from a typo (#832), and nothing that acts.
+pub(crate) fn assert_untouched_after_missing_record(calls: &Calls) {
+    assert_untouched_with(calls, true);
+}
+
+fn assert_untouched_with(calls: &Calls, herdr_reads_ok: bool) {
+    if herdr_reads_ok {
+        assert!(
+            crate::list::only_herdr_reads(&calls.herdr),
+            "no Herdr call that acts, only reads: {:?}",
+            calls.herdr
+        );
+    } else {
+        assert_eq!(calls.herdr, vec![], "no Herdr call: {:?}", calls.herdr);
+    }
     assert_eq!(calls.host, vec![], "no host call");
     assert_eq!(calls.harness, vec![], "no harness call");
     assert_eq!(calls.probes, vec![], "no probe run");
@@ -589,11 +676,15 @@ pub(crate) fn launch_spec() -> ProfileSpec {
     }
 }
 
-/// A `HostPort` over the rig's `FakeHost` whose `stop_owned` also kills the servers served
-/// for the pane, when linked.
+/// A `HostPort` over the rig's `FakeHost` whose `run` also starts the fake server an argv of
+/// `serve_command` describes (and fires the server-start hooks), and whose `stop_owned` also
+/// kills the servers that run for the pane, when linked. `run` answers what `FakeHost::run`
+/// answers: a server the fake refuses to start (a port another pane's server holds, a frozen
+/// one) is not `run`'s error, as tmux starts the process anyway; the health wait sees it.
 struct LinkedHost<'a> {
     fakes: &'a Fakes,
     linked: bool,
+    hooks: &'a Hooks,
 }
 
 impl HostPort for LinkedHost<'_> {
@@ -601,8 +692,19 @@ impl HostPort for LinkedHost<'_> {
         self.fakes.host.ensure_session(name, cwd)
     }
 
-    fn run(&self, name: &PaneName, argv: &Argv) -> Result<(), PaneError> {
-        self.fakes.host.run(name, argv)
+    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
+        self.fakes.host.run(name, cwd, argv)?;
+        let harness = &self.fakes.harness;
+        if let Some(started) = harness.start_server(argv) {
+            let port = started.ok().and_then(|pid| {
+                RIG_PORTS
+                    .into_iter()
+                    .find(|&port| harness.server(port).is_some_and(|s| s.pid == pid))
+            });
+            let called = Called { pane: None, port };
+            fire(self.fakes, self.hooks, On::ServerStart, called);
+        }
+        Ok(())
     }
 
     fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
@@ -627,32 +729,47 @@ impl HostPort for LinkedHost<'_> {
     }
 }
 
+/// Run (and drop) the first hook armed for `on`. No lock is held while it runs.
+fn fire(fakes: &Fakes, hooks: &Hooks, on: On, called: Called) {
+    let hook = {
+        let mut hooks = hooks.lock().unwrap_or_else(PoisonError::into_inner);
+        hooks
+            .iter()
+            .position(|(armed, _)| *armed == on)
+            .map(|at| hooks.remove(at).1)
+    };
+    if let Some(hook) = hook {
+        hook(fakes, &called);
+    }
+}
+
 /// A `HarnessPort` over the rig's `FakeHarness` that runs a test's hook after a method.
 struct HookedHarness<'a> {
     fakes: &'a Fakes,
-    hooks: &'a Mutex<Vec<(HarnessOp, Hook)>>,
+    hooks: &'a Hooks,
 }
 
 impl HookedHarness<'_> {
-    /// Run (and drop) the first hook armed for `op`. No lock is held while it runs.
     fn fire(&self, op: HarnessOp, called: Called) {
-        let hook = {
-            let mut hooks = self.hooks.lock().unwrap_or_else(PoisonError::into_inner);
-            hooks
-                .iter()
-                .position(|(armed, _)| *armed == op)
-                .map(|at| hooks.remove(at).1)
-        };
-        if let Some(hook) = hook {
-            hook(self.fakes, &called);
-        }
+        fire(self.fakes, self.hooks, On::Harness(op), called);
     }
 }
 
 impl HarnessPort for HookedHarness<'_> {
-    fn serve(&self, name: &PaneName, port: u16) -> Result<u32, PaneError> {
-        let answer = self.fakes.harness.serve(name, port);
-        self.fire(HarnessOp::Serve, port_only(port));
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        let answer = self.fakes.harness.serve_command(name, port, spec);
+        self.fire(HarnessOp::ServeCommand, port_only(port));
+        answer
+    }
+
+    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+        let answer = self.fakes.harness.verify_serving(port, spec);
+        self.fire(HarnessOp::VerifyServing, port_only(port));
         answer
     }
 

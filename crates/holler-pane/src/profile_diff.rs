@@ -40,6 +40,7 @@ pub enum SpecField {
     Provider,
     ModelId,
     Effort,
+    OpencodeAgent,
     Role,
     Env,
     ContextSoft,
@@ -53,7 +54,7 @@ impl SpecField {
     /// Every field, in the order `profile show` lists a spec and [`diff_spec`] compares
     /// it. `harness.port_policy` is compared like every other field: the live side is
     /// the policy of the port the pane's harness uses (ADR-0021 section 3).
-    pub const ALL: [SpecField; 15] = [
+    pub const ALL: [SpecField; 16] = [
         SpecField::Workspace,
         SpecField::Grid,
         SpecField::Cwd,
@@ -62,6 +63,7 @@ impl SpecField {
         SpecField::Provider,
         SpecField::ModelId,
         SpecField::Effort,
+        SpecField::OpencodeAgent,
         SpecField::Role,
         SpecField::Env,
         SpecField::ContextSoft,
@@ -83,6 +85,7 @@ impl SpecField {
             SpecField::Provider => "model.provider",
             SpecField::ModelId => "model.model_id",
             SpecField::Effort => "model.effort",
+            SpecField::OpencodeAgent => "opencode_agent",
             SpecField::Role => "role",
             SpecField::Env => "env",
             SpecField::ContextSoft => "context.soft",
@@ -105,6 +108,9 @@ impl SpecField {
             SpecField::Provider => FieldValue::Text(spec.model.provider.clone()),
             SpecField::ModelId => FieldValue::Text(spec.model.model_id.clone()),
             SpecField::Effort => FieldValue::Text(spec.model.effort.clone()),
+            SpecField::OpencodeAgent => {
+                FieldValue::Key(spec.opencode_agent.as_ref().map(|k| k.as_str().to_owned()))
+            }
             SpecField::Role => FieldValue::Text(serde_text(&spec.role)),
             SpecField::Env => {
                 FieldValue::List(spec.env.iter().map(|n| n.as_str().to_owned()).collect())
@@ -169,25 +175,33 @@ pub enum FieldValue {
     List(Vec<String>),
     /// `command`, `check`; `None` serializes as `null`.
     Argv(Option<Argv>),
+    /// `opencode_agent`, the agent's key; `None` (no agent: the server's default one)
+    /// serializes as `null`.
+    Key(Option<String>),
 }
 
 impl fmt::Display for FieldValue {
     /// The text form:
     ///
-    /// - `Text` with every control character escaped by `char::escape_default`, so ESC
-    ///   prints as `\u{1b}` and a newline as `\n` (the rule Holler's text log lines
-    ///   escape a field value with, in `holler_proto::log`); every other character as is.
+    /// - `Text` and `Key(Some)` with every control character escaped by
+    ///   `char::escape_default`, so ESC prints as `\u{1b}` and a newline as `\n` (the rule
+    ///   Holler's text log lines escape a field value with, in `holler_proto::log`); every
+    ///   other character as is.
     /// - `Grid` as `r2c1`, and `Number` in decimal.
     /// - `List` and `Argv(Some)` as a compact JSON array of strings, `["opencode","serve"]`,
     ///   never a line joined for a shell; `Argv(None)` as `none`.
+    /// - `Key(None)` as `(default)`, never `none`: `none` is a valid agent key, so it could
+    ///   not tell an agent of that name from no agent, and no key can be `(default)` (a key
+    ///   holds only ASCII letters, digits, `-` and `_`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FieldValue::Text(text) => write_escaped(f, text),
+            FieldValue::Text(text) | FieldValue::Key(Some(text)) => write_escaped(f, text),
             FieldValue::Grid(grid) => write!(f, "{grid}"),
             FieldValue::Number(number) => write!(f, "{number}"),
             FieldValue::List(items) => write_json_strings(f, items),
             FieldValue::Argv(Some(argv)) => write_json_strings(f, argv.as_slice()),
             FieldValue::Argv(None) => f.write_str("none"),
+            FieldValue::Key(None) => f.write_str("(default)"),
         }
     }
 }

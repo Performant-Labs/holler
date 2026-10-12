@@ -13,6 +13,7 @@
 use clap::Args;
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_launch::{relaunch, RelaunchRequest, TxOptions};
+use holler_pane::unmanaged;
 use holler_pane::{PaneError, PaneName, Ports};
 
 use super::args::{ProfileOpt, SpecFlags, SpecOnly};
@@ -32,7 +33,8 @@ use crate::output::{emit_error, ErrorBody, VerbCtx};
 /// Herdr pane is closed once the record names the new one). Flags not given keep the record's
 /// values, or with `--profile P` the values of P's spec for the pane.
 ///
-/// `--format=json` prints one envelope whose data is `{"verb", "pane", "profile", "spec_only"}`.
+/// `--format=json` prints one envelope whose data is
+/// `{"verb", "pane", "profile", "spec_only", "agent"}`.
 #[derive(Args, Debug)]
 pub struct PaneRelaunch {
     /// The pane's name, e.g. demo-c1r1.
@@ -68,9 +70,7 @@ fn relaunch_request(args: &PaneRelaunch, ports: Ports<'_>) -> Result<RelaunchReq
     let record = ports
         .pane_store
         .get(&name)?
-        .ok_or_else(|| PaneError::PaneNotFound {
-            what: name.to_string(),
-        })?;
+        .ok_or_else(|| unmanaged::missing(ports, name.as_str()))?;
     let profile = stored_profile(ports, profile.as_ref())?;
     let from_record = spec_from_pane(&record);
     let base = profile

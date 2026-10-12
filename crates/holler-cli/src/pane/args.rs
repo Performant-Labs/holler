@@ -57,8 +57,8 @@ pub struct SpecFlags {
     /// The pane's role: agent or orchestrator.
     #[arg(long, value_name = "ROLE")]
     pub role: Option<String>,
-    /// The OpenCode agent the pane's messages run as: letters, digits, - and _. Without it, the
-    /// server's default agent.
+    /// The OpenCode agent the pane's messages run as: letters, digits, - and _. Without it, a
+    /// new spec has none (the server's default agent) and an existing spec keeps its own.
     #[arg(long, value_name = "KEY")]
     pub agent: Option<String>,
     /// An environment variable NAME the pane gets (a name only, never NAME=value). Repeatable.

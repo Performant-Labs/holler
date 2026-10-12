@@ -8,6 +8,102 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
+  It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
+  the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON
+  envelope with every error code and its exit code, the cutover from the launcher's files, and the rollback. The
+  section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
+  that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
+  fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+- Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
+  `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
+  registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)). The CLI reads the registries over the hub's control
+  socket and builds the adapters itself; the hub builds none. With no hub running, every one of these verbs exits 1 with
+  `unavailable`, naming the missing hub, and touches nothing else; `pane list`, `get` and `watch` and `profile list` and
+  `show` need nothing but the hub. The adapters are configured by environment variables, and a missing or malformed one
+  fails only the verbs that use its adapter, when they first use it, with an error naming it:
+  `HOLLER_HERDR_SESSION` (the Herdr session the panes live in; Herdr's own `HERDR_SESSION` is not read),
+  `HOLLER_HERDR_SOCKET` (else `HERDR_SOCKET_PATH`, else that session's default socket), `HOLLER_HERDR_WORKSPACES` (each
+  workspace's rows by columns, `label=RxC,...`), `HOLLER_TMUX_SOCKET` (an absolute path; unset, tmux's default socket),
+  `HOLLER_OPENCODE_BIN` (else `opencode` on `PATH`) and `HOLLER_OPENCODE_SERVE_ARGS` (a JSON array of strings). A registry
+  write whose reply is lost answers `timeout`, since it may have landed. No credential is read, printed or put on a
+  command line: an OpenCode server inherits its tmux server's environment. Two things go live with it: every profile
+  write a `--profile` pane verb or `profile apply` makes is logged as `holler pane`
+  ([#825](https://github.com/Performant-Labs/holler/issues/825)), and the first message of `pane reset --first` reaches
+  the pane's server outside the hub's park and hold gate, so until
+  [#828](https://github.com/Performant-Labs/holler/issues/828) lands, do not use `reset --first` on a parked or held pane.
+  An opt-in scenario (`HOLLER_TEST_PANE_INTEGRATION=1`) runs the verbs end to end against scratch Herdr, tmux and OpenCode
+  instances it starts itself, and refuses any real session. [ADR 0021](docs/adr/ADR-0021.md) records the wiring.
+- Setup wizard (epic [#726](https://github.com/Performant-Labs/holler/issues/726)): Stage 1 asks which Herdr session to
+  build in, between the orchestrators and the workspace name ([#838](https://github.com/Performant-Labs/holler/issues/838)).
+  "The default, unnamed session" (recommended) writes no `[instance]` table, so nothing changes; "A new named session"
+  proposes a full second instance (`state_dir = "~/.holler-<name>"`, ports 41808, 8443 and 47101) and refuses a name
+  already in `herdr session list`, running or stopped. An existing config is not re-asked. Stage 0 lists every session
+  with its status, and Stage 1's report and Stage 3's plan name the targeted session.
+- Pane control, unmanaged panes (epic [#633](https://github.com/Performant-Labs/holler/issues/633), decision 9):
+  `holler pane list` (over the whole registry) and `holler pane get` now show a Herdr pane that no record names, with the
+  state `unmanaged`, its Herdr pane id, label, working directory and idle time
+  ([#832](https://github.com/Performant-Labs/holler/issues/832)). `unmanaged` is observed, never stored, and not a hold: no
+  verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`, `close`) accepts one, and each refuses it with the
+  new code `pane-unmanaged` (exit 3) instead of `pane-not-found`. `holler pane doctor --unmanaged-stalled-after SECONDS`
+  reports an unmanaged pane whose screen has not changed that long as the finding `unmanaged-stalled`. **Herdr 0.8.2 reports no
+  time at which a screen last changed**, so the port carries `last_screen_change` (new `HerdrPort::observe_pane`) and the real
+  adapter leaves it, and the idle time, empty rather than guess one: the idle time and `unmanaged-stalled` need a Herdr that
+  reports it, tracked in [#837](https://github.com/Performant-Labs/holler/issues/837). If Herdr cannot be read, `list` still prints the registry's panes and says so. The test
+  kit gains `seed_unmanaged_pane`, and the roster (#648) is not changed here.
+- Pane control, the migration import (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane
+  import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE]... [--dry-run]` adopts the fleet
+  the old launcher runs ([#650](https://github.com/Performant-Labs/holler/issues/650)). It reads each pane directory's
+  `pane.env` (five values, and every other variable by name only, never its value), `last-session`, `sessions.toml`
+  (through `holler-body`'s own reader) and `owned-sessions`, and a launcher table whose shape this story defines (one TOML
+  table per pane with `port`, `cwd` and `command`, ADR-0021 section 13). It finds each pane's Herdr pane by its label in
+  the named Herdr session, takes its position from there and never from the name, and takes the session of record only
+  where every file names the same session and the pane's healthy server has it. A dry run writes nothing and reports
+  every disagreement as a finding. A real run writes the profile `fleet` and one record per pane, or nothing at all: it is
+  refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
+  again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
+  named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
+  idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,
+  it creates a pane that has no record (through the launch transaction, which runs the spec's health check and refuses
+  an occupied cell), adopts a healthy pane that matches its spec (makes it a member of the profile and touches nothing
+  live), reports one that differs with the field-by-field comparison `profile show` prints, relaunches an agent that is
+  not healthy in place, and never relaunches the orchestrator. Healthy is observed, not read from the record: the
+  pane's harness server answers, Herdr lists its pane, and its TUI does not show a session other than its session of
+  record. A pane of another profile is refused unless `--take-over`, which moves it. A refused or reported step leaves
+  the exit code at 0; a failed step stops the run and exits 1, printing only that failure and how many later steps it
+  skipped. A step refused or failed after its launch or relaunch had begun says how to reconcile the profile, as
+  `holler pane launch` does. `--dry-run` prints the plan and changes nothing, `--format=json` prints
+  `{"profile", "dry_run", "steps"}`, and creating a pane needs `--herdr-session`. [ADR 0021](docs/adr/ADR-0021.md)
+  defines what adopting a pane means. Until the ports are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verb answers `not-implemented`
+  ([#664](https://github.com/Performant-Labs/holler/issues/664)).
+- OpenCode adapter, part 3: the pane's agent, prompts and activity (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler-adapter-opencode` now applies a pane's OpenCode
+  agent (`Pane.opencode_agent`) as its harness server's default agent, set once when the server starts, and checks it.
+  The server's command line sets `OPENCODE_CONFIG_CONTENT={"default_agent":"<agent>"}` (the agent's name only, and never
+  on the TUI's command line). Once the server answers, `verify_serving` asks it for its configuration and its agents: a
+  server whose default agent is not the pane's agent (the setting did not reach it), or whose agent is missing, a subagent
+  or hidden, is refused with the adapter's own code `agent-unusable` (exit 3), and the launch then rolls back and stops
+  the server. This replaces the `agent-unsupported` refusal the adapter answered for every agent, which stays the code of
+  a harness that cannot apply an agent at all. `send_prompt` now queues a prompt through OpenCode's API, never by typing
+  into the TUI, and no error message carries the prompt's text. `session_activity` reports a session that holds a
+  question or a permission request (its own or a subagent's), one that is running a turn (including a turn OpenCode is
+  retrying), or one that is idle, so `pane reset` refuses a conversation that is not idle; an abort likewise waits until
+  a retrying session has stopped. [ADR 0021](docs/adr/ADR-0021.md) records the decisions. Nothing a user runs changes yet:
+  #649 wires the adapter in ([#642](https://github.com/Performant-Labs/holler/issues/642)).
+- Pane control, a Herdr pane's label (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every pane
+  `HerdrPort::snapshot` lists and `HerdrPort::ensure_pane` answers now carries its Herdr label (`HerdrPane.label`), the key
+  by which `holler pane import` ([#650](https://github.com/Performant-Labs/holler/issues/650)) will find a pane name's
+  live Herdr pane. The Herdr adapter reads it from the pane info Herdr already sends, with no new request, and reports
+  none for a pane with no label or an empty one. The label is observed, never recorded: `launch` and `relaunch` write
+  none, so a pane record and `panes.json` are written byte for byte as before, and an older `panes.json` still loads.
+  Reconcile and `pane doctor` ignore it, and `launch`'s check that Herdr still lists the pane at its cell compares the
+  pane's place, not its label. The test kit's fake Herdr can label a pane, the `HerdrPort` conformance suite gains a
+  12th case for it, and [ADR 0021](docs/adr/ADR-0021.md) records the decision. Nothing a user runs changes yet: #649
+  wires the adapter in ([#808](https://github.com/Performant-Labs/holler/issues/808)).
 - `scripts/pane-restart` now also restarts Claude Code panes (issue [#784](https://github.com/Performant-Labs/holler/issues/784),
   epic [#633](https://github.com/Performant-Labs/holler/issues/633)). A pane is Claude Code when a live process's record in
   `~/.claude/sessions/<pid>.json` names its tmux session; it takes `--model ALIAS|NAME` and `--effort`, keeps the process's own flags,
@@ -387,6 +483,39 @@ fills this file in at release time.
   [ADR 0021](docs/adr/ADR-0021.md) records how they behave. Until the hub's stores and the adapters are wired into the
   binary ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+- Pane control, a pane's harness server now runs inside the pane's tmux session (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)), so a wedged server can always be stopped
+  ([#695](https://github.com/Performant-Labs/holler/issues/695)). This replaces what the OpenCode adapter's part 1
+  entry above says of `serve`: the adapter no longer starts the server in a process group of its own or returns its
+  pid. `HarnessPort::serve` became `serve_command`, which only builds the server's command line from a `ServeSpec`
+  (today the pane's OpenCode agent; the model, effort and environment names will join it). The host adapter starts
+  that command in the pane's tmux session, in the pane's own project directory, and stops it the way it stops every
+  process it started (TERM, a grace, then KILL), so `pane relaunch`, `pane close` and a launch that fails all stop the
+  server, and no pid is recorded for it. `HostPort::run` now takes the directory a program starts in, and the tmux
+  adapter refuses one that is not an absolute path to an existing directory. The launch engine builds the command in
+  its plan, so a harness that cannot apply the pane's agent refuses before anything is changed (`agent-unsupported`,
+  exit 3; the OpenCode adapter answers it for every agent until it applies agents), checks the port again just before
+  the server starts (never adopting a running server now rests on that check and the plan's `port-in-use` check, without
+  the adapter's own check that a healthy answer came from the server it had started), waits for the server's health
+  within the run's budget (a server that never answers is now `timeout`, not `unavailable`), and has the harness say
+  whether the running server honours the spec (`verify_serving`) before it creates the session of record. Nothing a
+  user runs changes yet:
+  [#649](https://github.com/Performant-Labs/holler/issues/649) wires the adapters in
+  ([#802](https://github.com/Performant-Labs/holler/issues/802)).
+- Pane control, the OpenCode agent through `holler pane launch` and `holler pane relaunch` (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)): a successful run reports the agent the pane was
+  recorded with. The text line gains `, agent KEY` after the harness port (a pane with no agent prints the line it
+  printed before), and the `--format=json` data gains the key `agent` after `spec_only`: the record's `opencode_agent`,
+  or `null` for a pane with none and with `--spec-only`; every earlier key keeps its place. A running server that does
+  not honour the pane's agent is refused by the harness (`verify_serving`) with the harness's own code, exit 3: the run
+  stops the server it started and records nothing, and a refused relaunch leaves the pane with its old server stopped
+  and its record unchanged (`relaunch PANE` without `--agent` keeps the recorded agent and brings it back). The CLI
+  reads no project file to check a key. `profile show` now lists a spec's `opencode_agent`, as `(default)` when it has
+  none (`none` is a valid key), and reports a live pane whose agent differs from its spec. The `--agent` help now says
+  that without it a new spec has none and an existing spec keeps its own, and [ADR 0021](docs/adr/ADR-0021.md) records
+  the decisions. Until the hub's stores and the adapters are wired into the binary
+  ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
+  ([#644](https://github.com/Performant-Labs/holler/issues/644)).
 
 ## [0.4.0] - 2026-09-29
 
@@ -484,7 +613,7 @@ fills this file in at release time.
   Install, Quick Start), following the existing zh-CN/ja/es/de pattern: AI-assisted, everything
   else stays English-only, and every language switcher now lists Français.
 - The `setup-wizard` Claude Code skill now ships in the repo at
-  [`agent-skills/setup-wizard/SKILL.md`](agent-skills/setup-wizard/SKILL.md) instead of living only
+  [`agent-skills/herdr-setup/SKILL.md`](agent-skills/herdr-setup/SKILL.md) instead of living only
   in one operator's home directory. The README's agent prompt uses the skill if it is installed and
   otherwise fetches it from the repo, so it launches the real wizard on a machine that has never seen
   it (it previously fell back to an approximation rebuilt from `docs/setup-wizard.md`). The README
