@@ -1,39 +1,39 @@
-# Handoff-A: #844 oc-tmux-utf8  (up-front plan review)
+# Handoff-A: #844 oc-tmux-utf8  (up-front plan review, second pass)
 
 **Date:** 2026-10-12
 **Branch:** issue-844-implementation
-**Brief reviewed:** docs/handoffs/844-brief.md   **Reuse map:** the brief's "Reuse map" paragraph   **Wireframe:** N/A (no UI)
-**Verdict:** BLOCK
+**Brief reviewed:** docs/handoffs/844-brief.md (amended in a66de75)   **Reuse map:** the brief's "Reuse map" paragraph   **Wireframe:** N/A (no UI)
+**Verdict:** PASS
 
 ## Summary
-The production design is right: `-u` added in the one builder, `tmux_command`, after the socket flag, with no new setting,
-no env change, no parser change. It extends the single choke point and matches the module's "every tmux process is built
-here" rule. The plan is blocked for one factual gap in the test side: removing `("LANG", "C.UTF-8")` from
-`pane_integration/scratch/mod.rs` also breaks `guards.rs`, which pins that entry, and AC 3's "runs with the ambient `LANG`"
-is false for that rig. Four warnings are specific enough to fold into the same amendment.
+The amended brief closes the one block of the first pass. `guards.rs` and the `scratch/mod.rs:234` doc line are now in Files,
+AC 3 says the binary runs with no locale at all (verified: `binary_env` inherits nothing), the `LC_CTYPE` removals, the helper
+rationale, the Drop guard and the require-`-u` fixture are all in. The production change stays one line in the single
+builder, `tmux_command`, with no wire, state, secret or concurrency impact. Three non-blocking warnings remain.
 
 ## Findings
 
 | # | Severity | Plan element | Drift dimension | Finding | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | block | Files / AC 3: remove `("LANG","C.UTF-8")` at `scratch/mod.rs:253-257`; "the scenario runs with the ambient `LANG`" | pattern consistency (a pinned guard) | `binary_env` builds the binary's env "from nothing inherited". `crates/holler-cli/tests/pane_integration/guards.rs:100-128` (`the_binary_env_is_built_from_nothing_inherited`, not opt-in) asserts that `LANG` is in the exact name set (`:109`) and that `value(&env,"LANG") == "C.UTF-8"` (`:128`). Removing the entry fails `cargo test -p holler-cli --test pane_integration` (AC 3). The binary will then see no `LANG` at all, not an ambient one: that is the failing case of the issue, so the scenario becomes a stronger pin, but the brief's wording is wrong. The doc comment at `scratch/mod.rs:234` ("UTF-8 `LANG`") goes stale too. | Add `guards.rs` to Files (T edits it): drop `"LANG"` from the expected set, replace line 128 with an assertion that no `LANG` and no `LC_*` name is present, and reword the message to say the rig leaves the locale unset on purpose (#844). Fix `scratch/mod.rs:234`. Reword AC 3 to "the scenario runs with no locale variable". |
-| 2 | warn | New `utf8_locale_test.rs` env: `.env("LANG","C").env_remove("LC_ALL")` | test validity | tmux decides UTF-8 from `LC_ALL`, then `LC_CTYPE`, then `LANG`. An ambient `LC_CTYPE=en_US.UTF-8` (common) makes the test pass before the fix, so it is not RED on that machine. | Also `env_remove("LC_CTYPE")` in the `LANG=C` case, and in the `LC_ALL=C` case remove `LANG` and `LC_CTYPE`. Say so in the test's header. |
-| 3 | warn | New test's private-server helpers | duplication (Phase 7 candidate) | `rig.rs` already has `on_path` and `tmux(bin, sock, args)`. It cannot be included from a second test file: workspace `dead_code = "deny"` rejects unused `pub` items and `scripts/lint.sh` forbids an unlinked `allow(dead_code)`. Also `rig::binaries()` panics without `opencode`. So a small local helper is justified, but the brief must say so, or A will flag a near-copy at Phase 7. | Add to the brief: "own 10-line `tmux()` and PATH lookup, because `rig.rs` cannot be included without unused items (`dead_code = deny`) and needs `opencode`". Keep it to those two helpers; use `tui::{tmux_command, query_args, parse_query}` for the call under test, never a hand-built argv. |
-| 4 | warn | New test: server lifetime | concurrency / cleanup | The brief does not say how the private server is stopped. A failing assert would leak a tmux server and its `sleep`. | Follow `rig.rs`: a guard value built before `new-session`, whose `Drop` runs `kill-server` on the private socket and removes the temp dir (`tempfile`, prefix as `hlr642t-`, so the socket path stays short). Never touch the default server; remove `TMUX`/`TMUX_PANE` as `rig::tmux` does. |
-| 5 | warn | Fake-tmux skip (decision 3) | pattern consistency | Skipping `-u` in the fixture keeps `attach_test.rs` unchanged, which is the smaller edit and acceptable. But the contract comment (`fake-tmux:5`, `support/fake_tmux.rs:7`) says "called as `fake-tmux -S <path> <subcommand>`", and `[ "$1" = "-u" ] && shift` hides a missing `-u` from every hermetic test. | Prefer making the fixture require it: after `shift 2`, `if [ "$1" != "-u" ]; then ...exit 64; fi; shift`, so all call sites are pinned, not only `ac11c`. If the skip is kept, use an `if` (not `&&`) and update both contract comments. POSIX sh and `cat` only still holds. |
+| 1 | warn | New `utf8_locale_test.rs` runs real tmux in the default `cargo test` (skip when absent) | pattern consistency | The repo's convention for real-tmux tests is `#[ignore]`: `holler-adapter-host/tests/real_tmux_test.rs` ("needs tmux; run with --ignored") and `docs/testing.md:447`. The brief's choice is defensible (a regression pin that is `#[ignore]`d never fails CI, and the test uses a private socket and kills it), but it departs from that convention without saying so. | Add one sentence to the brief (and `docs/testing.md` if F touches it) giving the reason: the pin must run in CI, so it skips on a missing `tmux` instead of being ignored. Keep the socket path short (`/tmp`, as `rig.rs:368` does with `hlr642r-`) so macOS's `sun_path` limit is not hit. |
+| 2 | warn | AC 4: `grep -n '"-u"' crates/holler-adapter-opencode/src/tui.rs` | naming / verifiability | The grep is scoped to `tui.rs`, and passes. An unscoped grep of `src/` also hits `lib.rs:234` (`env -u <var>`, the server launcher's, not a tmux flag). A reader could mistake it for a second tmux `-u`. | Keep the AC scoped to `tui.rs` as written; F should not "tidy" `lib.rs:234`. |
+| 3 | warn | CHANGELOG bullet "under `[Unreleased]` (Fixes)" | naming | The heading in `[Unreleased]` is `### Bug Fixes` (CHANGELOG.md:600), not "Fixes". | Add the bullet under `### Bug Fixes`. |
+
+## Checked and consistent
+- **Choke point:** `tmux_command` is the only tmux builder in the crate (`attach.rs:217` is its sole caller; no other `Command::new` of tmux in `src/`). Adding `-u` there covers `attach_tui`, `select_session` and `shown_session` in every delivery variant.
+- **Placement:** `-u` after the socket flag and before the call's arguments keeps `$1 == -S` for the fixture; `ac11c`'s `flag ++ ["-u"] ++ call` is the right extension, and `TmuxSocket::Default` yields `-u` first.
+- **Parser and wire:** no change to `QUERY_FORMAT`, `parse_query` or any protocol file; the host and Claude adapters are space-joined and out of scope. Rejecting `_`-as-TAB parsing is right (ambiguous with a title containing `_`).
+- **Size:** `tui.rs` is 319 lines; `attach_test.rs` 706, `guards.rs` 245, `scratch/mod.rs` 553, all under the 800 threshold.
+- **Test duplication (Phase 7 candidate):** the two local helpers in `utf8_locale_test.rs` are justified in writing (`rig.rs` cannot be included: `dead_code = "deny"` at `Cargo.toml:33`, `lint.sh` forbids an unlinked `allow(dead_code)`, and `rig::binaries()` panics without opencode). Phase 7 should hold them to a PATH lookup and a private-socket runner only, with the call under test built by `tui::{tmux_command, query_args, parse_query}`, never a hand-built argv.
+- **Fixture:** requiring `-u` and not recording it keeps `attach_test.rs` unchanged and pins every hermetic call site; POSIX sh and `cat` only still holds. Both contract comments (`fake-tmux:5`, `support/fake_tmux.rs:7`) are named for update.
+- **Clashes:** #845 and #696 touch `attach.rs` and possibly `tui.rs`; the edit here is one function plus docs, so a merge is mechanical.
 
 ## Notes for O
-Amend `docs/handoffs/844-brief.md` before a fresh run (the script stops on an unchanged brief; do not use `resumeFromRunId`):
-1. Files: add `crates/holler-cli/tests/pane_integration/guards.rs` (finding 1) and the `scratch/mod.rs:234` doc line.
-2. AC 3 and Test plan item 3: "no locale variable is set for the binary", not "ambient `LANG`".
-3. Test plan item 2: the env removals of finding 2, the helper rationale of finding 3, the guard of finding 4.
-4. Decision 3: choose between the require-`-u` fixture and the skip (finding 5), and name the contract comments to update.
-Everything else (docs/CHANGELOG touch, size of `tui.rs` at 319 lines, no wire/proto/state/secret impact, clashes with #845 and
-#696 limited to one function) is consistent and needs no change. `holler-adapter-host` and `-claude` are correctly out of scope.
+None required (PASS). Findings 1 to 3 are one-line brief or implementation tweaks and do not need a re-review.
 
 ## Patterns referenced
-- `crates/holler-adapter-opencode/src/tui.rs:5-30,114-133` (single builder rule, `tmux_command`)
-- `crates/holler-adapter-opencode/tests/tui_test.rs:197-224` (`ac11c`)
-- `crates/holler-adapter-opencode/tests/fixtures/fake-tmux`, `tests/support/fake_tmux.rs`
-- `crates/holler-adapter-opencode/tests/real_opencode/rig.rs:153-165` (private-server helper, guard), workspace `Cargo.toml:33`
-- `crates/holler-cli/tests/pane_integration/guards.rs:100-128`, `scratch/mod.rs:234-257`
+- `crates/holler-adapter-opencode/src/tui.rs:5-30,114-133`, `src/attach.rs:217`, `src/lib.rs:234`
+- `crates/holler-adapter-opencode/tests/tui_test.rs:197-224`, `tests/fixtures/fake-tmux`, `tests/support/fake_tmux.rs`
+- `crates/holler-adapter-opencode/tests/real_opencode/rig.rs:89-165,368`
+- `crates/holler-adapter-host/tests/real_tmux_test.rs`, `docs/testing.md:447`
+- `crates/holler-cli/tests/pane_integration/guards.rs:100-128`, `scratch/mod.rs:234-257`; `CHANGELOG.md:8,600`
