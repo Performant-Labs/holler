@@ -1,36 +1,39 @@
 ---
 name: herdr-setup
-description: Run a read-only preflight first (Stage 0: what this machine has, with Herdr installed on a yes if it is missing), end it with the question "All systems go. Proceed?", and only then optionally set up a Herdr workspace — one or more local orchestrator panes plus one remote agent session pane per entry in a Holler session config, wired through a Holler hub (local) / body (remote) pair, using the safe `opencode attach` recipe (never herdr-mirror). Config-driven, not hardcoded — every orchestrator's name/command/directory, every session's harness, and the whole pane layout (including how many orchestrators there are and where each one sits) are all read from the config, never assumed. Use when the user asks to install Herdr, set up Herdr with a local orchestrator + remote agent sessions, recreate the alpha/beta (or N-agent, or multi-orchestrator) setup, or rebuild that workspace.
+description: Run a read-only preflight first (Stage 0: what this machine has, with Herdr installed on a yes if it is missing), end it with the question "All systems go. Proceed?", and only then optionally build a Herdr workspace of Holler registry panes — a grid of OpenCode and Claude Code panes, one or more of them orchestrators, each launched, recorded and kept in shape by `holler pane` and `holler profile apply`, and driven through a Holler hub and body on this machine (never herdr-mirror). Config-driven, not hardcoded — every pane's name, directory, harness and role, and the whole grid (how many panes, how many orchestrators, and where each one sits), are read from the config, never assumed. Use when the user asks to install Herdr, set up a Herdr workspace of agent panes driven by Holler, recreate the orchestrator-and-agents grid, or rebuild that workspace.
 ---
 
-# Herdr: M local orchestrators + N remote agent sessions — wizard
+# Herdr: a grid of OpenCode and Claude Code panes, built through Holler — wizard
 
-Rebuilds a working Herdr + Holler setup verified live 2026-09-21/22 on a real two-machine
-deployment. This repo's `docs/setup-wizard.md` carries the operational rules and the reasoning
-behind each step's shape — read it if anything here looks surprising. The examples use one
-Claude orchestrator and OpenCode session harnesses because that's what was verified live —
-**don't read that as a hardcoded requirement.** Nothing about the Herdr/Holler mechanism itself
-is Claude- or OpenCode-specific, and nothing about it requires exactly one orchestrator either —
-those are just this pattern's most-exercised instance.
+Builds a Herdr workspace whose every pane is a Holler **registry pane**: a record in the hub's pane
+registry, launched, recorded and reconciled by Holler's own verbs (`holler pane`,
+`holler profile apply`; epic #633, ADR-0021), running OpenCode or Claude Code, with one or more of
+the panes the orchestrators that drive the others. This repo's `docs/setup-wizard.md` carries the operational rules
+and the reasoning behind each step's shape (its section "How the wizard builds panes" is the design),
+and `docs/pane-control.md` is the operator guide for every pane verb the stages run — read them if
+anything here looks surprising.
 
 **The Holler session config file is the base model for everything this wizard builds.** It is
 not just an artifact produced at the end — read it *first*, and every later stage's cardinality
-(how many orchestrators to launch, how many backends to start, how many session IDs to
-capture, how many panes to split and attach, and where every one of those panes sits) is
-derived from the config you actually read. Never hardcode an orchestrator count, a session
-count, any name, any command, any directory, or a harness anywhere in this run.
+(how many panes, which of them are orchestrators, which harness each one runs, and where every one
+of them sits) is derived from the config you actually read. Never hardcode a pane count, an
+orchestrator count, any name, any directory, or a harness anywhere in this run.
 
-Target shape: one local Herdr workspace, arranged into one or more columns per the config's own
-`layout` field — every orchestrator pane and every session pane is a real, explicit entry in
-that grid (no assumed "there is exactly one orchestrator" or "it's always the fixed left pane"
-— however many orchestrators the config's `[[orchestrator]]` list has, and wherever `layout`
-puts each one, is what gets built), driven by a Holler hub locally and a Holler body on the
-remote machine.
+Target shape: one Herdr workspace on this machine, arranged into one or more columns per the
+config's own `layout` field — every pane is a real, explicit entry in that grid (no assumed
+"there is exactly one orchestrator" or "it's always the fixed left pane": however many `[[pane]]`
+tables the config has, and wherever `layout` puts each one, is what gets built), recorded in the
+registry under one profile, and driven by one Holler hub and one Holler body, both on this machine.
 
 **Never use `herdr-mirror` for this.** Three separate confirmed incidents (in the handbook
 doc's "Mirror gotchas" section) include one where the mirror daemon's own reconciliation
-killed the real remote processes, not just their viewer panes. Everything below uses plain
-local panes + `opencode attach`, which never touches the mirror daemon.
+killed the real processes it was only meant to show, not just their viewer panes. Everything below
+builds registry panes through Holler's pane verbs, which never touch the mirror daemon.
+
+**Never drive a Herdr pane yourself.** Every pane is built, changed and read through Holler, and
+every Holler pane call goes through one door, `herdr.sh holler` (Stage 6 says why). The wizard runs no
+Herdr pane or workspace command of its own: `herdr.sh run` reaches Herdr only for `status`,
+`session list` and `workspace list`, and refuses every other word (exit 2, naming `holler pane`).
 
 **Shell variables do not persist between commands.** Every command you run starts a fresh
 shell: nothing you assigned or `export`ed in an earlier command exists in the next one. So every
@@ -52,70 +55,55 @@ never signal it, report its pid, owner and command, then stop and ask the user. 
 even when a foreign process holds a port or a name the plan needs. Do it with
 `stop-owned.sh` in the skill's `lib` directory (it asks `ledger.sh` and signals nothing by name
 or pattern): `bash $WIZARD_LIB/stop-owned.sh stop <state_dir> <pid>`, `... restart <state_dir> <pid>`,
-`... check-port <state_dir> <port>`, `... teardown <state_dir>`. Exit 0 is done, 1 is stale, 2 is
-foreign (both unsignalled: report and ask), 3 is still running, 4 is a usage error. Do not
-substitute a hand-written `kill`, `pkill` or `killall`. `<state_dir>` is the instance's resolved
-state directory on the host the process runs on (Stage 1). The ledger lives on that host, so for
-a remote host run the script there, sending it and `ledger.sh` together (the copy lives in a
-scratch directory under that host's home and is removed at the end):
-```bash
-tar -C $WIZARD_LIB -cf - ledger.sh stop-owned.sh | ssh <remote_host> 'd=$(mktemp -d "$HOME/.wizard-run.XXXXXX") && tar -C "$d" -xf - && bash "$d/stop-owned.sh" <verb> <state_dir> <pid-or-port>; rc=$?; rm -rf "$d"; exit $rc'
-```
-The last word depends on the verb: a pid for `stop` and `restart`, a port for `check-port`, and for
-`teardown` the third argument is empty or `--purge-state` (leave the word out when it is empty).
-The Herdr server the wizard started for the instance is a ledger process like any other: it
-stops through `stop-owned.sh` (a `herdr` row), never through `herdr.sh run server stop`.
+`... check-port <state_dir> <port>`, `... teardown <state_dir>` (with `--purge-state` as a third
+argument only when the user asked for it). Exit 0 is done, 1 is stale, 2 is foreign (both
+unsignalled: report and ask), 3 is still running, 4 is a usage error. Do not substitute a
+hand-written `kill`, `pkill` or `killall`. `<state_dir>` is the instance's resolved state directory
+(Stage 1). The Herdr server the wizard started for the instance is a ledger process like any other:
+it stops through `stop-owned.sh` (a `herdr` row), never `herdr.sh run
+server stop` (which `herdr.sh` refuses anyway). **A pane is not a ledger process**: Holler started it
+and records it, so it stops only through `holler pane close` (the teardown in "If a stage fails"),
+never through `stop-owned.sh` or a signal.
 
 A ledger left at the old path (`<state_dir>/wizard-ledger.toml`, before the wizard moved its files to
 `<state_dir>/herdr/setup/`) is not read: its processes look foreign. The operator may move the file by hand.
 
-**What's genuinely generalized here vs. what's still OpenCode-specific:** every orchestrator
-(command, working directory, and there can be more than one) is fully config-driven and can be
-any CLI agent. The session side already carries a per-entry `harness` field (per
-`docs/adr/ADR-0005.md`'s config shape) — but **Stage 4 (starting a backend) and Stage 9
-(attaching a live view) only have real, implemented logic for `harness = "opencode"` today.** A
-config entry with a different harness value is real config Holler itself may already support
-for spawn-mode sessions, but this wizard's own backend-start and live-view mechanics haven't
-been built for anything but OpenCode's attach-mode HTTP server yet — see the explicit gate on
-this in Stages 4 and 9, don't silently assume another harness works the same way.
+**Two harnesses, one kind of pane.** A pane's harness is OpenCode (`harness = "opencode"`, the default)
+or Claude Code (`harness = "claude"`, #831), and an orchestrator is a role on a pane of either kind, never
+a free-form command: Holler starts what the harness adapter builds, so what a pane holds is its harness
+and nothing else. Where the two differ, the stage says so: an OpenCode pane has a server on a fixed port,
+and its model is recorded, not applied, until #829 (its server runs what its OpenCode configuration
+selects); a Claude Code pane has no server and no port, its model and effort are applied, and it has no
+body row and no roster row until #850, so Stage 10's `holler say` round trip covers OpenCode panes only.
 
 ## Connections this wizard's setup actually makes
 
-Holler has its own wire protocol — this is what Stage 0's and Stage 2's checks (`tailscale status`, the hub
-port, the OpenCode model endpoint) are really probing, so it's worth stating explicitly rather
-than leaving it implicit in scattered preflight commands. **Every literal port and path in this
-section is the default instance's** (hub port 41807, serve port 443, the unnamed Herdr socket); an
-`[instance]` table changes them (`hub_port`, `serve_https_port`, `herdr_session`, and a session's
-own backend port), and the stages below always use the instance's values. Four distinct connections, verified
-against the real ADRs in the `holler` repo (`docs/adr/ADR-0004.md`, `ADR-0005.md`, `ADR-0006.md`)
-rather than assumed:
+Every literal port and path in this section is one of the default instance's **defaults** (hub port
+41807, the OpenCode panes' ports from 47001, the unnamed Herdr session's socket); an `[instance]` table
+changes them (`hub_port`, `backend_port_base`, `herdr_session`, and a pane's own `backend_port`), and the
+stages below always use the instance's values. Everything runs on this one machine, so every
+connection is loopback or a local socket, verified against the ADRs in the `holler` repo
+(`docs/adr/ADR-0004.md`, `ADR-0014.md`, `ADR-0021.md`) rather than assumed:
 
-1. **Hub ↔ body ("the circuit")** — the only connection that crosses machines. JSON-RPC 2.0 over
-   a WebSocket (ADR 0004). The hub binds **loopback only** (`ws://127.0.0.1:41807`); the
-   supported cross-machine path is `tailscale serve --bg --https 443 41807` (the defaults)
-   proxying that to `wss://<hub-host>.<tailnet>.ts.net` (port 443, ADR 0006) — this is Stage 6's `hub serve` +
-   `tailscale serve` and Stage 7's `body join`/`body run`. Authenticated by a minted token
-   (`circuit/join`) plus a Noise XK handshake (`circuit/authenticate`/`circuit/prove`,
-   ADR-0019) — a tailnet IP is **never** trusted as identity on its own (ADR 0006 point 4).
-2. **Body ↔ its own backend agent ("the body hop")** — for `harness = "opencode"` in attach
-   mode, plain HTTP on **loopback only**, `http://127.0.0.1:<port>` on the *body's own machine*
-   (ADR 0005) — attach mode has no remote-endpoint form, which is exactly why Stage 4 starts
-   `opencode` on the same remote host the body itself runs on, never elsewhere. Co-location is
-   per body, not global — **different sessions can live on different remote hosts**, each with
-   its own body process; that's exactly what each session's own `remote_host` field controls
-   (see "The config file" below) and what Stage 7 groups by, rather than assuming one host for
-   everything.
-3. **The backend agent ↔ its model** — e.g. OpenCode ↔ a local or hosted model provider, as
-   configured on each remote host (its `opencode.jsonc` provider block). This is the backend's
-   own concern, not part of Holler's wire protocol at all — Stage 2 checks it only because a
-   session can't do anything useful without it.
-4. **This wizard's own Herdr control** — a **local Unix socket**
-   (`~/.config/herdr/herdr.sock`), never a network connection, and entirely unrelated to
-   Holler's wire. Stage 8 talks to it to build/inspect panes; it has nothing to do with how
-   sessions actually communicate.
+1. **Hub ↔ body ("the circuit").** JSON-RPC 2.0 over a WebSocket (ADR 0004) on loopback,
+   `ws://127.0.0.1:41807`: the hub binds loopback only, and the body on this machine dials it there (a
+   plaintext `ws://` to a loopback host is allowed, so there is no TLS proxy and no tailnet in the
+   path). Authenticated by a minted token (`circuit/join`) plus a Noise XK handshake (ADR-0019). Stage 4
+   starts the hub; Stage 8 joins and runs the body.
+2. **Body ↔ each OpenCode pane's server ("the body hop").** Attach mode (ADR 0014): plain HTTP on
+   loopback, `http://127.0.0.1:<port>`, to the server Holler started inside that pane's tmux session.
+   The body is not that server's parent, and its rows take each pane's port and session of record from
+   the registry (Stage 8). A Claude Code pane has no server and no body row yet (#850).
+3. **Holler ↔ Herdr, tmux and the harnesses.** Holler's pane verbs reach Herdr through its adapter over
+   Herdr's **local Unix socket** (for the default instance `~/.config/herdr/herdr.sock`), run each pane's
+   harness in a tmux session named as the pane (the default instance on tmux's default server, a named
+   instance on its own socket), and reach OpenCode over loopback HTTP and Claude Code as a process. The
+   wizard itself reaches Herdr only for the server's start and its read-only status words.
+4. **A harness ↔ its model.** OpenCode's provider block in `~/.config/opencode/opencode.jsonc`; Claude
+   Code's own login. Not part of Holler's wire: Stage 2 checks the OpenCode model only because a pane
+   can't do anything useful without it, and the wizard never touches the Claude Code login (Stage 9).
 
-Only connection 1 ever needs a firewall/tailnet consideration; 2-4 are all loopback or a local
-socket, on whichever single machine each one lives on.
+None of them crosses machines, so nothing here needs a firewall or tailnet consideration.
 
 ## The config file
 
@@ -138,147 +126,108 @@ you report Stage 1's result — don't leave it ambiguous which config is in effe
 row then column, like a spreadsheet cell: `r1c1`, `r1c2`, `r1c3`, `r1c4` for the first row, `r2c1`
 for the first cell of the second row, and so on. `layout` is built as columns of those names.
 
-Everything this wizard needs to know — every orchestrator, every session, the whole layout, and
-which machine everything remote actually runs on — is authored in whichever file that is. The
-user edits one file, not several:
+Everything this wizard needs to know — every pane, its directory, harness and role, the whole
+layout, and the defaults the panes share — is authored in whichever file that is. The user edits one
+file, not several:
 
 ```toml
-# LAYOUT — one field, a nested array: outer = columns, left to right; inner = each column's
-# panes, top to bottom. This is the ENTIRE workspace layout — every `[[orchestrator]]` name and
-# every `[[session]]` name is a real slot in this grid, nothing assumed. Every `[[orchestrator]]`
-# name must appear in `layout` exactly once; every `[[session]]` name must appear exactly once;
-# `[[orchestrator]]` and `[[session]]` names must not collide with each other (one flat
-# namespace) — Stage 1 validates all of that. This example — o1 alone in its own column,
-# alpha/beta stacked in a second column — is today's usual shape, but it's not assumed.
-#
-# MUST come before every table header below (`[[orchestrator]]`, `[[session]]`) — a bare
-# top-level key placed after any table header is parsed as belonging to THAT table, not the
-# file's top level. This bit the wizard's own real config once; don't repeat it.
-layout = [["o1"], ["alpha", "beta"]]
+# THE DEFAULTS every pane takes unless it sets its own: the model (provider/id, read from this
+# machine's OpenCode configuration in Stage 1), the effort, and the two context ceilings a watchdog
+# reads. A new pane spec needs all four. A Claude Code pane never takes this `model` (it names an
+# OpenCode model): it sets its own. Bare top-level keys, before every table header.
+model = "provider/model-name"
+effort = "medium"
+ctx_soft = 800000
+ctx_hard = 900000
 
-# THIS machine's own tailnet FQDN — the hub advertises it so remote bodies can dial back.
-# (Bare top-level key for the same "must come before any table header" reason as layout.)
-hub_host = "hub.example.ts.net"
+# LAYOUT — one field, a nested array: outer = columns, left to right; inner = each column's
+# panes, top to bottom. This is the ENTIRE workspace layout: every `[[pane]]` name is a real slot in
+# this grid and appears in it exactly once. No column may be taller than the column to its left (the
+# first column is the tallest): Herdr adds a row only below a row of one pane, so that is the set of
+# grids Holler can build. Stage 1's check refuses a taller column, naming `layout` and the column.
+#
+# MUST come before every table header below (`[instance]`, `[[pane]]`) — a bare top-level key
+# placed after any table header is parsed as belonging to THAT table, not the file's top level.
+# This bit the wizard's own real config once; don't repeat it.
+layout = [["r1c1", "r2c1"], ["r1c2", "r2c2"]]
 
 # OPTIONAL — the name of the Herdr workspace: 1 to 40 characters, a letter or digit first, then
-# letters, digits, spaces, `.`, `_` or `-`. Bare top-level key, before every table header.
+# letters, digits, spaces, `.`, `_` or `-`. Bare top-level key, before every table header. With no
+# `workspace` it is `holler`. The same name is the profile the wizard builds (`<profile>`).
 workspace = "herald-relay"
 
 # OPTIONAL — an `[instance]` table, to build a second Holler instance beside a running one.
 # Leave it out and everything below behaves exactly as before. It is a table header, so it goes
-# AFTER the bare top-level keys above and BEFORE `[[orchestrator]]`/`[[session]]`. Every value
-# shown is the default. A non-default instance must set `name`, `state_dir` and `herdr_session`.
-# Stage 1 validates it with `lib/instance.sh`. A session may also set its own `backend_port`.
+# AFTER the bare top-level keys above and BEFORE every `[[pane]]`. Every value shown is the
+# default. A non-default instance must set `name`, `state_dir` and `herdr_session`. Stage 1
+# validates it with `lib/instance.sh`. An OpenCode pane may also set its own `backend_port`.
 # See docs/setup-wizard.md.
 #
 # [instance]
 # name = "default"             # ^[a-z][a-z0-9-]{0,23}$
 # prefix = "default"           # prefixes every log, config and process name; defaults to `name`
 # hub_port = 41807             # 1024 to 65535
-# serve_https_port = 443       # 1 to 65535 (the `tailscale serve` HTTPS port)
+# serve_https_port = 443       # 1 to 65535; still validated, and unused: the hub is served on loopback only
 # state_dir = ""               # absolute or ~/ path; empty = Holler's default ($HOME/.holler)
 # herdr_session = ""           # empty = no named Herdr session
-# backend_port_base = 47001    # session i (0-based) listens on base + i unless it sets backend_port
+# backend_port_base = 47001    # OpenCode pane i (0-based, layout order) listens on base + i unless it sets backend_port
 
-# Orchestrators — one or more. Each is real, named config: `name` is how `layout` below refers
-# to it, `dir` is its working directory, `cmd` is commonly "claude" but can be any CLI agent (an
-# opencode TUI, a plain shell script, whatever briefing that orchestrator needs). Each drives
-# whichever sessions it's briefed to via Holler's own CLI (the say, roster and interrupt verbs, run
-# against this instance's hub; see Stage 8's briefing) — the wizard itself doesn't assign sessions to
-# orchestrators; that's a matter of what each orchestrator is told to do, not layout.
-[[orchestrator]]
-name = "o1"
-dir = "~/Projects/holler"
-cmd = "claude"
+# One `[[pane]]` per grid cell. `name` is how `layout` refers to it (lower-case letters and digits,
+# `-` between them, 1 to 32 characters: it is also the pane's tmux session name); `dir` is its
+# working directory (absolute, or starting with ~/); `harness` is "opencode" (the default) or
+# "claude"; `role` is "agent" (the default) or "orchestrator" — at least one pane is an orchestrator,
+# and there may be several (the MO pattern). Optional: `agent` (the OpenCode agent the pane's
+# messages run as), `backend_port` (an OpenCode pane's own port), and `model`, `effort`,
+# `ctx_soft`, `ctx_hard` to override the defaults above for this pane.
+[[pane]]
+name = "r1c1"
+dir = "~/Projects/demo"
+role = "orchestrator"
 
-# `harness` is real, per-session config (per docs/adr/ADR-0005.md) — "opencode" is what this
-# wizard's Stage 4/Stage 9 actually know how to start and live-view today; a different value is
-# valid Holler config but this wizard will flag it as unimplemented rather than guess a
-# mechanism for it (see Stages 4 and 9's Gates).
-#
-# `remote_host`/`remote_tailnet_host` are PER SESSION, not a single global value — attach mode
-# requires a session's body and backend to be co-located (ADR 0005), but that co-location can
-# happen on a DIFFERENT host per session/body-group. `remote_host` is the SSH alias/hostname
-# (matching your `~/.ssh/config` or a plain resolvable name); `remote_tailnet_host` is that same
-# machine's tailnet FQDN, used to build the `wss://`/`http://` URLs the hub and `opencode
-# attach` actually dial — not always identical to `remote_host` (an SSH alias and a MagicDNS
-# name are different namespaces, even when they point at the same box). Stage 7 groups sessions
-# by `remote_host` and runs one Holler body per distinct host, not one body for everything.
+[[pane]]
+name = "r2c1"
+dir = "~/Projects/demo"
 
-[[session]]
-name = "alpha"
-harness = "opencode"
-mode = "attach"
-endpoint = "http://127.0.0.1:47001"
-remote_host = "remote-a"
-remote_tailnet_host = "remote-a.example.ts.net"
-# session_id filled in by Stage 5 — leave absent or blank in the template
+[[pane]]
+name = "r1c2"
+dir = "~/Projects/demo"
+harness = "claude"
+model = "anthropic/claude-sonnet-5-5"   # a Claude Code pane sets its own model
 
-[[session]]
-name = "beta"
-harness = "opencode"
-mode = "attach"
-endpoint = "http://127.0.0.1:47002"
-remote_host = "remote-a"
-remote_tailnet_host = "remote-a.example.ts.net"
+[[pane]]
+name = "r2c2"
+dir = "~/Projects/demo"
+agent = "build"
 ```
 
-**Two orchestrators, with sessions split across two different remote hosts, looks exactly like
-more entries in the same lists — no different mechanism, and this is where per-session
-`remote_host` actually earns its keep:**
-```toml
-layout = [["o1"], ["alpha", "beta"], ["o2"], ["gamma", "delta"]]   # must come first — see above
-hub_host = "hub.example.ts.net"
+That is a 2 x 2 grid of four panes: an OpenCode orchestrator at `r1c1`, two OpenCode agents and one
+Claude Code agent. Which panes an orchestrator actually *drives* is up to how it is briefed (its own
+`AGENTS.md`, per the "MO" (multiple-orchestrator) pattern) — `layout` only controls where panes sit on
+screen, not who talks to whom over Holler. With a pane count that does not fill the last row, the short
+columns go on the right: five panes are `[["r1c1", "r2c1"], ["r1c2", "r2c2"], ["r1c3"]]`.
 
-[[orchestrator]]
-name = "o1"
-dir = "~/Projects/holler"
-cmd = "claude"
+If a `[[pane]]` is missing `name` or `dir`, ask the user once (in Stage 1) for what's missing, state
+the value you propose and let them confirm or override it, and write the answer back into this same
+file — don't ask again on every run.
 
-[[orchestrator]]
-name = "o2"
-dir = "~/Projects/other-project"
-cmd = "claude"
+**The retired tables and keys.** A config of the previous wizard has `[[orchestrator]]` and
+`[[session]]` tables and the keys `endpoint`, `mode`, `session_id`, `cmd` and the two remote-host keys:
+the wizard no longer builds attach-mode sessions on other machines, and an orchestrator is a role on a
+pane. `bash $WIZARD_LIB/panes.sh check <config>` refuses each by name, and Stage 1 offers the conversion.
+`hub_host` is accepted and ignored (`check` prints one warning line): nothing on another machine dials
+the hub any more.
 
-# alpha, beta: remote_host = "remote-a" (both on the same remote machine, one body)
-# gamma, delta: remote_host = "remote-b" (both on a different machine, a second body)
-# ... [[session]] entries for alpha, beta, gamma, delta, each with its own remote_host/
-#     remote_tailnet_host ...
-```
-That's 4 columns: o1 alone, alpha/beta stacked, o2 alone, gamma/delta stacked — 6 panes total,
-2 orchestrators + 4 sessions, all real data in one file — and **2 real Holler bodies**, one on
-`remote-a` (hosting alpha/beta) and one on `remote-b` (hosting gamma/delta), because Stage 7 groups by
-`remote_host`. Which sessions o1 vs. o2 actually *drive* is up to how each is briefed (its own
-`AGENTS.md`/prompt, per the "MO" (multiple-orchestrator) pattern) — `layout` only controls where
-panes sit on screen, not who talks to whom over Holler, and is independent of which host each
-session's body actually runs on.
-
-If any `[[orchestrator]]` entry is missing `name`/`dir`/`cmd`, ask the user once (in Stage 1)
-for whatever's missing — don't default `cmd` to `"claude"` silently just because that's the
-common case; state the default you're proposing and let them confirm or override it, and write
-the answer back into this same file — don't ask again on every run.
-
-**The master file is not the body's config.** Holler's parser
-(`crates/holler-body/src/config.rs`) denies unknown keys at the top level and per session (typos
-stay errors). It knows `hub_host`, `layout`, `[[orchestrator]]` and each session's
-`remote_host`/`remote_tailnet_host` and ignores them, validating only their types. It does **not**
-know the wizard's `[instance]` table or a session's `backend_port`: a file holding either makes
-`holler body run` fail to start. So the wizard always writes a **derived body config** per distinct
-`remote_host` (Stage 7), and that copy is what `scp` and `--config` use. The derived body config
-holds only that host's `[[session]]` tables; it **drops** the `[instance]` table and every
-session's `backend_port`, and **sets** each session's `endpoint` to
-`http://127.0.0.1:<resolved backend port>`, taking the port from what `instance.sh` printed for
-that session in Stage 1 (with an `[instance]` table the master file's own `endpoint` may name
-the first instance's port; the body would dial that backend). It also **drops** the top-level `workspace` key (the body denies unknown top-level keys).
-The wizard-only keys
-(`remote_host`, `remote_tailnet_host`, `hub_host`, `layout`, `[[orchestrator]]`) may stay or be
-dropped; other tools may add their own data under a top-level `[ext.<namespace>]` or per-session
-`[session.ext.<namespace>]` table, which the body also ignores. The master file — whichever of the
-three sources Stage 1 actually loaded (explicit `--config` flag, cwd, or the global fallback) —
-keeps every field, including `[instance]`, `hub_host`, every `[[orchestrator]]`, `layout`, every
-session's `remote_host`/`remote_tailnet_host` and the real `session_id`s once captured, for next
-time. Don't hand-author separate files by hand — one master file in, the per-host derived files
-(one per host) are *generated*, every run.
+**The master file is not the body's config.** Holler's parser (`crates/holler-body/src/config.rs`)
+denies unknown keys at the top level and per session (typos stay errors), and it does not know the
+wizard's `[instance]` table, a pane's `backend_port`, a `[[pane]]` table or the top-level `workspace`
+key: a file holding any of them makes `holler body run` fail to start. So Stage 8 writes a
+**derived body config**, built from the registry rather than copied from this file: it **drops** the `[instance]`
+table and every `[[pane]]` table with its `backend_port`, it **drops** the top-level `workspace` key with
+`layout` and the defaults, and it **sets** one `[[session]]` row per OpenCode pane whose `endpoint` and
+`session_id` are that pane's port and session of record as `holler pane get NAME --format=json` prints
+them, never values from this file. The master file — whichever of the three sources Stage 1 actually
+loaded (explicit `--config` flag, cwd, or the global fallback) — keeps every field for next time; the
+derived file is *generated*, every run, at `<body_config>` (Stage 8). Don't hand-author it.
 
 ## How to run this: one stage at a time, gated on real verification
 
@@ -303,28 +252,31 @@ For every stage:
 1. State which stage you're starting (`Stage N/11: <name>`, N running 0 through 11 — 12 stages
    total: Stage 0 (the Preflight), the build-and-verify stages 1 to 10, and the final Stage 11).
 2. If the stage has an **Ask** line, ask the user that question and wait for the answer before
-   doing anything else in the stage — don't guess a pane id, port, hostname, orchestrator
-   name/command/directory, or harness-specific behavior that varies by session state or config.
-3. Run the **Do** commands — for stages 4/5/8/9, this means looping over every session (and, in
-   Stage 8, every orchestrator) in the config you read in Stage 1, not a fixed alpha/beta pair
-   or a fixed single orchestrator, and using each entry's own `harness`, not assuming
-   `opencode`.
+   doing anything else in the stage — don't guess a directory, a harness, a port, a model or a name.
+3. Run the **Do** commands — in Stages 6 to 9 this means every line `panes.sh` printed and every pane
+   in the config you read in Stage 1, not a fixed pair or a fixed single orchestrator, and each pane's
+   own `harness`, not an assumed `opencode`.
 4. Run the **Verify** command and read its real output — never assume success from a command's
-   exit code alone if Verify gives you something more concrete to check (a session id, a
-   `connected` row, a reply's content).
+   exit code alone if Verify gives you something more concrete to check (a step's outcome, a pane's
+   cell, a `connected` row, a reply's content).
 5. Report one line: what you did, what Verify actually showed.
 6. **Gate:** if Verify passed, move to the next stage automatically. If it failed, don't retry
    blindly, don't skip ahead, and don't improvise a fix silently — but also don't just stop and
    hand the problem back unresolved. Look up the matching entry in "If a stage fails" below, tell
    the user plainly what broke, and ask them the one concrete question that unblocks it (a
-   missing value, a yes/no on killing something, which of two real options they want) — then act
+   missing value, a yes/no on stopping something, which of two real options they want) — then act
    on their answer and resume the stage sequence from wherever it left off. Only end the run
    early if the user's answer is itself "stop," or if a stage's own Gate is explicit that no
-   answer can resolve it (an unimplemented harness, for instance).
+   answer can resolve it.
+
+**Every Holler call is bounded, and a failure is a question.** Each pane and profile verb carries its
+own 10 s per-call bound; `profile apply` adds those bounds up over its creates (Stage 7 states the
+sum and the timeout to give it). A call that fails is a Gate with a question: never a retry loop,
+and never a fallback to a Herdr command.
 
 **Stage 3 is a hard stop, not just a gate like the others: nothing that changes real state
-(starting a process, killing one, joining, splitting a pane) may happen before the user has
-explicitly said to proceed.** Stage 0 (apart from installing Herdr or the skill, each on its own yes) and Stages 1 and 2 are read-only except the scratch directory and the config file you write from the user's answers (loading a file,
+(starting a process, stopping one, joining, creating a profile or a pane) may happen before the user
+has explicitly said to proceed.** Stage 0 (apart from installing Herdr or the skill, each on its own yes) and Stages 1 and 2 are read-only except the scratch directory and the config file you write from the user's answers (loading a file,
 checking status; the only things they write are `<scratch>` and that config file, and installing the skill needs its own
 yes, see Stage 0) so they're safe to run ahead of that; everything from Stage 4 onward is not.
 
@@ -340,31 +292,32 @@ directly after the preflight status table, and every stage transition reprints t
 | 1     | Load the session config                                  | ✅     |
 | 2     | Config checks                                            | ✅     |
 | 3     | Present the plan, get assent                             | 🔄     |
-| 4     | Start remote agent backends (N=2: alpha, beta — harness: opencode) | ⬜ |
-| 5     | Capture session IDs                                      | ⬜     |
-| 6     | Bring up the hub                                         | ⬜     |
-| 7     | Join + run the body                                      | ⬜     |
-| 8     | Build the Herdr workspace (M+N panes)                    | ⬜     |
-| 9     | Attach panes to sessions                                 | ⬜     |
+| 4     | Bring up the hub                                         | ⬜     |
+| 5     | Start the Herdr server                                   | ⬜     |
+| 6     | Create the profile                                       | ⬜     |
+| 7     | Build the panes                                          | ⬜     |
+| 8     | Join and run the body                                    | ⬜     |
+| 9     | Check the registry                                       | ⬜     |
 | 10    | Verify end-to-end                                        | ⬜     |
 | 11    | Basic Herdr commands                                     | ⬜     |
 ```
 
 ✅ done · 🔄 in progress (the stage you just started) · ⬜ not started yet · ⏭️ skipped (nothing to
-do, for example no sessions) · ❌ failed/stopped (pair with a one-line reason). The legend stays
-one line under the first table. Include the real M (orchestrator count), N (session count), and
-every name/harness once known (from Stage 1 onward), not a generic "N sessions" placeholder —
-the point is a human can read it at a glance, including which harness is actually in play.
+do, for example Stage 8 with no OpenCode pane: there is no body row) · ❌ failed/stopped (pair with a
+one-line reason). The legend stays one line under the first table. From Stage 1 onward add the real
+counts to the Name column where they help (the pane count, how many run OpenCode and how many Claude
+Code, the orchestrators' names), not a generic "N panes" placeholder — the point is a human can read it
+at a glance, including which harnesses are actually in play.
 
 ## Stage 0 — Preflight
 
 **Stage 0 is the Preflight: machine-level and read-only, and it needs no config.** It looks at what this
 machine has, prints it as one status table, and ends with the question "All systems go.
 Proceed?". Its one write is installing `herdr` (or the skill's own directory), each only on an
-explicit yes. It has nothing to do with any remote host or with building a workspace: the
-checks that need the config (the orchestrators, the remote hosts, the model endpoints) are
-Stage 2's. Never fold the install question and the closing question into one ask: a yes to
-installing Herdr is not a yes to also setting up a workspace in the same run.
+explicit yes. It has nothing to do with building a workspace: the checks that need the config (each
+pane's directory and harness, the OpenCode model) are Stage 2's. Never fold the install question and
+the closing question into one ask: a yes to installing Herdr is not a yes to also setting up a
+workspace in the same run.
 
 **First, locate the skill's scripts and define `WIZARD_LIB` (once, here, in Stage 0).** Every helper script
 this wizard runs lives in the `lib/` directory of the **whole** installed skill directory, not
@@ -373,8 +326,9 @@ just `SKILL.md`. The one definition, an absolute path (`<HOME>` is the output of
 ```
 WIZARD_LIB=<HOME>/.claude/skills/herdr-setup/lib
 ```
-Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh`.
-If the files are not there, the skill was installed as a single file. Installing writes into
+Check it before going on: `ls <that path>/ledger.sh <that path>/instance.sh <that path>/herdr.sh <that path>/panes.sh`.
+If the files are not there, the skill was installed as a single file, or by a version of this skill
+from before `panes.sh` existed. Installing writes into
 `~/.claude/skills`, so **ask the user before installing** (Stage 0 changes nothing else but Herdr, on its own yes), then
 install the whole directory (works on a machine with no checkout of this repository, and needs no
 `sudo`):
@@ -391,9 +345,10 @@ Herdr settings here are the default instance's (the config is not read yet); a c
 ```bash
 command -v herdr >/dev/null 2>&1 && herdr --version || echo "herdr: not found"
 command -v holler >/dev/null 2>&1 && holler --version && holler --help || echo "holler: not found"
-command -v tailscale >/dev/null 2>&1 && tailscale status --self --json || echo "tailscale: not found"
-command -v ssh >/dev/null 2>&1; echo "ssh: exit $?"
-for f in ledger instance herdr; do test -f <WIZARD_LIB>/$f.sh && echo "$f.sh ok" || echo "$f.sh MISSING"; done
+command -v tmux >/dev/null 2>&1 && tmux -V || echo "tmux: not found"
+command -v opencode >/dev/null 2>&1 && echo "opencode: $(command -v opencode)" || echo "opencode: not found"
+command -v claude >/dev/null 2>&1 && echo "claude: $(command -v claude)" || echo "claude: not found"
+for f in ledger instance panes herdr; do test -f <WIZARD_LIB>/$f.sh && echo "$f.sh ok" || echo "$f.sh MISSING"; done
 WIZARD_INSTANCE_NAME=default bash $WIZARD_LIB/herdr.sh check-pane
 WIZARD_INSTANCE_NAME=default bash $WIZARD_LIB/herdr.sh run status 2>&1
 herdr session list 2>&1   # default instance only
@@ -401,10 +356,15 @@ HOLLER_STATE_DIR="$HOME/.holler" holler hub status 2>&1   # default instance onl
 cat "$HOME/.holler/herdr/setup/wizard-ledger.toml" 2>&1   # default instance only
 ls ./sessions.toml "$HOME/.holler/herdr/setup/sessions.toml" 2>&1
 ```
-A `--config <path>` flag in the invocation text is the first of the three config tiers: report
-whether that file exists. When `herdr` or `holler` is off `PATH`, use its
-absolute path (see the note after Verify). A missing tool is a row of the table, not a failure of
-the stage.
+When `holler` is found, also run `holler pane --help` on its own: it must list the pane verbs
+(`launch`, `list`, `get`, `doctor`, `close`), and `holler --help` must list `pane` and `profile` beside
+`hub` and `body`. A `holler` without them predates pane control (epic #633). Each of `tmux`, `opencode`
+and `claude` counts as present only when `command -v` prints an absolute path: Holler finds `opencode`
+and `claude` as executables on `PATH`, never through a shell alias, so an alias (which `command -v`
+prints as `alias ...`) is not an alias Holler can use — it is missing. A `--config <path>` flag in the
+invocation text is the first of the three config tiers: report whether that file exists. When `herdr`
+or `holler` is off `PATH`, use its absolute path (see the note after Verify). A missing tool is a row of
+the table, not a failure of the stage.
 
 **Print one vertical status table**, columns Check, Result and Detail, one row per machine fact
 the wizard can establish without a config:
@@ -412,9 +372,10 @@ the wizard can establish without a config:
 | Check | Result | Detail |
 |---|---|---|
 | `herdr` installed | ok / missing | the version; the absolute path when it is off `PATH` |
-| `holler` is the current single binary | ok / missing / legacy | the version; whether `hub` and `body` subcommands exist (the legacy client lists flat `join`/`run`/`detach`/`attach` verbs and a `0.1.x` version) |
-| `tailscale` present and logged in | ok / absent | this machine's tailnet name (`.Self.DNSName`, trailing dot stripped) |
-| `ssh` present | ok / absent | absent means manual-relay mode in Stage 2 and after |
+| `holler` is the current single binary | ok / missing / legacy | the version; whether `hub`, `body`, `pane` and `profile` subcommands exist (`holler pane --help` lists the pane verbs; the legacy client lists flat `join`/`run`/`detach`/`attach` verbs and a `0.1.x` version) |
+| `tmux` present | ok / absent | the version: every pane's harness runs in a tmux session |
+| `opencode` present | ok / absent | the absolute path (an executable on `PATH`, not an alias); needed by an OpenCode pane |
+| `claude` present | ok / absent | the absolute path (an executable on `PATH`, not an alias); needed by a Claude Code pane |
 | The skill's `lib/` scripts present (`WIZARD_LIB`) | ok / missing | the absolute `lib` path |
 | Driving agent not inside a Herdr pane (`check-pane`) | ok / stop | a stop is a Stage 3 refusal, carried forward |
 | Herdr server state and saved sessions | info | the server running or stopped, and every session from `herdr session list` with its status (running or stopped) |
@@ -439,17 +400,17 @@ curl -fsSL https://herdr.dev/install.sh | sh
 ```
 This is the canonical installer from the real `herdrdev/herdr` project (verified against its own
 `README.md`, `https://github.com/herdrdev/herdr`) — it installs only the `herdr` binary itself
-for the current user on this machine; it does not touch any remote host, and it says nothing about
-whether `holler` is present (that is its own row, and Stage 2 checks `holler` on every remote
-host). If the user would rather use Homebrew (a real, equally valid path on a Homebrew-managed
-machine), `brew install herdr` is the same install, just via a different channel — use whichever
-the user asks for; don't default to one over the other without asking if they have a preference.
+for the current user on this machine, and it says nothing about whether `holler`, `tmux`,
+`opencode` or `claude` is present (each is its own row). If the user would rather use Homebrew (a
+real, equally valid path on a Homebrew-managed machine), `brew install herdr` is the same install,
+just via a different channel — use whichever the user asks for; don't default to one over the other
+without asking if they have a preference.
 
 **Verify:** the stage re-checks `herdr` after an install, then prints the status table again with the new result:
 ```bash
 command -v herdr >/dev/null 2>&1 && herdr --version || echo "herdr: still not found"
 ```
-**A real Homebrew/Linuxbrew-installed `herdr` (or `holler`, same issue for its row and in Stage 2) can still
+**A real Homebrew/Linuxbrew-installed `herdr` (or `holler`, same issue for its row) can still
 report `not found` here even in a login shell (`bash -lc`)** — this isn't just the
 login-vs-non-login PATH gap noted elsewhere; some machines simply never added the brew prefix's
 `bin` dir to `$PATH` at all. Confirmed live 2026-09-23: `herdr` was a real, working
@@ -463,16 +424,18 @@ If one of those resolves to a real binary, it *is* installed — just not on thi
 Don't fix the shell profile as part of this wizard; simplest is to use that absolute path for
 every `herdr`/`holler` invocation on this host for the rest of the run, and say plainly that
 you're doing so (once, not on every command). For Herdr that means `HERDR_BIN=<that absolute
-path>` among the Herdr settings Stage 1 defines (`herdr.sh` runs that binary).
+path>` among the Herdr settings Stage 1 defines (`herdr.sh` runs that binary); for Holler it means
+`WIZARD_HOLLER_BIN=<that absolute path>` among the same settings (`herdr.sh holler` runs that binary).
 
 **Gate:** A no to installing ends the wizard cleanly right here: report plainly that Herdr
 isn't installed and the wizard is stopping, and let the user re-invoke later; do not fall through
 to the closing question. If the install command itself fails, report the real error (network
 failure, permission issue, unsupported platform) and don't proceed to the closing question until
 it is resolved or the user explicitly says to move on without a working `herdr`. A `holler` that
-is missing or the legacy client, a missing `lib/` directory (after the install offer above),
-and a `check-pane` stop are reported as rows of the table and carried forward: the first two are
-Stage 1 and Stage 2 gates, the pane stop a Stage 3 refusal.
+is missing, the legacy client or one without the pane verbs, a missing `tmux`, a missing `lib/`
+directory (after the install offer above), and a `check-pane` stop are reported as rows of the table
+and carried forward: the first ones are Stage 1 and Stage 2 gates, the pane stop a Stage 3 refusal. A
+missing `opencode` or `claude` matters only when the config has a pane of that harness (Stage 2).
 
 **Then, only once `herdr` is confirmed present (already installed, or freshly installed and
 verified) — ask a second, separate, explicit question, never assumed:** **"All systems go. Proceed?"** (yes/no) A no (or "not right now," or any non-committal
@@ -488,13 +451,12 @@ wizard never deletes it. The "no config found" message names the config path it 
 
 **Ask:** yes, if no config exists at any of the three tiers — but as a short scenario menu plus
 whatever's genuinely undiscoverable, not a blank "give me the whole schema" ask (see the Do
-step's own note on why, and the scenario menu it walks through). Also ask if any
-`[[orchestrator]]` entry is missing `name`/`dir`/`cmd` in an existing file — that narrower case
-stays a plain question, no menu needed.
+step's own note on why, and the scenario menu it walks through). Also ask if any `[[pane]]` in an
+existing file is missing `name` or `dir` — that narrower case stays a plain question, no menu needed.
 
 **Do:**
 
-Stage 0 already checked `tailscale`, `ssh` and the `lib/` scripts; use its table. First, check whether the invocation text contains a `--config <path>` flag (or `--config=<path>`)
+Stage 0 already checked the binaries and the `lib/` scripts; use its table. First, check whether the invocation text contains a `--config <path>` flag (or `--config=<path>`)
 — Claude Code skills receive their invocation arguments as free-form text after the command name
 (whatever followed `/herdr-setup` when it was run), not pre-parsed shell argv, so this is
 a text check against that string, not literal `$1`-style argument handling. **If `--config
@@ -524,85 +486,68 @@ fi
 echo "config: $CONFIG"; cat "$CONFIG" 2>&1
 ```
 From here on carry the config's path as a literal (`<config>`); the variable above lives only
-inside that one command. **If neither exists, this is a hard stop before writing anything — but it is NOT a four-category
-interrogation either.** Two failure modes to avoid, both seen live: (1) auto-writing the
-example's own values (`hub_host = "hub.example.ts.net"`, `remote_host = "remote-a"`) —
-those are **placeholder values, not the user's real infrastructure**, copied verbatim from documentation, and on a
-genuinely fresh setup the wizard would sail through validation and Stage 3 could end up trying
-to actually SSH into a real host the new user never chose. (2) swinging the other way and asking
-a brand-new user to compose the *entire* schema cold — orchestrators, every session's four
-remote fields, `hub_host`, `layout` syntax — in one message. That's not a fix, it's punting the
-whole interview onto someone who doesn't yet know the shape well enough to answer it.
+inside that one command. **If neither exists, this is a hard stop before writing anything — but it is
+NOT a full-schema interrogation either.** Two failure modes to avoid, both seen live: (1) auto-writing
+the example's own values (`dir = "~/Projects/demo"`, the example model `provider/model-name`) — those
+are **placeholder values, not the user's real projects or models**, copied verbatim from
+documentation, and on a fresh setup the wizard would sail through validation and build panes in a
+directory the new user never chose. (2) swinging the other way and asking a brand-new user to
+compose the *entire* schema cold — every pane, its harness, the defaults, `layout` syntax — in one
+message. That's not a fix, it's punting the whole interview onto someone who doesn't yet know the
+shape well enough to answer it.
 
 Instead: **discover what's discoverable, default what's reasonable, and only ask for what is
-genuinely unknowable** — a real remote machine's own address is the one thing that can't be
-invented or guessed; everything else here can be.
+genuinely unknowable** — which project directory each pane works in, and which harness it runs;
+everything else here can be read or proposed.
 
-1. **Check whether `tailscale` is even there before trying to use it for anything** — never
-   assume it:
+1. **Read this machine's OpenCode model before proposing one** (read-only; it is the default every
+   OpenCode pane takes):
    ```bash
-   command -v tailscale >/dev/null 2>&1; echo "tailscale: exit $?"
+   cat ~/.config/opencode/opencode.jsonc 2>&1
    ```
-   If that's non-zero, this machine has no `tailscale` client (a real, unremarkable case —
-   nothing about this wizard *requires* Tailscale specifically, it's just what this pattern's
-   been verified against). Skip straight to asking for any `remote_host`/
-   `remote_tailnet_host` values directly (and for `hub_host` only when the config will have a session, N>=1) — don't block on it, don't pretend it's there. It's
-   fine to mention, once, in passing while asking (e.g. "if these machines are on a Tailscale
-   tailnet, I can look values up live instead of you typing them — let me know if `tailscale`
-   is installed somewhere I should check") — a suggestion offered while doing the real work,
-   never a requirement gating it.
+   The model is written `<provider>/<model>`: the top-level `model` key if present, otherwise the
+   single provider/model pair the `provider` block defines. If the file names no default or defines
+   several candidates, **ask the user once** which `<provider>/<model>` to use. Never invent one or
+   copy a value from this document.
 
-2. **If it is there, discover `hub_host` before asking anything** — it's a live fact about
-   *this* machine, not a decision. `hub_host` is optional when N=0 and required when N>=1:
-   ```bash
-   tailscale status --self --json 2>&1
-   ```
-   Use `.Self.DNSName` (strip the trailing dot) if that succeeds. If the command itself fails
-   (installed but not logged in / not running), fall back to asking when N>=1 (same as the "not
-   installed" case above, just reached a different way); for N=0 leave it out of the file.
-
-3. **Offer a scenario menu instead of a blank-slate interview:**
-   - **(A) Just a local orchestrator, nothing remote yet.** Needs only an orchestrator. Propose
-     a default — `name = "r1c1"`, `dir` = the cwd this wizard is running from, `cmd = "claude"` —
-     and ask one confirm-or-override question, not three separate ones. `layout` is then just
+2. **Offer a scenario menu instead of a blank-slate interview:**
+   - **(A) One orchestrator pane, nothing else yet.** Propose a default — `name = "r1c1"`, `dir` =
+     the cwd this wizard is running from, `role = "orchestrator"` — and ask one confirm-or-override
+     question plus its harness (OpenCode or Claude Code), not separate questions. `layout` is then just
      `[["r1c1"]]`, computed, not asked. When the user wants several panes and does not name them,
      the default names are the grid cells, row then column: `r1c1`, `r1c2`, `r1c3`, `r1c4` for
      the first row, `r2c1` for the first cell of the second row, and so on, with `layout` built
      as columns of those names. If they give a pane count and no grid, propose a grid by one rule
      (two rows for more than four panes, up to 8 panes, for example 8 panes as 2 rows of 4; above 8 panes the squarest grid) and ask one confirm.
-     The user's own names always win. This is a fully valid, complete config: a real Herdr pane
-     running a real orchestrator, with no SSH/tailnet knowledge required at all — and doesn't
-     even touch the `tailscale` question above, since there's nothing remote to look up; fill `hub_host` from `tailscale` only when step 2 succeeds, otherwise leave it out. Most
-     useful as the on-ramp for someone who hasn't set up a remote body yet.
-   - **(B) A local orchestrator plus one or more remote attach-mode sessions.** Same
-     orchestrator default as (A) (`name = "r1c1"`, `layout = [["r1c1"]]`), then — and only then — the genuinely unknowable part: for
-     each remote session the user actually wants (ask how many, don't assume a count), get its
-     `remote_host`. If `tailscale` is available (step 1), offer real, live candidates before
-     asking them to type one blind:
-     ```bash
-     tailscale status 2>&1
-     ```
-     lets you show actual reachable peers by name, so the user can pick one instead of
-     recalling/typing a hostname from memory — this is discovery of real machines, not
-     invention of a fake one. `remote_tailnet_host` is that same peer's own tailnet DNSName from
-     the same `tailscale status` output (again read, not asked, once they've picked the host).
-     If `tailscale` isn't available, just ask for `remote_host`/`remote_tailnet_host` directly —
-     that's a completely normal path, most machines aren't on a tailnet at all. Only the session
-     `name` and the OpenCode port are genuinely up to the user either way — ask those together,
-     one line per session, not as four separate prompts each.
+     A count that does not fill the last row leaves its short columns on the right, because no
+     column may be taller than the column to its left. The user's own names always win. This is a
+     fully valid, complete config: one registry pane holding a real orchestrator. Most useful as the
+     on-ramp for someone trying the wizard for the first time.
+   - **(B) A grid of agent panes with an orchestrator** — the typical shape: ask how many panes (or
+     the grid itself), then, in one line per pane, its directory and its harness, then which pane or
+     panes are orchestrators (the default orchestrator cell is `r1c1`). One `ls -1 ~/Projects` is a
+     fair read-only hint for the directories; it pins nothing.
    - **(C) I'll write or paste my own `sessions.toml`.** Tell them the path Stage 1 will look
      for next (`./sessions.toml` or the global fallback) and stop; re-invoke once it exists.
-   - **(D) Something more complex** (multiple orchestrators, sessions split across hosts, an
-     existing config to extend) — fall through to a real interview, but even then, use
-     `tailscale` for discovery only when step 1 found it available, the same way (A)/(B) do;
-     only the shape of *how many* orchestrators/sessions and what each does is genuinely the
-     user's call.
+   - **(D) Something more complex** (several orchestrators in chosen cells, one project per column, an
+     OpenCode agent key per pane, a named Herdr session) — fall through to a real interview; only the
+     shape of the grid and what each pane does is genuinely the user's call.
 
    Present this as an actual choice (e.g. via whatever this session's own means of asking a
    multiple-choice question is), not as open-ended prose — a menu is faster to answer than a
    paragraph asking the same thing.
 
-   **Next, once the orchestrators are settled, ask the Herdr session question** (skip it for (C);
+   **For every pane, its harness, asked plainly:** OpenCode or Claude Code, no third choice. For an
+   orchestrator say once why there is no free-form command to give it: what a pane holds is its
+   harness, which Holler launches, records and reconciles, so a CLI agent or a script of the user's own
+   cannot be a pane. **Then the defaults, asked once** as one confirm-or-override: the `model` read in step 1,
+   `effort = "medium"`, and the ceilings `ctx_soft = 800000` and `ctx_hard = 900000` (the operator
+   guide's own launch example). None of them is a default of Holler, so this is asked, never assumed.
+   A Claude Code pane's `model` is asked on its own (`provider/id`, for example
+   `anthropic/claude-sonnet-5-5`): the proposal above names an OpenCode model, and a Claude Code pane
+   never takes it.
+
+   **Next, once the panes are settled, ask the Herdr session question** (skip it for (C);
    an existing config is not re-asked: its `[instance]` table, or the lack of one, stands, and
    Stage 1's report states which session it targets). Herdr has no session rename, so this is
    decided now, before the workspace is first built. Offer two answers, again as an actual choice:
@@ -626,15 +571,15 @@ invented or guessed; everything else here can be.
      backend_port_base = 47101
      ```
      The ports are defaults only (nothing is probed here): Stage 3's `collide.sh` stays the
-     authority and refuses a taken port, and the user may change any value. Step 4 writes the
-     table after the bare top-level keys and before `[[orchestrator]]`, shows the file, and the
+     authority and refuses a taken port, and the user may change any value. Step 3 writes the
+     table after the bare top-level keys and before `[[pane]]`, shows the file, and the
      user confirms or edits it before `instance.sh` validates it (Verify, below). Say this once:
      a named session is driven from a terminal outside any Herdr pane (rule (2) of "Two rules for
      a non-default instance", below), and `holler` calls in the user's own shells need
      `HOLLER_STATE_DIR=<state_dir>` (for example `HOLLER_STATE_DIR=$HOME/.holler-work holler hub
      status`), or they reach the default instance instead.
 
-   **Then, once the orchestrators and the session are settled, ask the last question: the
+   **Then, once the panes and the session are settled, ask the last question: the
    workspace name.**
    Suggest **two dictionary words related to the task**, lower case, joined with a hyphen
    (Discord-style), for example `herald-relay`, `lantern-hub`, `quiet-tower`. Offer one
@@ -642,228 +587,206 @@ invented or guessed; everything else here can be.
    the answer is written into the config as the top-level `workspace = "<name>"`, before every
    table header. Pick nouns or adjectives that fit what is being built (a message hub, relays,
    agents), never a project's real name, never a person's name. The key is optional: with no
-   `workspace` Herdr labels the workspace itself.
+   `workspace` the workspace is named `holler`. It is also the name of the profile the wizard builds.
 
-4. **Write the file from the answers** (on a first run create the directory first:
+3. **Write the file from the answers** (on a first run create the directory first:
    `mkdir -p ~/.holler/herdr/setup`), **show it, and let the user confirm or edit before Stage 1
    re-validates it** — don't silently trust your own assembly of their answers into TOML;
    showing the real file is cheap and catches a transcription mistake before Stage 3 builds a
    plan from it. A new named session's `[instance]` table goes after the bare top-level keys
-   (`workspace`, `hub_host`, `layout`) and before the first `[[orchestrator]]`.
+   (the defaults, `layout`, `workspace`) and before the first `[[pane]]`.
 
-Only once a config exists this way — assembled from the user's own real answers, plus live
-`tailscale status` discovery when it's actually available, never from the doc's example values
-— does Stage 1 proceed to Verify. If the file that *was* found (an existing, real config) has an `[[orchestrator]]` entry
-missing `name`/`dir`/`cmd`, that narrower case is unaffected: ask the user once for what's
-missing and write the answer back into that same file before moving on — don't defer that
-question to Stage 8, where it's too late to have asked cheaply.
+Only once a config exists this way — assembled from the user's own real answers, never from the doc's
+example values — does Stage 1 proceed to Verify. If the file that *was* found (an existing, real
+config) has a `[[pane]]` missing `name` or `dir`, that narrower case is unaffected: ask the user once
+for what's missing and write the answer back into that same file before moving on.
+
+**A config of the previous wizard is converted, never rewritten silently.** When `panes.sh check`
+(Verify, below) refuses `[[orchestrator]]`, `[[session]]` or one of their keys, the file is the
+previous wizard's. Show the user the conversion **as text** first (the confirm step above applies),
+and never write over the old file: each `[[orchestrator]]` becomes a `[[pane]]` with
+`role = "orchestrator"`, its `name` and `dir`, and its `harness` taken from the first word of its `cmd`
+when that word is `opencode` or `claude`; for any other command the `cmd` is not carried, and you ask
+which of the two harnesses the pane gets. Each `[[session]]` is dropped — it was a backend on another
+machine, and registry panes are local to the hub — and the conversion text names every one. `layout`
+keeps the orchestrators' names in their columns, with the dropped names and any column left empty
+removed, and must then pass the rule that no column is taller than the one to its left (offer the
+reordering when it does not). `hub_host` goes. The defaults (`model`, `effort` and the ceilings) are
+asked as above. The converted file is written next to the old one (for example
+`sessions.pane.toml`), shown and confirmed, and Stage 1 then loads it as an explicit `--config`.
+
+**Remote sessions are not built.** A user who needs a remote, headless OpenCode session is told,
+once, that this wizard does not build one: attach mode (ADR 0014) and `holler body` still serve such a
+session, set up by hand (ADR-0021 section 11 says how the two relate).
 
 **Verify:** state plainly **which of the three paths/sources** you actually loaded (an explicit
 `--config` flag, cwd, or the global fallback), as an absolute path — this is real, user-visible state that changes
 what a later edit to either file would affect. State the Herdr session the config targets: the
 `[instance]` table's `herdr_session` ("Herdr session: `<name>`"), or, with no `herdr_session`,
-"Herdr session: default (unnamed)". The file parses as valid TOML with a top-level
-`hub_host` (non-empty; optional when N=0, required when N>=1), at least one `[[orchestrator]]` table (every entry has a real `name`,
-`dir`, and `cmd`), zero or more `[[session]]` tables (a local-only config has none, N=0; every
-entry that exists has a real `name`, `harness`, `endpoint` — a `http://127.0.0.1:<port>` URL — **and its own non-empty `remote_host` and
-`remote_tailnet_host`**), and a top-level `layout` (a nested array of names). Cross-check
-`layout` in every direction: every `[[orchestrator]]` name must appear in `layout` exactly
-once, every `[[session]]` name must appear in `layout` exactly once, no orchestrator name and
-session name may collide with each other, and `layout` must contain no name that isn't a real
-orchestrator or session. Extract and state `hub_host` (or "none", when N=0 and it is absent), the real M (orchestrator count) and N
-(session count), every orchestrator's name/dir/cmd, every session's name/port/harness/
-`remote_host`, **the set of distinct `remote_host` values across all sessions** (this is what
-Stage 7 groups bodies by — state it explicitly, e.g. "2 distinct hosts: remote-a (alpha, beta),
-remote-b (gamma, delta)"; with no sessions say plainly "N=0: no distinct remote hosts"), and the resolved column/row layout **naming which pane holds which
-orchestrator or session** — this is what every later stage builds from, not raw file order, an
-assumed single fixed orchestrator pane, or a hardcoded/globally-shared hostname.
-
-**Validate the `[instance]` table.** Run the validator on the loaded config (its absolute path)
-and state its output:
+"Herdr session: default (unnamed)". Then run the two validators on the loaded config (its absolute
+path) and state their output:
 ```bash
 bash $WIZARD_LIB/instance.sh <config>
+bash $WIZARD_LIB/panes.sh check <config>
+bash $WIZARD_LIB/panes.sh grid <config>
+bash $WIZARD_LIB/panes.sh env <config>
 ```
-With no sessions it prints the instance and no `session` lines (N=0), and exits 0. It prints the resolved instance (name, prefix, hub port, serve port, state directory, Herdr
-session, backend port base) and, per session, one line
-`session <name>: backend_port=<N> endpoint=http://127.0.0.1:<N>`; it exits 1 with one message
-per problem, each naming the key. **Those per-session ports are the only ports every later stage
-uses** (backends, the collision plan, the checks, the derived body config, the attach panes):
-never recompute one from `backend_port_base` or from the master file's `endpoint`. A config with
-no `[instance]` table resolves to all defaults, which is today's behaviour unchanged (there a
-session's port is its own `endpoint`'s port). With an `[instance]` table, a session whose own
-`endpoint` names a different port gets one warning on stderr (exit stays 0): the derived body
-config will carry the printed endpoint, not the master file's. It refuses a malformed value, an
-`[instance]` placed after an `[[orchestrator]]`/`[[session]]` table, a non-default instance
-missing `name`, `state_dir` or `herdr_session`, a non-default instance whose `state_dir` is the
-default state directory (`~/.holler`: it would share the first instance's state), and two
-sessions on the same `remote_host` that resolve to one backend port (naming both).
+`instance.sh` validates the `[instance]` table and the `workspace` key. It prints the resolved instance
+(name, prefix, hub port, serve port, state directory, Herdr session, backend port base) and, when the
+config has one, `workspace: <name>`; it exits 1 with one message per problem, each naming the key. A
+config with no `[instance]` table resolves to all defaults. It refuses a malformed value, a non-default
+instance missing `name`, `state_dir` or `herdr_session`, and a non-default instance whose `state_dir` is
+the default state directory (`~/.holler`: it would share the first instance's state).
+
+`panes.sh check` validates the panes, and only the panes: it reads the `[instance]` table and the
+workspace from what `instance.sh` prints, never again from the file. It exits 1 with one message per
+problem, each naming the key: a name outside the grammar or given twice, a name missing from `layout` or
+extra in it, a column taller than the column to its left (naming `layout` and the column), a relative
+`dir`, a `harness` or `role` outside its set, no orchestrator, a pane with no `model`, `effort`,
+`ctx_soft` or `ctx_hard` of its own or from the defaults, `ctx_soft` above `ctx_hard`, an `agent` or a
+`backend_port` on a Claude Code pane, a Claude Code pane with no `model` of its own, the retired tables
+and keys (with the word "attach"), and the port rules below. On success it prints one summary line, and
+an ignored `hub_host` is one warning line. `panes.sh grid` prints the workspace, its extent (`RxC`:
+the first column's height by the number of columns), **the profile** and one `cell` line per pane in
+layout order: its cell, name, harness, role, directory (with `~/` expanded) and, for an OpenCode pane,
+its port. **Those ports are the only ports every later stage uses** (the collision plan, the specs, the
+body): never recompute one from `backend_port_base`. `panes.sh env` prints the environment literals
+below.
 
 **Two rules for a non-default instance, stated here because Stage 3 refuses them.** (1) It never
-uses the first instance's ports: `instance.sh` refuses a `hub_port` of 41807, a `serve_https_port`
-of 443, and resolved backend ports that fall in 47001 to 47001 plus the session count unless every
-session sets its own `backend_port` (exit 1, one line naming the key). (2) It is driven from a
-terminal outside any Herdr pane: a driving agent that runs inside a Herdr pane cannot establish
-which session it is in, and Stage 2's `check-pane` stops it (the fix is to start the wizard from a
-plain terminal, or from the desktop app, not from a pane).
+uses the first instance's ports: `instance.sh` refuses a `hub_port` of 41807 and a `serve_https_port`
+of 443, and `panes.sh` refuses OpenCode ports that fall in 47001 to 47001 plus the OpenCode pane count
+unless every OpenCode pane sets its own `backend_port`, two panes on one port, and a port above 65535
+(exit 1, one line naming the key). (2) It is driven from a terminal outside any Herdr pane: a driving
+agent that runs inside a Herdr pane cannot establish which session it is in, and Stage 2's `check-pane`
+stops it (the fix is to start the wizard from a plain terminal, or from the desktop app, not from a pane).
 
-**Resolve the instance's literals once, and carry them.** After `instance.sh` passes, write down
+**Resolve the instance's literals once, and carry them.** After both validators pass, write down
 these values; every later command uses them as literals (shell-state rule, top of this file):
-- `<name>`, `<prefix>` (default: the name), `<hub_port>` (41807), `<serve_https_port>` (443),
-  `<herdr_session>` (empty for the default instance), and each session's `<port>` from the
-  `instance.sh` output above.
-- `<state_dir>`, **resolved to an absolute path once per host** and used unchanged for that host
-  everywhere (the ledger, `HOLLER_STATE_DIR`, logs, the derived config). With no `state_dir` the
-  one spelling is `$HOME/.holler`, resolved. On this machine:
-  `printf %s "$HOME/.holler"`, or for a `~/` value, `printf %s ~/.holler-second`. For a remote
-  host (Stage 2 does this per distinct `remote_host`), let that host expand it:
-  `ssh <remote_host> 'printf %s "$HOME/.holler"'` or `ssh <remote_host> 'printf %s ~/.holler-second'`.
-  An absolute `state_dir` is used as given. In every command `<state_dir>` means the resolved value
-  for the host that command runs on.
-- `<logs_dir>` = `<state_dir>/logs` on each host. Create it first with `mkdir -p`.
+- `<name>`, `<prefix>` (default: the name), `<hub_port>` (41807) and `<herdr_session>` (empty for the
+  default instance), from the `instance.sh` output above.
+- `<profile>`, the profile the wizard builds: the `profile` line of `panes.sh grid`, which is the
+  workspace's name (`holler` when the config has no `workspace`). It is computed by `panes.sh`, never
+  chosen by you. `<workspace>` is the same name, from the `workspace` line.
+- `<apply_session>`, the `--herdr-session` value of the apply lines: `default` for the default
+  instance, else `<herdr_session>` (`panes.sh plan` prints it).
+- Each OpenCode pane's `<port>`, from its `cell` line.
+- `<state_dir>`, **resolved to an absolute path once** and used unchanged everywhere (the ledger,
+  `HOLLER_STATE_DIR`, logs, the derived config). With no `state_dir` the one spelling is
+  `$HOME/.holler`, resolved: `printf %s "$HOME/.holler"`, or for a `~/` value,
+  `printf %s ~/.holler-second`. An absolute `state_dir` is used as given.
+- `<logs_dir>` = `<state_dir>/logs`. Create it first with `mkdir -p`.
 - `<scratch>` = `<state_dir>/wizard-scratch` on this machine (create it with `mkdir -p`): Stage 2's
-  inventories and fetched ledgers and Stage 7's derived configs live there. Never `/tmp`.
-- `<herdr_env>`, the Herdr settings, which go in front of every `herdr.sh` command:
+  inventory and Stage 7's apply output live there. Never `/tmp`.
+- `<herdr_env>`, the Herdr and Holler settings, which go in front of every `herdr.sh` command:
   `WIZARD_INSTANCE_NAME=<name> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_INSTANCE_PREFIX=<prefix> WIZARD_STATE_DIR=<state_dir> WIZARD_LOG_DIR=<logs_dir>`
-  (add `HERDR_BIN=<absolute path>` when `herdr` is not on `PATH`). `WIZARD_INSTANCE_NAME` is
-  mandatory: `herdr.sh` refuses to run without it, and the default instance's name is the literal
-  `default`.
+  followed by the lines `panes.sh env` printed, exactly as printed:
+  `WIZARD_HERDR_WORKSPACES='<workspace>=<R>x<C>'` and, for the default instance,
+  `WIZARD_HERDR_SOCKET='<socket path>'`, or, for a named instance, `WIZARD_TMUX_SOCKET='<state_dir>/tmux.sock'`
+  (add `HERDR_BIN=<absolute path>` when `herdr` is not on `PATH`, and `WIZARD_HOLLER_BIN=<absolute path>`
+  when `holler` is not). `WIZARD_INSTANCE_NAME` is mandatory: `herdr.sh` refuses to run without it,
+  and the default instance's name is the literal `default`. `herdr.sh holler` also refuses (exit 2,
+  nothing run) without an absolute `WIZARD_STATE_DIR`, a named instance without an absolute
+  `WIZARD_TMUX_SOCKET`, and the default instance without an absolute `WIZARD_HERDR_SOCKET`: a lost value
+  must never reach the default hub, another Herdr session, or tmux's default server. The default
+  instance's socket is the default session's path in Herdr's configuration directory (UNVERIFIED against
+  a real Herdr until the operator's repeat of the new-user run, #778); a named instance's panes run on
+  their own tmux server, so two instances' `r1c1` never meet on one.
 
-**Gate:** zero sessions is not a failure: a config with at least one `[[orchestrator]]` and no `[[session]]` passes. Stop on: the files under `$WIZARD_LIB` are missing and the install command did not fix it (stop and say so); `instance.sh` exits non-zero (stop and show the user its messages, never guess a fix);
-no config found at any of the three tiers (per the Do step above, this is a hard stop
-with the user, never an auto-created file), a missing/empty `hub_host` when N>=1 (with N=0 it may be absent), a missing `name`/`dir`/`cmd` on any orchestrator entry, a
-missing `name`/`harness`/`mode`/`endpoint`/`remote_host`/`remote_tailnet_host` on any session
-entry, a `mode` value other than `attach` (the only mode this wizard's Stage 4/9 implement —
-flag it explicitly here rather than letting it fail silently three stages later, same as an
-unimplemented `harness`), a port collision between two session entries **on the same
-`remote_host`** (two different hosts may reuse the same port — that's not a collision), a name
-collision between an orchestrator and a session, a `layout` that doesn't perfectly match every
-orchestrator and session name exactly once (missing, extra, or duplicated), or a file that fails
-to parse — stop and ask the user to fix the config rather than guessing what they meant. **If an
-explicit `--config` flag was given and that file is missing or fails to parse, this is a hard
-stop with no fallback** — do not silently substitute the cwd or global config; tell the user the
-path they gave doesn't resolve and let them fix it or drop the flag.
+**Gate:** Stop on: the files under `$WIZARD_LIB` are missing and the install command did not fix it
+(stop and say so); `instance.sh` or `panes.sh check` exits non-zero (stop and show the user its
+messages, never guess a fix) — except the retired tables and keys, for which you offer the conversion
+above; no config found at any of the three tiers (per the Do step above, this is a hard stop with the
+user, never an auto-created file); a missing `name` or `dir` on any pane; or a file that fails to parse
+— stop and ask the user to fix the config rather than guessing what they meant. **If an explicit
+`--config` flag was given and that file is missing or fails to parse, this is a hard stop with no
+fallback** — do not silently substitute the cwd or global config; tell the user the path they gave
+doesn't resolve and let them fix it or drop the flag.
 
 ## Stage 2 — Config checks
 
-**Ask:** nothing yet — the no-`ssh` fallback below is a mode switch this wizard makes for
-itself from a real, checkable fact (Stage 0's `ssh` row), not a question to put to the user.
+**Ask:** nothing yet.
 
 This stage holds only the checks that need the config. Stage 0 already ran the machine-level
-ones (`herdr`, `holler`, `tailscale`, `ssh`, the `lib/` scripts, the Herdr server, the default
-hub and ledger), and they are not repeated here.
+ones (`herdr`, `holler`, `tmux`, `opencode`, `claude`, the `lib/` scripts, the Herdr server, the default
+hub and ledger), and they are not repeated here. Every check below is read-only and runs on this
+machine: there is no other host.
 
-**No local `ssh` binary — the manual-relay fallback, decided from Stage 0's `ssh` row:** if that
-row said `absent`, this machine has no `ssh` client at all — a real, if unusual,
-environment (a sandboxed Claude Code session, a locked-down container). **This does not mean
-the wizard can't run; it means every remaining `ssh <host> "<remote command>"` in every later
-stage switches to manual-relay mode for the rest of this run:** instead of running the command
-yourself, print the exact command verbatim, ask the user to run it on their own machine (or
-have them relay it to whichever remote host from a shell that does have `ssh`), and ask them to
-paste back its output before you continue past that step. State plainly, once, right here in
-Stage 2's report, that manual-relay mode is active and why (no local `ssh`) — don't silently
-ask for one-off copy-pastes later without having said so. Every Gate/Verify step downstream
-still applies the same way; the only thing that changes is who's holding the keyboard for the
-remote half. If `ssh` *is* present locally, none of this applies — proceed with every `ssh`
-call below exactly as written, run by you directly.
-
-**With no sessions (N=0),** skip the ssh reachability loop, the remote `which holler`, the
-model-endpoint checks, the remote state-directory and ledger fetch and the `tailscale status`
-grep of remote names: there is no remote host to reach. Still run the orchestrator `dir`/`cmd`
-checks, the local inventory, the `collide` inputs and the Herdr session check. Report each skipped check as skipped, never as failed.
-
-**Do (SSH reachability, first — looped over every DISTINCT `remote_host` from Stage 1, not just
-one — everything after this depends on it, so check each host in isolation rather than letting
-a bad one fail silently inside a later, more complicated command). Skip this block entirely in
-manual-relay mode — there's nothing to gain by making the user run a bare reachability probe
-for you; move straight to asking them to run each real command as it comes up in the stage that
-needs it:**
+**Do (each pane's directory and harness).** For every pane of `panes.sh grid`, its `dir` (with `~/`
+already expanded in the `cell` line) exists, and its harness's binary is an executable on `PATH`:
 ```bash
-for host in <distinct remote_host values>; do
-  echo "=== $host ==="
-  ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" true
-  echo "exit: $?"
-done
+test -d "<the pane's dir, from its cell line>" && echo "<name>: dir ok" || echo "<name>: dir MISSING"
+command -v opencode >/dev/null 2>&1 && echo "opencode: $(command -v opencode)" || echo "opencode: NOT on PATH"
+command -v claude >/dev/null 2>&1 && echo "claude: $(command -v claude)" || echo "claude: NOT on PATH"
 ```
-`-o BatchMode=yes` forces a hard failure instead of hanging on a password prompt if key auth
-isn't set up — each check should return in seconds, not sit waiting for input. A config with
-sessions split across 2 hosts needs both checked here — don't stop at the first one that passes.
+(the first line once per pane; the second when the grid has an OpenCode pane, the third when it has a
+Claude Code pane). A pane whose `dir` doesn't exist fails its launch deep in Stage 7, and a Claude Code
+pane in a directory where Claude Code has never run may stop at its first-run or trust dialog there
+(`harness-dialog-open`): say so now, so the user can answer that dialog once by hand, in a plain
+terminal in that directory, before Stage 7.
 
-**Do (config-completeness checks that need the live local environment, not just a parse —
-Stage 1 already validated every field is *present*; this is whether what it names actually
-*resolves*, which only preflight can answer). Looped over every `[[orchestrator]]` entry:**
+**Do (the OpenCode model, read-only, when the grid has an OpenCode pane).** Re-read this machine's
+OpenCode configuration (Stage 1 proposed the model from it) and check that its provider's endpoint
+answers:
 ```bash
-for each orchestrator: test -d "<its dir, ~-expanded>" && echo "<name>: dir ok" || echo "<name>: dir MISSING"
-for each orchestrator: command -v "<first token of its cmd>" >/dev/null 2>&1 && echo "<name>: cmd ok ($(command -v <first token>))" || echo "<name>: cmd NOT on PATH"
+cat ~/.config/opencode/opencode.jsonc 2>&1
+curl -s <baseURL>/models | head -c 200
 ```
-An orchestrator whose `dir` doesn't exist or whose `cmd` doesn't resolve will fail silently deep
-in Stage 8 (a pane launched into a broken directory, or a shell reporting "command not found"
-with nothing watching for it) unless caught here, where it's cheap to catch and cheap to fix.
+The model endpoint is the `baseURL` of the provider the config's `model` names. The check is driven by
+what the OpenCode config says — never assume a provider or a model. Until #829 an OpenCode pane's server
+runs the model its OpenCode configuration selects, whatever the spec records, so this is the model that
+matters.
 
-**Do (the remote checks, per distinct `remote_host` — never a hardcoded hostname, and never
-assuming there's only one):**
+**If the provider block is missing**, don't proceed — the pane's model will fail to resolve. Stop and
+ask the user which provider/model to use and where its endpoint lives, then add a block of this shape
+(values are the user's, not yours to guess):
+```json
+"<provider>": {
+  "name": "<display name>",
+  "npm": "@ai-sdk/openai-compatible",
+  "options": { "baseURL": "<endpoint base URL>", "apiKey": "<key, if the endpoint needs one>" },
+  "models": { "<model>": { "tool_call": true, "reasoning": true } }
+}
+```
+A provider credential belongs in that OpenCode configuration: a pane's server starts with no shell, so
+it never reads a shell rc, and the scrubbed environment of Stage 6 drops the agent's own variables
+(UNVERIFIED against a real OpenCode inside tmux until the operator's repeat of the new-user run, #778).
+
+**Do (this instance's own processes and panes).** Stage 0's hub and Herdr lines report the
+*default* instance's, which is a different thing when this is a second instance. This instance's own
+hub, Herdr server and body are read from its ledger (a live row) and the inventory below:
 ```bash
-tailscale status | grep -E "$(echo <hub_host> | cut -d. -f1)|<pipe-separated short names of every distinct remote_tailnet_host>"
-for host in <distinct remote_host values>; do
-  ssh "$host" "which holler"
-done
-# for every session on a host whose harness is opencode, resolve that host's model and check
-# its endpoint. First read the host's OpenCode config to learn <provider>/<model> and the
-# provider's baseURL (see "Resolving <provider>/<model>" below):
-ssh <that session's remote_host> "cat ~/.config/opencode/opencode.jsonc" 2>&1
-# then probe the provider's model-list endpoint at the baseURL that config names:
-ssh <that session's remote_host> "curl -s <baseURL>/models" | head -c 200
+HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh list
+<herdr_env> bash $WIZARD_LIB/herdr.sh run session list
 ```
-With N=0 none of these remote lines runs (see above). When
-`hub_host` is absent, skip the `tailscale status` check and say why: no `hub_host` and no remote
-host to look up, so there is nothing to grep for.
-
-Stage 0's hub and Herdr lines report the *default* instance's hub and Herdr, which is a
-different thing when this is a second instance. This instance's own hub and Herdr server are read
-from its ledger (a live row) and the inventory below, never from a bare status call.
-
-**Do (the instance's state directory on each remote host, once per distinct `remote_host`, as
-Stage 1 describes)**, so every later command on that host uses its own resolved `<state_dir>`:
+and, **only when the ledger has a live `hub` row** (the instance's hub is up, from an earlier run), the
+registry, which needs that hub:
 ```bash
-ssh <remote_host> 'printf %s "$HOME/.holler"'
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane list --format=json
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile list --format=json
 ```
-(or the `~/` form for a `~/` value; an absolute `state_dir` needs no call). Write the answer down
-per host. **For a non-default instance, also fetch each remote host's `$HOME/.holler`** (the call
-above with no `state_dir` gives it) **and refuse a `state_dir` equal to it**: that host's default
-state directory belongs to the first instance, and `instance.sh` can only compare against this
-machine's home. Treat it as a Stage 3 refusal naming the `state_dir` key.
+`data.panes` are the registry's panes, each with its `name`, `pos`, `profile` and `sync`;
+`data.unmanaged` (left out when empty) are the Herdr panes no record names, each with its `workspace`,
+`pos` and `label`; the profile list says whether `<profile>` exists. Stage 3 judges the build's case
+from these.
 
-**Do (the collision inventory — read-only, per host the run touches: this machine and every
-distinct `remote_host`).** Run `inventory.sh` (in `$WIZARD_LIB`) once per host, and next to each
-inventory fetch that host's own ledger, into the named scratch directory (`mkdir -p <scratch>`
-first). A host that has never run the wizard has no ledger: the `cat` fails and leaves an empty
-file, which is right (everything running there is foreign):
+**Do (the collision inventory — read-only).** Run `inventory.sh` (in `$WIZARD_LIB`) into the scratch
+directory (`mkdir -p <scratch>` first):
 ```bash
 WIZARD_INVENTORY_HERDR=1 bash $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
-ssh <remote_host> 'bash -l -s' < $WIZARD_LIB/inventory.sh > <scratch>/inventory-<host>.tsv
-ssh <remote_host> "cat <state_dir>/herdr/setup/wizard-ledger.toml" > <scratch>/ledger-<host>.toml
 ```
-(the first line for this machine, the others for each remote host; `<host>` names the file, the
-`<state_dir>` is that remote host's resolved one. This machine's ledger is read in place, no
-copy. In manual-relay mode, hand the user those exact commands and have them paste the output
-back.) Without the fetched ledger every process on a remote host would look foreign on a rerun
-and the instance's own processes would be refused. **`WIZARD_INVENTORY_HERDR=1` is set on the
-local line only**: it switches on the Herdr section (the Herdr sessions that exist, and a `missing
-tool herdr` warning), and the Herdr server runs on this machine, never on a remote host, so a
-missing `herdr` on a remote host is expected and the remote lines do not set it. The remote form
-runs `bash -l -s` (a login shell reading the script from stdin) so the tools a non-login `ssh` shell
-lacks are on `PATH`. The first line of every inventory is `home<TAB><that host's $HOME>`;
-`collide.sh` resolves `-` and `~/` state directories against it. `inventory.sh` lists listening TCP ports,
-running `holler hub`, `holler body`, `opencode` and `herdr` processes (pid, owner, state
-directory where visible — Linux only —, start time, and for a body its `--config` path), the
-`tailscale serve` configuration, and the Herdr sessions that exist. It only reads: it never
-writes, signals, starts or stops anything (it calls just `ss`/`lsof`, `ps`, `tailscale serve
-status` and, with the flag, `herdr session list`). If a host's inventory cannot be taken, that is a hard failure
-for this stage, not something to skip — the plan cannot be checked without it. A line
-`warn<TAB>missing tool <name>` means the tool is not on that shell's `PATH` (a non-login `ssh`
-shell often lacks it): put it on `PATH` or use the `bash -l -s` form above, then take the
-inventory again (this does not apply to `herdr` on a remote host, see above); never plan from an inventory with such a line unless the user says to.
+(`<host>` names the file, for example this machine's short name). `WIZARD_INVENTORY_HERDR=1` switches
+on the Herdr section (the Herdr sessions that exist, and a `missing tool herdr` warning). The first line
+of the inventory is `home<TAB><this machine's $HOME>`; `collide.sh` resolves `-` and `~/` state
+directories against it. `inventory.sh` lists listening TCP ports, running `holler hub`, `holler body`,
+`opencode` and `herdr` processes (pid, owner, state directory where visible — Linux only —, start time,
+and for a body its `--config` path), any serve configuration, and the Herdr sessions that exist. It
+only reads: it never writes, signals, starts or stops anything. If the inventory cannot be taken, that
+is a hard failure for this stage, not something to skip — the plan cannot be checked without it. A line
+`warn<TAB>missing tool <name>` means the tool is not on this shell's `PATH`: put it on `PATH`, then take
+the inventory again; never plan from an inventory with such a line unless the user says to.
 
-**Do (the Herdr session checks for this instance, on this machine, before Stage 3):**
+**Do (the Herdr session checks for this instance, before Stage 3):**
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-pane      # stops if this run is inside a Herdr pane it cannot place in the instance's session
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-session   # stops if the named session exists and the ledger did not create it
@@ -875,64 +798,24 @@ Herdr pane) and when that pane belongs to a different session than the instance'
 default instance, with no `herdr_session`, both pass.
 
 The checks above are read-only (they tell Stage 3 what already exists so its plan is
-accurate) — none starts, stops, nor changes anything. The model-endpoint checks
-are driven by what each host's own OpenCode config says — never assume every host uses the same
-provider or model.
+accurate) — none starts, stops, nor changes anything.
 
-**Resolving `<provider>/<model>` (do this once per distinct `remote_host`, here in Stage 2).**
-Stages 4 and 5 need the OpenCode model a session should use, written `<provider>/<model>`
-(e.g. the provider key from the config's `provider` block plus one of that provider's model
-ids). Read it from the host's `~/.config/opencode/opencode.jsonc` — the top-level `model` key
-if present, otherwise the single provider/model pair the `provider` block defines. If the config
-doesn't name a default or defines several candidates, **ask the user once** which
-`<provider>/<model>` to use for that host, and reuse the answer for every session on it. Never
-invent one or copy a value from this document.
+**Verify:** every pane's `dir` exists and its harness's binary resolves on `$PATH` (an absolute path,
+not an alias); when the grid has an OpenCode pane, the model endpoint returns real JSON (a model list),
+not a connection error, and the provider block exists; and you now know whether this instance's own
+hub, Herdr server and body are already running (a live row in its ledger and the inventory), and, when
+its hub is up, which panes and profiles its registry holds — for Stage 3's summary.
 
-**Verify:** every orchestrator's `dir` exists and its `cmd`'s first token resolves on `$PATH`
-(locally — orchestrators always run on the hub machine, never remote). The remote lines below
-apply only when N>=1; with N=0 only the orchestrator and Herdr session lines apply. Every host's SSH check
-exits 0 — a non-zero exit for any one of them is the *root cause* to report for that host
-specifically, not a mysterious later failure three stages downstream (and not a reason to
-silently skip that host's sessions — surface it). Every distinct `remote_tailnet_host` shows
-`active`/`online` in `tailscale status` (not `offline`); every remote `which holler` call (the local one was Stage 0's) resolves **to the current single-binary `holler` (hub/body subcommands) —
-not the legacy `holler-client`/`holler-server` split** (check with `holler --help`: the new
-binary lists `hub`/`body` subcommands, the legacy client lists flat `join`/`run`/`detach`/
-`attach` verbs and reports a `0.1.x` version — and note that a plain non-login `ssh <host>
-"which holler"` can miss a real Homebrew-installed binary if it's not on the non-login PATH;
-retry with `ssh <host> "bash -lc 'which holler'"` before concluding it's actually missing — and
-if it's *still* not found even in a login shell, check the common install locations directly
-per Stage 0's note (the same brew-prefix-not-on-PATH issue applies to `holler` here, not just
-`herdr` there) before concluding it's genuinely absent); for
-every `opencode`-harness session, its own host's model endpoint returns real JSON (model list),
-not a connection error, and the relevant provider block exists on that host's OpenCode config;
-and you now know whether this instance's own hub and Herdr server are already running (a live
-row in its ledger and the inventory), for Stage 3's summary.
+**If `holler` is missing, not on `PATH`, the legacy client, or lacks the pane verbs**, that's a real
+gate failure — stop and ask the user how to proceed (e.g. install the current release with
+`brew install performant-labs/tap/holler`, or build and put it on `PATH`) rather than substituting
+another binary's verbs, which speak a different, incompatible protocol.
 
-**If the provider block is missing** (opencode-harness sessions only), don't proceed — the
-session's model will fail to resolve. Stop and ask the user which provider/model that host
-should use and where its endpoint lives, then add a block of this shape (values are the user's,
-not yours to guess):
-```json
-"<provider>": {
-  "name": "<display name>",
-  "npm": "@ai-sdk/openai-compatible",
-  "options": { "baseURL": "<endpoint base URL>", "apiKey": "<key, if the endpoint needs one>" },
-  "models": { "<model>": { "tool_call": true, "reasoning": true } }
-}
-```
-
-**If `holler` is missing, not on `PATH`, or is the legacy client**, that's a real gate failure
-— stop and ask the user how to proceed (e.g. build/deploy the current release to both machines
-and put it on `PATH`, or `brew install performant-labs/tap/holler` on each, matching how this
-was resolved 2026-09-22) rather than substituting the legacy binary's verbs, which speak a
-different, incompatible protocol.
-
-**Gate:** any hard failure here (an orchestrator's `dir` missing or `cmd` not resolving, remote
-host offline, `holler` missing/wrong version on a remote host, an opencode-harness session's model endpoint
-down) — stop and tell the user (the remote host, `holler` on a remote host and model-endpoint
-failures apply only when N>=1; with N=0 none of the remote failures can occur); every later stage depends on this one being real. A missing
-`dir`/unresolved `cmd` is the user's config to fix (a typo, an uninstalled CLI, a directory that
-moved) — don't guess a substitute path or auto-install anything on their behalf.
+**Gate:** any hard failure here (a pane's `dir` missing, its harness's binary not resolving, the model
+endpoint down for an OpenCode pane, `holler` without the pane verbs, a missing `tmux`) — stop and tell
+the user; every later stage depends on this one being real. A missing `dir` is the user's config to fix
+(a typo, a directory that moved) — don't guess a substitute path or auto-install anything on their
+behalf.
 
 ## Stage 3 — Present the plan, get assent
 
@@ -942,52 +825,91 @@ explicitly said to proceed.
 **Do:** using what Stages 1 and 2 actually found (not a generic template), write out a concrete
 plan and show it before touching anything:
 
-- **Orchestrators (from the config):** the real M, each one's name/dir/cmd — e.g. "2
-  orchestrators: o1 (`claude`, `~/Projects/holler`), o2 (`claude`,
-  `~/Projects/other-project`)." Not assumed to be exactly one, not assumed to be Claude.
-- **With no sessions (N=0),** say so: "Stages 4, 5, 7 and 9 are skipped (no sessions)", reported as skipped, never as failed, and with
-  no remote host the `tailscale serve` line of Stage 6 is skipped too (no remote host dials the
-  hub), so leave `WIZARD_SERVE_HTTPS_PORT` empty on the local call (a port never used must not
-  refuse the plan); the hub is still started and every orchestrator pane is still built.
-- **Sessions (from the config), grouped by their own `remote_host`** — the real N, names,
-  ports (the ones `instance.sh` printed in Stage 1, never recomputed), and **harnesses**,
-  organized per host, not as one flat list — e.g. "2 hosts: remote-a
-  (alpha opencode 127.0.0.1:47001, beta opencode 127.0.0.1:47002), remote-b (gamma opencode
-  127.0.0.1:47001)." This grouping is what Stage 7 will actually build (one body per host) —
-  get it right here, not there. If any session's harness isn't `opencode`, say so explicitly
-  here and flag that Stages 4/9 don't have implemented logic for it yet — don't silently plan
-  as if every entry were OpenCode.
-- **The collision preflight, per host — a refusal, not a warning.** Before anything else in the
-  plan is shown as final, run `collide.sh <host-label> <inventory file>` for each host, with the
-  instance's contract values set inline on that command: `WIZARD_INSTANCE_NAME`,
-  `WIZARD_STATE_DIR` (that host's resolved one), `WIZARD_BACKEND_PORTS` (the ports `instance.sh`
-  printed for the sessions that run on that host) and `WIZARD_LEDGER` (that host's ledger: the
-  fetched `<scratch>/ledger-<host>.toml` for a remote host; `<state_dir>/herdr/setup/wizard-ledger.toml`
-  for this machine). The local call also carries the four hub-only variables; a remote host's call
-  carries none of them:
+- **The grid, from the config.** Print it, read-only:
   ```bash
-  # this machine (the hub and Herdr host):
-  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT=<serve_https_port> WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<state_dir>/herdr/setup/wizard-ledger.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
-  # each remote host:
-  WIZARD_INSTANCE_NAME=<name> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<ports on this host>" WIZARD_LEDGER=<scratch>/ledger-<host>.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  bash $WIZARD_LIB/panes.sh grid <config>
+  bash $WIZARD_LIB/panes.sh plan <config> <profile>
   ```
-  `WIZARD_HERDR_HOST=1` marks the host that runs the Herdr server (the unnamed-server refusal below
-  applies only there): set it on the local call only, never on a remote host's call. The same goes
-  for `WIZARD_HUB_PORT`, `WIZARD_SERVE_HTTPS_PORT` and `WIZARD_HERDR_SESSION`: a remote host builds
-  no hub and no Herdr, so they belong to the local call only.
-  Its output is the inventory printed beside what the run will create: everything that runs and
-  was not created by this instance is listed as "present, not touched" (so is this instance's own
-  `tailscale serve` entry, when the ledger has a live `hub` row). It exits 1 and prints a
-  `REFUSED:` line — naming the colliding item and the config key to change — when the plan
-  needs a port that is in use, a hub port a hub already listens on, a state directory another
-  process uses, or a Herdr session of the same name. (It does not check bodies per session: a
-  body's session is not on its command line; Stage 7's ledger rule covers bodies.) A planned
-  Herdr session counts only when `inventory.sh` ran with `WIZARD_INVENTORY_HERDR=1` (Stage 2). On any
-  refusal, show the refusals, **do not ask "Proceed with this plan?"**, and stop until the config
-  is changed and Stage 1 onward is re-run. Never start, stop or kill the colliding thing to make
-  room: it was not created by this run. A stop from Stage 2's `check-pane` or `check-session`, or
-  from the remote `$HOME/.holler` comparison, is a refusal of the same kind: show it, do not ask
-  "Proceed with this plan?". What to offer for each case:
+  Show the grid as a table: cell, name, harness, role, directory, port (`-` for a Claude Code pane),
+  plus the model of each pane; then the workspace, its extent `RxC`, the profile `<profile>` and the pane
+  count (how many OpenCode, how many Claude Code, which are orchestrators). The ports are the ones
+  `panes.sh grid` printed, never recomputed. Say, in one line each: the model, effort and environment
+  of an OpenCode pane are recorded, not applied, until #829 (its server runs what its OpenCode
+  configuration selects); the model and effort of a Claude Code pane are applied; and a Claude Code pane
+  has no body row and no roster row yet (#850), so Stage 10's round trip covers OpenCode panes only.
+  The `plan` lines are the calls Stages 6 and 7 run, in that order: the profile, one `--spec-only`
+  launch per pane (which touches nothing live), the dry run, then one apply.
+- **Which case this is.** Name which of these holds, from Stage 2's ledger, session list and
+  registry; the user's yes covers only that case:
+  1. **Fresh**: no profile `<profile>` and no pane in the registry (with no live `hub` row in the
+     ledger there is no registry yet; a live one, left by an earlier run that stopped early, is
+     reused). Stages 4 to 9 build everything.
+  2. **A rerun of this wizard**: a live `hub` row, and the profile `<profile>` exists. Show the
+     registry's own plan, read-only:
+     ```bash
+     <herdr_env> bash $WIZARD_LIB/herdr.sh holler profile apply <profile> --dry-run --herdr-session <apply_session> --format=json
+     ```
+     Read `data.steps` (each `{pane, action, outcome, code}`), never the exit code: a dry run exits 0
+     whatever it plans. Apply is idempotent: it adopts a healthy pane that matches its spec, relaunches
+     an unhealthy agent, creates a pane the config added, reports one that differs, and never kills a
+     healthy pane; it never relaunches an orchestrator (`orchestrator-not-relaunched`), and it refuses a
+     recorded pane whose spec now names another harness (`harness-change-refused`). Each such refusal is
+     reported and asked about, as Stage 7 says. A spec in `<profile>` that the config no longer names
+     keeps its spec (a `--spec-only` launch never removes one): name it, and offer, with the user's yes,
+     `holler pane close NAME --profile <profile> --spec-only` through the door. Stage 6 then runs the
+     `--rerun` plan, which leaves out `profile create`.
+  3. **The registry already has panes outside `<profile>`** (a live `hub` row, whose registry holds
+     panes from an import or launched by hand). The wizard touches none of them. Compare the config's
+     names with the registry before anything changes (Stage 2 ran this already; run it again when time
+     has passed):
+     ```bash
+     <herdr_env> bash $WIZARD_LIB/herdr.sh holler pane list --format=json
+     ```
+     A config name that a record outside `<profile>` already holds is refused here, by this check: apply
+     would adopt such a record if it is healthy and matches, report it if it differs, or relaunch it if
+     it is an unhealthy agent, so no refusal of Holler's guards this case — the wizard's own pre-check
+     does. A cell of the workspace that a pane Holler does not drive already occupies is a create apply
+     refuses as `grid-occupied`. The choices: other names in the config, another workspace, another
+     instance, or stop. `holler profile create <profile> --from-current`, which puts the un-profiled
+     records under the wizard's profile, is offered only if the user asks for it, and so is
+     `--take-over` (apply takes a pane from another profile).
+  4. **A layout the previous wizard built**: the ledger has `backend` rows (the previous wizard's
+     OpenCode backends), or the registry lists unmanaged Herdr panes whose labels are the config's pane
+     names. Nothing can adopt it: Holler's import reads the old launcher's files, which no wizard file
+     provides. The wizard leaves that layout alone and offers a **second instance** beside it (a new
+     `[instance]` name, state directory, ports and Herdr session: Stage 1's session question), or
+     stopping. Those are the only two choices: no conversion in place, and no teardown is offered here
+     (the ledger teardown of "If a stage fails" stays a separate action the user asks for by name). This
+     case is judged before case 5, so a restored saved session that holds the previous wizard's layout
+     is this case.
+  5. **Restored panes.** A restarted Herdr server restores its saved session, and its panes have no
+     record: they are unmanaged, and no Holler verb adopts them. They are never reused, split or
+     closed; the wizard builds its workspace beside them with the user's yes (Holler's adapter creates
+     it), and refuses a `workspace` name that a restored workspace already uses (the adapter finds a
+     workspace by its name, so a restored workspace of that name would be taken for ours, and its
+     occupied cells refused as `grid-occupied`): the user then picks another `workspace`.
+- **The collision preflight — a refusal, not a warning.** Before anything else in the plan is shown
+  as final, run `collide.sh` with the instance's contract values set inline on that command:
+  `WIZARD_INSTANCE_NAME`, `WIZARD_STATE_DIR`, `WIZARD_BACKEND_PORTS` (the OpenCode panes' ports from
+  `panes.sh grid`), `WIZARD_LEDGER` (this instance's ledger) and the Herdr and hub values:
+  ```bash
+  WIZARD_HERDR_HOST=1 WIZARD_INSTANCE_NAME=<name> WIZARD_HUB_PORT=<hub_port> WIZARD_SERVE_HTTPS_PORT= WIZARD_HERDR_SESSION=<herdr_session> WIZARD_STATE_DIR=<state_dir> WIZARD_BACKEND_PORTS="<the OpenCode panes' ports>" WIZARD_LEDGER=<state_dir>/herdr/setup/wizard-ledger.toml bash $WIZARD_LIB/collide.sh <host-label> <scratch>/inventory-<host>.tsv
+  ```
+  `WIZARD_HERDR_HOST=1` marks this machine as the one that runs the Herdr server (the unnamed-server
+  refusal below applies there). The call leaves `WIZARD_SERVE_HTTPS_PORT` empty: the hub is served on
+  loopback only, so no serve port of the instance can collide. An old serve entry of the instance (the
+  previous wizard served the hub to bodies on other machines) is listed as present, not touched: with
+  the port empty `collide.sh` no longer calls it "this instance's port pair, no live hub", and the
+  wizard never turns it off — removing it is the user's own step. Its output is the inventory printed
+  beside what the run will create: everything that runs and was not created by this instance is listed
+  as "present, not touched". It exits 1 and prints a `REFUSED:` line — naming the colliding item and the
+  config key to change — when the plan needs a port that is in use, a hub port a hub already listens on,
+  a state directory another process uses, or a Herdr session of the same name. A planned Herdr session
+  counts only when `inventory.sh` ran with `WIZARD_INVENTORY_HERDR=1` (Stage 2). On any refusal, show the
+  refusals, **do not ask "Proceed with this plan?"**, and stop until the config is changed and Stage 1
+  onward is re-run. Never start, stop or kill the colliding thing to make room: it was not created by
+  this run. A stop from Stage 2's `check-pane` or `check-session` is a refusal of the same kind: show
+  it, do not ask "Proceed with this plan?". What to offer for each case:
   - **A Herdr session of the instance's name exists and the ledger did not create it**
     (`check-session`, or `collide.sh`'s `REFUSED: a herdr session named ... already exists`). Never
     build in it. If `herdr session list` shows it `stopped`, offer, **with the user's yes**, to delete
@@ -995,74 +917,57 @@ plan and show it before touching anything:
     session, only when it is stopped and the ledger has no live `herdr` row for it, and refuses
     otherwise), then re-run Stage 2's `check-session`. If it is running, or the user says no, the
     answer is another `herdr_session` in the config, and Stage 1 onward is re-run.
-  - **A `tailscale serve` entry on the instance's `serve_https_port` that `collide.sh` calls "this
-    instance's port pair, no live hub"** is not a refusal: the entry is the instance's own (it
-    proxies to `http://127.0.0.1:<hub_port>`, a crash, reboot or teardown left it, and no live
-    foreign process holds `hub_port`). Say so and continue; Stage 6 starts the hub and runs its
-    `tailscale serve --bg` line again, which sets the same mapping. If the same port is refused
-    (`tailscale serve already uses https port ...`), the entry is someone else's: change
-    `serve_https_port`.
   - **The default instance and a running unnamed Herdr server with no live `herdr` row in the
-    ledger** (`REFUSED: an unnamed herdr server is already running`): that server is foreign. Ask
-    one question: build in it (the user's own yes to using the server; "build in it" means a new
-    workspace in that server, `herdr.sh run workspace create`, never splitting the panes it already
-    has; Stage 8 builds there and records nothing for it), or stop (set a `herdr_session` in an `[instance]` table, which makes the instance
-    non-default). Never stop that server.
+    ledger** (`REFUSED: an unnamed herdr server is already running`): that unnamed Herdr server is
+    foreign. Ask one question: build in it (the user's own yes to using the server; "build in it" means
+    a new workspace in that server, which Holler's adapter creates when Stage 7's apply makes its first
+    pane, never anything done to the panes it already has; Stage 5 records nothing for it), or stop
+    (set a `herdr_session` in an `[instance]` table, which makes the instance non-default). Never stop
+    that server.
 - **The Herdr session.** The plan names it in both cases: "Herdr session: default (unnamed)" for
   the default instance (no `herdr_session`), or "Herdr session: `<name>` (new, own state directory
   and ports)" for a named one, followed by its `state_dir` and ports.
-- **The workspace's name.** When the config has a `workspace`, the plan names it ("workspace
-  `<workspace>`"); with none, say Herdr labels the workspace itself.
-- **A new workspace, when the wizard creates one** (a restored saved session, or "build in it" on a
-  foreign server): name the new workspace in this plan and list the restored panes beside it (they
-  stay untouched). The plan's one yes ("Proceed with this plan?") is the user's yes to that, and
-  the "Proceed with this plan?" yes covers creating it (`workspace create`); a "no" means stop, or reuse the restored panes only if the user asks.
+- **The workspace's name.** As for the session, the plan names it ("workspace `<workspace>`", `holler`
+  when the config has no `workspace`), and the profile `<profile>`, which has the same name.
+- **A new workspace beside restored panes** (a restored saved session, or "build in it" on a foreign
+  server): name the new workspace in this plan and list the restored panes beside it (they stay
+  untouched). The plan's one yes ("Proceed with this plan?") is the user's yes to that: the
+  "Proceed with this plan?" yes covers creating it, and a "no" means stop.
 - **Teardown and the restored workspace.** The Herdr server the wizard starts also holds any
   restored workspace of the user (with any auto-resumed agent), and teardown stops that server:
   list those panes here and ask before any teardown. For the default instance, offer to leave the
   server running and stop only the hub.
-- **What's already running vs. what will be started fresh, per host.** "Reused" means exactly one
-  thing: a **live row in this instance's own ledger** (its pid, start time and command still
-  match; see Stage 4, "Reuse on a rerun"). List per host which backends, the hub, the bodies and
-  the Herdr server are reused that way and which will be started new. When `herdr session list`
-  shows a stopped session of the instance's name (for the default instance (no `herdr_session`) the entry named `default`), say so here: starting the Herdr server restores
-  that saved session (its workspaces and panes, and an agent in a pane may resume), so Stage 8
-  checks `pane list` after `server-start` and builds a **new workspace** beside any panes the
-  wizard did not create (`workspace create`, with the user's yes). A listener on a planned
-  port that has no live row is not reused: it is a collision (above), however much it looks like
-  ours. If a fresh hub will replace a recorded one whose identity key is gone, only **this
-  instance's own recorded bodies** are orphaned and need a rejoin (Stage 6's note), per host.
-- **Anything that would be killed or replaced, named with which host it's on.** Only
-  ledger-recorded processes (ownership rule, top of this file) may be planned for stopping;
-  anything else holding a planned port is reported under this heading as a conflict to ask
-  about. Be explicit and specific — "I'll stop this instance's recorded body on remote-a (PID 12345, live in
-  its ledger) because the hub's identity key changed and it can no longer reconnect" is a real plan; "I'll clean things up as
-  needed" is not. If nothing needs killing, say that plainly too.
-- **The end state**: M orchestrator panes + N session panes in a Herdr workspace, in the
-  columns/rows `layout` specifies, hub local, **one body per distinct remote host**, all N
-  sessions across all hosts verified with a real round-trip reply.
+- **What's already running vs. what will be started fresh.** "Reused" means exactly one thing for a
+  process: a **live row in this instance's own ledger** (its pid, start time and command still match;
+  see Stage 4, "Reuse on a rerun"). List which of the hub, the Herdr server and the body are reused
+  that way and which will be started new; the panes are the registry's, and case 2's dry run says which
+  are adopted. When `herdr session list` shows a stopped session of the instance's name (for the
+  default instance (no `herdr_session`) the entry named `default`), say so here: starting the Herdr
+  server restores that saved session (its workspaces and panes, and an agent in a pane may resume), so
+  Stage 5 lists them after `server-start`, and Stage 7 builds the new workspace beside them. A listener
+  on a planned port that has no live row is not reused: it is a collision (above), however much it
+  looks like ours.
+- **Anything that would be stopped.** Only ledger-recorded processes (ownership rule, top of this
+  file) may be planned for stopping, and only panes of `<profile>` may ever be closed (through Holler);
+  anything else holding a planned port or name is reported under this heading as a conflict to ask
+  about. Be explicit and specific — "I'll stop this instance's recorded body (PID 12345, live in its
+  ledger) because the hub's identity key changed and it can no longer reconnect" is a real plan; "I'll
+  clean things up as needed" is not. If nothing needs stopping, say that plainly too.
+- **The end state**: the grid of panes in the workspace `<workspace>`, in the columns and rows `layout`
+  specifies, every pane recorded in the registry under `<profile>`, the hub and one body on this
+  machine, and every OpenCode pane verified with a real round-trip reply.
 
-**Also ask, as its own explicit yes/no, separate from "proceed with this plan" (With no sessions (N=0) this briefing is not offered at all (nothing to drive), so do not ask it):** whether to
+**Also ask, as its own explicit yes/no, separate from "proceed with this plan":** whether to
 install/update the Holler self-status briefing in each orchestrator's own `AGENTS.md` — the
-fix for an orchestrator flailing on "what is `<session>` doing" (confirmed live 2026-09-21/22:
+fix for an orchestrator flailing on "what is `<pane>` doing" (confirmed live 2026-09-21/22:
 before this briefing existed, the orchestrator had no reason to know it could just run `holler
 roster`; after, it answered correctly, checked in real time). It's a real edit to a file the
 orchestrator's agent reads on every startup, so it's a genuine yes/no like any other file write
-this wizard proposes, not a silent default. If yes, Stage 8 writes/updates the briefing block
-right before launching that orchestrator's `cmd` — see Stage 8 for the exact text (the briefing
-never embeds the instance's state directory path; a second instance gets its own headed section).
-
-**This is orchestrator-side only — sessions get no such briefing, and no MCP either.** Verified
-live 2026-09-22 via `holler --help` and a real failed call from a session's own remote host:
-`roster`/`say`/`interrupt`/`wait`/`answer` are all **hub-only** — they only work on the machine
-running the hub, which an orchestrator is (this AGENTS.md fix targets exactly that), but a
-session's own remote host never is. A session has no working Holler self-query command at all,
-CLI or otherwise, so there's nothing accurate to brief it on — it just answers "what are you
-doing" from its own conversation context, same as without Holler in the picture. A dedicated MCP
-server (session-side `whoami`/self-query tool) was tried first and reverted for the orchestrator
-side specifically, since a plain `AGENTS.md` edit fixed that gap without a new binary — it
-remains a real option worth revisiting **only** for the session side, where the CLI genuinely
-has no answer, if that gap ever needs closing.
+this wizard proposes, not a silent default. Offer it when the grid has a pane besides the orchestrators
+(something to drive). If yes, Stage 7 writes/updates the briefing block before the apply launches that
+orchestrator — see Stage 7 for the exact text (the briefing never embeds the instance's state directory
+path; a second instance gets its own headed section). Only orchestrators are briefed: an agent pane is
+driven, it does not drive, and it answers "what are you doing" from its own conversation.
 
 Then ask directly: **"Proceed with this plan?"** — and wait for a real yes before continuing.
 A vague or non-committal reply is not assent; ask again or ask what to change.
@@ -1074,522 +979,246 @@ change).
 present it again; don't half-start based on an ambiguous answer. If they decline, stop the
 whole run here — Stages 1 and 2 already ran (read-only, nothing to undo) but nothing else does.
 
-## Stage 4 — Start the remote agent backends (one per config entry)
+## Stage 4 — Bring up the hub
 
-**Ask:** nothing further — Stage 3 already covered which processes are reused (a live ledger row) vs. started fresh; do
-what the assented-to plan said, for every `[[session]]` entry the plan called "start fresh."
+**Ask:** nothing further — Stage 3 already covered whether the hub is reused (a live ledger row) or
+started fresh.
 
-**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
-
-**Only implemented for `harness = "opencode"` today.** If a config entry's harness is anything
-else, this is a real gate — stop and tell the user this wizard doesn't have a start mechanism
-for that harness yet, rather than guessing one. Don't skip the entry silently and don't
-improvise a plausible-looking command for an unfamiliar harness.
-
-**In manual-relay mode** (per Stage 0's `ssh` row and Stage 2), every `ssh <remote_host> "…"` below is a command to hand
-the user, not one you run — print it verbatim, wait for them to paste back the real output, then
-apply the matching Verify/Gate to what they pasted exactly as if you'd run it yourself.
-
-**The instance's values.** Stages 4 to 9 use the literals Stage 1 resolved from the `[instance]`
-table (an absent table means every default, and then everything below behaves exactly as before
-this section existed): `<state_dir>` (resolved, absolute, per host; for the default instance
-`$HOME/.holler`, which is Holler's own default), `<prefix>`, `<hub_port>`, `<serve_https_port>`,
-and each session's `<port>` **exactly as `instance.sh` printed it**. Never pick a port, and never
-derive one from `backend_port_base` or the master file's `endpoint`: `instance.sh` already applied
-the rule for this config.
+**The instance's values.** Stages 4 to 9 use the literals Stage 1 resolved (an absent `[instance]`
+table means every default): `<state_dir>` (resolved, absolute; for the default instance
+`$HOME/.holler`, which is Holler's own default), `<prefix>`, `<hub_port>`, `<profile>`, `<herdr_env>`,
+and each OpenCode pane's `<port>` **exactly as `panes.sh grid` printed it**. Never pick a port, and
+never derive one from `backend_port_base`: `panes.sh` already applied the rule for this config.
 
 **Logs.** Never write a log under `/tmp` (a RAM-backed tmpfs on these hosts; filling it has
-taken a fleet down). Every log Stages 4 to 9 create goes in `<logs_dir>` = `<state_dir>/logs` on
-the host the process runs on, named `<prefix>-...` (Stage 8 passes it to `herdr.sh` as
-`WIZARD_LOG_DIR`). Create it first, on that host, before the first use in each stage:
-`mkdir -p <logs_dir>` (over `ssh <remote_host> "mkdir -p <logs_dir>"` for a remote host).
+taken a fleet down). Every log Stages 4 to 9 create goes in `<logs_dir>` = `<state_dir>/logs`,
+named `<prefix>-...` (Stage 5 passes it to `herdr.sh` as `WIZARD_LOG_DIR`). Create it first, before
+the first use: `mkdir -p <logs_dir>`.
 
-**The ledger.** Every process this wizard starts in Stages 4 to 8 is recorded, once it is up,
-in `<state_dir>/herdr/setup/wizard-ledger.toml` on the host it runs on (contract: epic #726; the file is
-the only source for "what this run created"). `ledger.sh` has three verbs and reads the state
-directory from `HOLLER_STATE_DIR` in its environment (unset means `$HOME/.holler`, and then it
+**The ledger.** Every process this wizard starts in Stages 4 to 8 — the hub, the Herdr server and the
+body — is recorded, once it is up, in `<state_dir>/herdr/setup/wizard-ledger.toml` (contract: epic
+#726; the file is the only source for "what this run created"). `ledger.sh` has three verbs and reads
+the state directory from `HOLLER_STATE_DIR` in its environment (unset means `$HOME/.holler`, and then it
 would silently use the default instance's ledger), so **every** call sets it inline:
 ```bash
-# on this machine:
-HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role <backend|hub|serve|body|herdr> --stage <4-9> [--session <name>]
-# on a remote host, with no copy of the script there (it is sent on stdin):
-ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> bash -s -- record --pid <pid> --role backend --stage 4 --session <name>" < $WIZARD_LIB/ledger.sh
+HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role <hub|herdr|body> --stage <4-9> [--session <name>]
 HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh list        # pid, live|stale, role, stage, session, cmd (tab separated)
 HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh owns <pid>  # exit 0 live, 1 stale (pid reused or process gone), 2 not recorded
 ```
-(`list` and `owns` on a remote host use the same `ssh <remote_host> "HOLLER_STATE_DIR=<state_dir>
-bash -s -- list" < $WIZARD_LIB/ledger.sh` form.) Record **after** the stage's Verify passes for
-that process, never while it is still starting (its command line changes when the shell hands
-over to the program). Never record a pid you did not start, and never signal a pid whose `owns`
-is not 0. **Every start command below prints the pid of the program itself** (a `{ nohup ... &
-echo $!; }` group, not `cmd && nohup X & echo $!`, which on some login shells prints the pid of a
-subshell): record that pid, then run `list` and confirm the recorded `cmd` starts with the
-program (`opencode`, `holler`, `herdr`). A row whose `cmd` is `bash` or `sh` is a wrapper: it
-would be stale as soon as the real program runs. Delete nothing by hand; stop, find the real
-pid and record that one.
+Record **after** the stage's Verify passes for that process, never while it is still starting (its
+command line changes when the shell hands over to the program). Never record a pid you did not start,
+and never signal a pid whose `owns` is not 0. **Every start command below prints the pid of the program
+itself** (a `{ nohup ... & echo $!; }` group, not `cmd && nohup X & echo $!`, which on some login shells
+prints the pid of a subshell): record that pid, then run `list` and confirm the recorded `cmd` starts
+with the program (`holler`, `herdr`). A row whose `cmd` is `bash` or `sh` is a wrapper: it would be
+stale as soon as the real program runs. Delete nothing by hand; stop, find the real pid and record that
+one. The panes are never recorded here: Holler launched them, its registry records them, and they stop
+only through `holler pane close`.
 
-**Reuse on a rerun.** Before starting anything in Stages 4 to 8, look the process up in that
-host's ledger by role and session (`list`, on the process's own host). A row that is `live`
-and whose command still has the port or arguments you are about to use is **reused**: do not
-start another one, and say so in the stage's report. A `stale` row, or no row, means start a
-new process and record it. Never adopt a process that is not in the ledger, even if its command
-line looks identical (it may belong to another instance) — if the port is taken by an
-unrecorded process, that is Stage 3's collision gate, stop and report it.
-
-**Before starting or restarting any backend, check its port** with the ownership rule (top of
-this file): `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <port>`, run on that entry's
-host (remote form at the ownership rule). Free, or held by a live ledger process, means go on.
-A foreign or stale holder (exit 2 or 1) is reported with its owner and command; stop and ask,
-never kill it. This is the check behind "Reuse on a rerun" above.
+**Reuse on a rerun.** Before starting anything in Stages 4 to 8, look the process up in the ledger by
+role and session (`list`). A row that is `live` and whose command still has the port or arguments you
+are about to use is **reused**: do not start another one, and say so in the stage's report. A `stale`
+row, or no row, means start a new process and record it. Never adopt a process that is not in the
+ledger, even if its command line looks identical (it may belong to another instance) — if the port is
+taken by an unrecorded process, that is Stage 3's collision gate, stop and report it.
 
 **A restart re-runs the stage's own start command.** `stop-owned.sh restart <state_dir> <pid>`
 stops the recorded process and prints `RESTART-CMD <recorded command>`. That line only
 identifies the entry: the recorded command has no environment (`HOLLER_STATE_DIR`), no `nohup`
 and no log redirect, and run alone it would use the default state directory. So run the stage's
-own start command again (the one below for a backend; Stage 6's for the hub; Stage 7's for a
-body), with its `HOLLER_STATE_DIR=<state_dir>`, `nohup` and log path, then record the **new**
-pid and run `list` to confirm it.
+own start command again (the one below for the hub; Stage 8's for the body), with its
+`HOLLER_STATE_DIR=<state_dir>`, `nohup` and log path, then record the **new** pid and run `list` to
+confirm it.
 
-**Do**, for every `opencode`-harness entry the plan marked as needing a fresh start (its own
-`remote_host` — read per-entry from the config, not a single value shared by all — and its
-`<port>`), printing the new pid:
-```bash
-ssh <that entry's remote_host> "mkdir -p <logs_dir> && cd ~ && { nohup opencode --port <port> --hostname 0.0.0.0 --model <provider>/<model> > <logs_dir>/<prefix>-opencode-<name>.log 2>&1 & echo \$!; }"
-```
-repeated once per entry (note each printed pid), then:
-```bash
-sleep 2
-```
+**`serve_https_port` is unused.** It stays a key of the `[instance]` table that `instance.sh` validates
+(a named session's proposal still sets one), and the wizard no longer uses it: the hub listens on
+loopback only, advertises no address and gets no serve entry, because nothing on another machine dials
+it. `<hub_port>` and `<serve_https_port>` are the instance's (defaults 41807 and 443); only the first is
+used.
 
-**Verify**, for every entry (both reused and freshly started), against that entry's own
-`remote_host`:
-```bash
-ssh <that entry's remote_host> "curl -s http://127.0.0.1:<port>/session >/dev/null && echo <name>-up || echo <name>-DOWN"
-```
-
-**Record** each freshly started backend, on its own host, with the pid printed above:
-`record --pid <pid> --role backend --stage 4 --session <name>` (remote form above), then `list`
-and confirm the recorded `cmd` starts with `opencode`.
-
-**Gate:** every entry must print `-up`. Any `-DOWN` — check that entry's own log file
-(`<logs_dir>/<prefix>-opencode-<name>.log`) before retrying — don't just re-run blind.
-
-**No session-side `AGENTS.md` briefing is needed, and don't add one that tells a session to run
-`roster`/`say`/`interrupt`/`wait`/`answer`.** Verified live 2026-09-22 via `holler --help`: those
-five verbs are explicitly **hub-only** — they talk to the hub's own local control socket, which
-doesn't exist on a session's `remote_host`. A session trying one gets a real, permanent failure
-("no live hub reachable"), not a transient one; earlier drafts of this skill (and a live
-`AGENTS.md` briefly deployed to a remote host) got this wrong before being corrected. The only
-Holler-aware command that *does* work from a session's own host is `holler body status`, and it
-reports the body process's own hub connection state (joined/stale/confirmed), not any one
-session's task state — not useful for a session answering "what are you doing." A session
-should just answer that from its own conversation context, the same way it would without Holler
-in the picture at all; there's nothing to brief it on.
-
-## Stage 5 — Create a real first session on each backend, capture its session_id
-
-**Ask:** nothing — this is fully mechanical, looped over every `opencode`-harness config entry
-(the same harness restriction as Stage 4 applies here). With no sessions, there is nothing to create:
-this stage is skipped (⏭️), never as failed. In manual-relay mode, the same rule from
-Stage 4 applies: hand the user the exact `ssh` command, capture the id they paste back.
-
-`GET /session` is a **global, per-user list, not scoped by port**. Don't trust `session[0]` as
-"the one just created" — create it with a real POST and read the id straight back from that
-response, for every entry:
-
-```bash
-ssh <that session's remote_host> "curl -s -X POST http://127.0.0.1:<port>/session -H 'Content-Type: application/json' \
-  -d '{\"directory\":\"'\$HOME'\",\"model\":{\"id\":\"<model>\",\"providerID\":\"<provider>\"}}'" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
-```
-The command prints the id; write each one down as a literal next to its session name (a shell
-variable would not survive to the next command).
-
-**Verify:** every printed id is non-empty and starts with `ses_`. Write each one back into
-your in-memory/working copy of the config's `session_id` field (you'll persist the completed
-file in Stage 7) — every later stage that references a session needs the exact id, not a guess.
-
-**Gate:** an empty id means that entry's POST failed (wrong provider/model name, the model endpoint down
-for that host) — check the raw response body before moving on to the next entry.
-
-## Stage 6 — Bring up the Holler hub locally
-
-**Ask:** nothing further — Stage 3's plan already said whether the hub gets reused or started
-fresh.
-
-**Never stop or replace a hub or `tailscale serve` that the ledger did not record** (ownership
-rule, top of this file): run `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <hub_port>`
-before the start block below; a foreign or stale holder is reported and the run stops and asks.
-
-**With no remote host (no sessions), skip the `tailscale serve` line below** (nothing remote dials
-the hub) and say Stage 3's plan already said so; the hub is still started.
+**Never stop or replace a hub that the ledger did not record** (ownership rule, top of this file):
+run `bash $WIZARD_LIB/stop-owned.sh check-port <state_dir> <hub_port>` before the start block below;
+free, or held by this instance's live `hub` row, means go on, and a foreign or stale holder is
+reported and the run stops and asks.
 
 **Do**, only if the plan called for a fresh hub (skip entirely if the ledger has a live `hub` row,
-which means the hub is reused) — bringing up the hub itself is host-agnostic, done exactly once
-regardless of how many remote hosts sessions are split across (token minting is per-host and
-happens in Stage 7). `mkdir -p <logs_dir>` first, then start it, printing the program's own pid:
+which means the hub is reused). `mkdir -p <logs_dir>` first, then start it, printing the program's own
+pid:
 ```bash
-{ HOLLER_STATE_DIR=<state_dir> nohup holler hub serve --listen 127.0.0.1:<hub_port> --advertise <hub_host>:<serve_https_port> > <logs_dir>/<prefix>-hub.log 2>&1 & echo $!; }
-tailscale serve --bg --https <serve_https_port> <hub_port>
+{ HOLLER_STATE_DIR=<state_dir> nohup holler hub serve --listen 127.0.0.1:<hub_port> > <logs_dir>/<prefix>-hub.log 2>&1 & echo $!; }
 ```
-Note the printed pid as a literal (it is not kept anywhere else). With no `hub_host` (N=0 and none in the config), leave `--advertise` out: `holler hub serve` then persists no advertise address and the hub advertises nothing remote, which is right when no body will dial it. `--advertise` carries the
-**serve port**: bodies dial `wss://<hub_host>:<serve_https_port>`, and a hub advertised without
-it would send them to port 443, which for a second instance is the first instance's serve
-endpoint. `<hub_port>` and `<serve_https_port>` are the instance's (defaults 41807 and 443); the
-hub's state — token store, pepper, identity key, control socket — is the instance's own
-`<state_dir>`, so a second instance beside this one shares none of it. Check the ledger first
-(see Stage 4, "Reuse on a rerun"): a `live` `hub` row means the hub is reused, do not start
-another. If the plan's `tailscale serve` is already in place for this exact port pair (and the
-ledger has a live `hub` row), leave it alone.
+Note the printed pid as a literal (it is not kept anywhere else). The hub's state — token store,
+pepper, identity key, control socket, and the pane registry and profiles — is the instance's own
+`<state_dir>`, so a second instance beside this one shares none of it.
 
 **Verify:**
 ```bash
 HOLLER_STATE_DIR=<state_dir> holler hub status
 ```
 Shows `listening: 127.0.0.1:<hub_port>` and a real PID behind it — the hub process actually
-started. Then **record** it with the pid printed above:
-`HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role hub --stage 6`,
-and confirm with `list` that the recorded `cmd` starts with `holler`. `tailscale serve
---bg` hands its work to the tailscale daemon and leaves no process of ours to signal, so it has
-no ledger row; the wizard never turns off a serve config it did not create, and teardown (the
-ownership rule) leaves it in place and says so: turning off the `<serve_https_port>` entry
-is a separate step (`tailscale serve --https=<serve_https_port> off`, see "If a stage fails"),
-taken only with the user's yes.
+started. Then **record** it with the pid printed above, and confirm with `list` that the recorded
+`cmd` starts with `holler`:
+```bash
+HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role hub --stage 4
+```
 
 **Gate:** if `hub serve` fails to start, stop and report the real error (port already bound by
-something else, a stale lock, etc.) — don't proceed to Stage 7's per-host token minting against
-a hub that isn't actually up.
+something else, a stale lock, etc.) — every pane and profile verb answers `unavailable` without a
+live hub, so nothing past this stage can run against a hub that isn't actually up.
 
 **If a recorded hub was already running and this is a resume** (its identity key didn't come from
-a fresh `hub_identity_generated` log line): this instance's already-live bodies from an earlier
-run may reconnect on their own without needing Stage 7's join again — check
-`HOLLER_STATE_DIR=<state_dir> holler roster` before redoing Stage 7 for any given host. If the
-hub's identity key *is* fresh (new `hub serve` invocation, no persisted key), every body **this
-instance's ledger recorded**, on every host, is orphaned (pinned to the old key) — this should
-already be called out in Stage 3's plan as something that will be stopped (through
-`stop-owned.sh`) and rejoined, **per host**, not just once. Bodies that are in no ledger of this
-instance are not this run's to stop or rejoin, whatever they look like.
+a fresh `hub_identity_generated` log line): this instance's already-live body from an earlier
+run may reconnect on its own without needing Stage 8's join again — check
+`HOLLER_STATE_DIR=<state_dir> holler roster` before redoing Stage 8. If the hub's identity key *is*
+fresh (new `hub serve` invocation, no persisted key), the body **this instance's ledger recorded** is
+orphaned (pinned to the old key) — this should already be called out in Stage 3's plan as something
+that will be stopped (through `stop-owned.sh`) and rejoined. A body that is in no ledger of this
+instance is not this run's to stop or rejoin, whatever it looks like.
 
-## Stage 7 — Migrate the config, join and run one body per distinct remote host
+## Stage 5 — Start the Herdr server
 
-**Ask:** nothing — you have everything from stages 1, 5, and 6. In manual-relay mode, every
-`scp`/`ssh` call in this stage (writing the derived per-host config out, `body join`, `body
-run`) is another command to hand the user rather than run — same rule as Stage 4.
+**Ask:** nothing further — Stage 3's plan already said whether the Herdr server is reused, built in
+(a foreign unnamed server the user said yes to), or started fresh.
 
-**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
+**Every Herdr command in this stage goes through `herdr.sh`** (in `$WIZARD_LIB`), written in full as
+`<herdr_env> bash $WIZARD_LIB/herdr.sh <verb> ...`, where `<herdr_env>` is the literal settings from
+Stage 1 (`WIZARD_INSTANCE_NAME`, `WIZARD_HERDR_SESSION`, `WIZARD_INSTANCE_PREFIX`, `WIZARD_STATE_DIR`,
+`WIZARD_LOG_DIR=<logs_dir>`, the `panes.sh env` lines, plus `HERDR_BIN` when `herdr` is off `PATH`).
+They are set inline on **every** command, never exported: a lost export would send a bare `herdr`
+command to the default session. `herdr.sh run` puts `--session <herdr_session>` in front of the words
+after it, and only for `status`, `session list` and `workspace list`: every other word exits 2, names
+`holler pane`, and reaches no Herdr. **A bare `herdr server stop` is never issued, by this skill or by
+the wrapper**: which server it stops is not established, and it could stop another instance's. The
+wrapper refuses to run when `WIZARD_INSTANCE_NAME` is unset, and when the instance is not the default
+one and sets no `herdr_session`.
 
-**Do, in three parts.** First, update the one master file — **the config Stage 1 loaded**,
-whichever of the three sources that actually was (explicit `--config` flag, cwd, or the global
-fallback), not always the global fallback; use the absolute path Stage 1 reported — with every
-entry's real `session_id` (and confirm
-`hub_host`, every `[[orchestrator]]` entry, and every session's `remote_host`/
-`remote_tailnet_host` are still intact); this is the file the user actually edits, so it keeps
-every field:
-```bash
-# write the updated content, including hub_host, every [[orchestrator]], layout, and every
-# session's remote_host/remote_tailnet_host, back to the config file Stage 1 loaded
-```
-
-Second, **group every session by its own `remote_host`** — this is the real structural step,
-not an afterthought: a config with sessions on 2 distinct hosts needs 2 separate derived
-configs, 2 separate tokens, and 2 separate `holler body run` processes, not one of each.
-
-Third, **for each distinct `remote_host`** (looping, not just doing this once):
-1. **Derive** the body config for this host, into `<scratch>/<prefix>-sessions-<remote_host>.toml`
-   (`<scratch>` from Stage 1). The derived body config holds `[[session]]` tables for *only this
-   host's* sessions (with their real `session_id`s), and — because the body denies unknown keys —
-   it **drops** the `[instance]` table and every session's `backend_port`, and **sets** each
-   session's `endpoint` to `http://127.0.0.1:<port>`, `<port>` being what `instance.sh` printed
-   for that session in Stage 1 (with no `[instance]` table that is the endpoint the session
-   already has). `remote_host`/`remote_tailnet_host`, `hub_host`, `[[orchestrator]]`, `layout` and
-   `ext` tables are ignored by the body, so they may stay or be dropped; dropping them keeps the
-   copy small. Re-read the copy before sending it: no `[instance]`, no `backend_port`, every
-   `endpoint` ending in its own `<port>`. Use *that* per-host copy for `scp`/`--config`, never a
-   copy containing another host's sessions. `<body_config>`, the path it has **on the remote
-   host**, is defined once, here: `~/sessions.toml` when the config has no `[instance]` table,
-   otherwise `<state_dir>/<prefix>-sessions.toml` (that host's resolved `<state_dir>`), so a
-   second instance on the same host cannot overwrite the first instance's file.
-2. **Mint a token for this host specifically, with a label that names *this hub and this
-   instance*, not just the remote host** — never `<remote_host>-body` alone. Real incident, 2026-09-22: a token
-   labeled plain `<remote_host>-body` (this exact pattern) was indistinguishable from a
-   completely different, unrelated, already-live pairing to the same remote host from a
-   *different* hub — a human reading the label had no way to tell which hub it belonged to,
-   and nearly killed the wrong process. A remote host can be paired to more than one hub over its
-   lifetime (or the same host runs bodies for two different setups at once, as happened here);
-   the label is the only thing a human or another agent has to tell them apart later.
-
-   Rejoining means stopping the old body first, and the ownership rule (top of this file)
-   applies: stop a body only through `bash $WIZARD_LIB/stop-owned.sh stop <state_dir> <pid>` (remote
-   form at the ownership rule), and only if the ledger recorded it. A `holler body run` the ledger does not list is someone else's: report
-   its pid, owner and command, then stop and ask.
-
-   First, check what — if anything — is already there, the same way Stage 2's SSH check does,
-   so the label you choose is informed by real state, not guessed:
-   ```bash
-   ssh <remote_host> "bash -lc 'ps -ef | grep \"[h]oller body run\"'"
-   ```
-   This only looks (the output includes each body's `--config` path); the ledger, not `ps`, says
-   which bodies are ours to reuse or stop. If that
-   shows an existing body (a different pairing, or a leftover from a prior run), your
-   new label must be visibly distinct from whatever's already there — not just non-colliding as
-   a string, but readable at a glance as "a different thing" by someone who didn't run this
-   wizard. Then mint, with `hub_host`'s own short name and the instance's `<prefix>` folded into
-   the label:
-   ```bash
-   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
-   ```
-   `<label>` is the Stage 7 token label. It is built as `--label <hub_host's short name>-<prefix>-<remote_host>`
-   (the hub's short name, the instance's prefix and the remote host), e.g.
-   `hub1-second-remote-a` (never `remote-a-body`), and is written as a literal in the command. A roster entry, a token list, or a process
-   inspected later on the remote host then carries which hub and which instance it's paired to,
-   not just which remote host it runs on.
-
-   **A label stays taken until its token's record is deleted.** `revoke` keeps the record by
-   design (an audit trail of which machine was cut off), so a revoked token still holds its
-   label; `hub token delete` removes an `unused` or `revoked` token's record and frees the label
-   (holler #454, releases after v0.3.0). A mint over a taken label fails with `label
-   "hub1-second-remote-a" already in use by <state> token <token_id>; free it with: ...`, naming the
-   exact commands. To reuse the label of a pairing you've confirmed is done (step above), revoke
-   the old token if `HOLLER_STATE_DIR=<state_dir> holler hub token list` still shows it `bound`, delete it, then mint again:
-   ```bash
-   HOLLER_STATE_DIR=<state_dir> holler hub token revoke <old_token_id>   # only if it is still bound
-   HOLLER_STATE_DIR=<state_dir> holler hub token delete <old_token_id>
-   HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
-   ```
-   The new token has a new token id, so the body joins again with the new join line. On holler
-   v0.3.0 and earlier nothing frees a label (`delete` only invalidated the secret; confirmed live
-   2026-09-23): there, append a counter and mint `hub1-second-remote-a-2`, then `-3`, and so on.
-
-   **A minted token's join secret is valid for 24 hours by default (`--ttl`); the human-readable
-   `expires` that `hub token mint` prints is one day early on holler releases before v0.3.0.** Confirmed
-   2026-09-23: a fresh token printed `expires` equal to the mint time, but `--json` showed
-   `expires - now = 86400s`, and `format_epoch` was missing a `+ 1` in its day term (fixed in
-   holler v0.3.0). So a same-second `expires` is a display bug, not a zero-length window — there is
-   no rush before `body join`; only a real `token expired`/`invalid token` error from `body join`
-   means the token lapsed. (This skill previously called it a "redeem-immediately window" — wrong.)
-   From holler #453 on (releases after v0.3.0), a joined body's token does not expire: the body
-   keeps authenticating until `HOLLER_STATE_DIR=<state_dir> holler hub token revoke <token_id>` ends it, so a working pairing
-   never needs a new mint just because a day has passed.
-3. **Join and run the body on this host**, using *this host's own* derived body config and *its
-   own* resolved `<state_dir>` (`mkdir -p <state_dir>` and `mkdir -p <logs_dir>` there first):
-   ```bash
-   scp <scratch>/<prefix>-sessions-<remote_host>.toml <remote_host>:<body_config>
-   ssh <remote_host> "HOLLER_STATE_DIR=<state_dir> holler body join --server wss://<hub_host>:<serve_https_port> --token <token_id>:<secret> --hub-key <hub_key>"
-   ssh <remote_host> "mkdir -p <logs_dir> && { HOLLER_STATE_DIR=<state_dir> nohup holler body run --config <body_config> --debug quiet > <logs_dir>/<prefix>-holler-body.log 2>&1 & echo \$!; }"
-   ```
-   The join URL carries the **serve port** (`<serve_https_port>`): `wss://<hub_host>` alone means
-   port 443, which for a second instance is the first instance's serve endpoint. `body join` and
-   `body run` get the **same** `HOLLER_STATE_DIR` on this host (its resolved `<state_dir>`): the
-   token's pairing is stored under it, and a body started with another directory finds no
-   pairing. With an absent `[instance]` table `<body_config>` is `~/sessions.toml` and the
-   state directory is the default one, as before. Note the pid the last command prints.
-
-   After the body shows up in `HOLLER_STATE_DIR=<state_dir> holler roster` (Verify, below),
-   **record** that pid on this host:
-   `record --pid <pid> --role body --stage 7 --session <the first session on this host>`
-   (remote form, Stage 4), and confirm with `list` that the recorded `cmd` starts with `holler`.
-   Reuse rule: a `live` `body` row for this host whose recorded `cmd` names the expanded path of
-   `<body_config>` (the recorded command line holds the path with `~` expanded, e.g. the host's
-   `$HOME/sessions.toml`, never the literal `~/sessions.toml`) means the body is reused, skip `body run`; a restarted wizard that finds the row `stale` runs it
-   again and records the new pid.
-
-**Verify:**
-```bash
-HOLLER_STATE_DIR=<state_dir> holler roster
-```
-Each hub lists only the bodies paired to its own state directory; a body of another instance
-(other state directory, other hub) can neither appear here nor join: its token does not exist
-in this instance's store.
-
-**Gate:** must show **every** session, on **every** host, as `connected` — a partial roster (2
-of 3 connected on host A, host B not connected at all, say) is a real failure for whichever
-host/entry is missing, not a partial success; don't declare Stage 7 done until every distinct
-`remote_host`'s body is confirmed connected with all of *its* sessions. A `no such token` error
-for a given host means that host's mint (this stage, step 2) and its join ran against different
-state/pepper — stop and check `HOLLER_STATE_DIR` on both sides for that host rather than
-re-minting blindly, and don't let one host's token problem block diagnosing/fixing the others.
-
-## Stage 8 — Build the Herdr workspace (M+N panes)
-
-**Ask:** nothing further — Stage 3's plan already said whether the Herdr server/workspace gets
-reused, extended, or built fresh. When the wizard creates a new workspace (below), Stage 3's plan
-named it and listed the restored panes beside it, and the "Proceed with this plan?" yes covers
-creating it; a "no" means stop, or reuse the restored panes only if the user asks.
-
-**Every Herdr command in this stage and in Stage 9 goes through `herdr.sh`** (in `$WIZARD_LIB`),
-written in full as `<herdr_env> bash $WIZARD_LIB/herdr.sh run <args>`, where `<herdr_env>` is the
-literal Herdr settings from Stage 1 (`WIZARD_INSTANCE_NAME`, `WIZARD_HERDR_SESSION`,
-`WIZARD_INSTANCE_PREFIX`, `WIZARD_STATE_DIR` and `WIZARD_LOG_DIR=<logs_dir>`, plus `HERDR_BIN` when
-`herdr` is off `PATH`). They are set inline on **every** command, never exported: a lost export
-would send a bare `herdr` command to the default workspace. `herdr.sh run <args>` runs
-`herdr --session <herdr_session> <args>`: the session flag is on **every** command, `server stop`
-and `session attach` included. **A bare `herdr server stop` is never issued, by this skill or by
-the wrapper**: which server it stops is not established, and it could stop another instance's.
-The wrapper refuses to run when `WIZARD_INSTANCE_NAME` is unset, and when the instance is not the
-default one and sets no `herdr_session`. In prose below, `herdr.sh run pane list` stands for that
-whole command.
-
-**Do (session check, before anything is built):**
+**Do (session check, before anything starts):**
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-pane      # stops if this run is inside a pane of a DIFFERENT Herdr session
 <herdr_env> bash $WIZARD_LIB/herdr.sh check-session   # stops if the named session exists and the ledger did not create it
 ```
 These ran in Stage 2 and passed or were refused in Stage 3; run them again here, since time has
 passed. If `check-session` stops, tell the operator the session's name and ask (Stage 3 lists what
-to offer, including `session-delete` for a stopped session); never split panes of a session this
-wizard did not create (it counts as created only when the ledger has a **live** `herdr` row for
-it). If `check-pane` stops, do not split anything. **For the default instance, a running unnamed
-Herdr server with no live `herdr` row is foreign** (Stage 3's question "build in it, or stop"):
-only with the user's yes to building in it does this stage use that server, and the wizard never
-stops it; without that yes, stop here and ask. "Build in it" means a new workspace in that server
-(`herdr.sh run workspace create`): never split a pane the wizard did not create. Read the new
-workspace's first pane id from `herdr.sh run pane list`, filtered by the new workspace id; that
-pane is `<base-pane>` below.
+to offer, including `session-delete` for a stopped session); never build in a session this wizard did
+not create (it counts as created only when the ledger has a **live** `herdr` row for it). If
+`check-pane` stops, build nothing. **For the default instance, a running unnamed Herdr server with no
+live `herdr` row is foreign** (Stage 3's question "build in it, or stop"): only with the user's yes to
+building in it does the wizard use that unnamed Herdr server, and the wizard never stops it; without
+that yes, stop here and ask. "Build in it" means a new workspace in that server, which Holler's adapter
+creates in Stage 7: the panes it already has are never touched.
 
 **Do (server check, first, only if the plan called for a fresh server):**
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh run status
 ```
 Herdr 0.8.x prints the line `status: not running` or `status: running` under `server:`; the
-older `server: not running` text stays accepted. If it is not running, start one headlessly (`herdr` alone needs a real TTY and will fail
-with "cannot attach without a usable terminal" when run non-interactively — use the headless
-form; its log is `<logs_dir>/<prefix>-herdr-server.log`, see `herdr.sh log-path`). The default
-instance starts an unnamed server; a named session starts a server for that session. The **first
+older `server: not running` text stays accepted. If it is not running, start one headlessly (`herdr`
+alone needs a real TTY and will fail with "cannot attach without a usable terminal" when run
+non-interactively — use the headless form; its log is `<logs_dir>/<prefix>-herdr-server.log`, see
+`herdr.sh log-path`). The default instance starts an unnamed server; a named session starts a server
+for that session, in a scrubbed environment (the agent's own variables never reach it). The **first
 line** of `server-start`'s output is the server's pid:
 ```bash
 <herdr_env> bash $WIZARD_LIB/herdr.sh server-start
 sleep 3
 <herdr_env> bash $WIZARD_LIB/herdr.sh run status   # should now show `status: running` under `server:`
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane list
 ```
-**Restored saved session:** starting the server restores the previous saved session of that name
-(its workspaces and panes, and an agent in a pane may resume). When `pane list` shows panes the
-wizard did not create, never split or close them: report them to the user and, with the user's
-yes, build a **new workspace** beside them with `herdr.sh run workspace create` (then split and
-label only that workspace's panes), or reuse them only if the user asks (see the reuse branch
-below).
 Then record the server in the ledger, with that pid, so a later run knows this wizard created the
 session (for the default instance, leave out `--session`):
 ```bash
-HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role herdr --stage 8 --session <herdr_session>
+HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role herdr --stage 5 --session <herdr_session>
 ```
 and confirm with `list` that the recorded `cmd` starts with `herdr`. A live `herdr` row for this
 instance means the server is reused: do not start another.
 
-A genuinely first-ever Herdr has exactly one pane and no way to know what it should become. This
-wizard assumes the agent driving it is **not** itself running inside a Herdr pane (true for the
-Claude Code desktop app and for a plain terminal), so there is nothing to "find" — you are building
-the workspace from scratch. If you *are* inside a Herdr pane, `herdr.sh check-pane` compares that
-pane's session with the instance's and stops when they differ; even in the instance's own
-session, don't build over your own pane: stop and ask which workspace to use. The older
-"note whichever pane `herdr.sh run pane list` shows, that pane becomes the **first slot**" rule
-applies only to a server with exactly one pane and no restored panes. Whenever the wizard creates
-a new workspace (a restored saved session, or "build in it" on a foreign server), `<base-pane>`
-is that workspace's first pane (`pane list` filtered by its id), and Verify and Gate below count
-panes in that workspace only.
-
-**Naming the workspace.** When the config has a `workspace`, the new workspace is created with
-`<herdr_env> bash $WIZARD_LIB/herdr.sh run workspace create --cwd <dir> --label <workspace>`.
-When the server is fresh and has exactly one pane (the base pane case), no workspace is created:
-rename that pane's workspace once with
-`<herdr_env> bash $WIZARD_LIB/herdr.sh run workspace rename <workspace_id> <workspace>`. With no
-`workspace` key nothing changes: Herdr's own label stays.
-
-**But a Herdr that has been run before does not start blank — it restores its saved session,
-and that restore is more than pane structure.** Confirmed live 2026-09-23: after killing the
-server and starting a fresh one, `herdr.sh run pane list` came back with all 3 panes from the previous
-run already present, the orchestrator pane's Claude conversation **auto-resumed** (Herdr
-re-launched it via `claude --resume <id>` on its own), and the two session-viewer panes back as
-**dead shells** showing `opencode --session <old id>` → `Session not found` (their old
-`session_id`s no longer exist on the freshly started backends). So check `herdr.sh run pane list`
-before splitting anything. Those panes are the user's, not the wizard's, so they are reused only
-on request. **Reuse branch:** if the user asked to reuse them and the count equals M+N, reuse the
-restored structure — don't split again (that produces M+N+… panes and a wrong layout) — skip
-re-launching an orchestrator pane that resumed idle and healthy, and re-attach only the dead
-viewer panes in Stage 9 using this run's *new* session ids. If the user asked to reuse them and
-the count doesn't match, that's the "config changed" case in "If a stage fails" below. If the user
-did not ask, build a new workspace as above.
-
-If reusing an existing server (per Stage 3's plan; that means a workspace in it, never a split
-of its existing panes), check whether a workspace matching this
-run's target shape already exists (`herdr.sh run workspace list` / `herdr.sh run pane list`) before splitting
-more — a persisted session can survive a server restart with its pane *structure* intact even
-though the processes inside are gone (confirmed live 2026-09-22); reusing that structure is
-allowed only if the user asked for it, and then verify pane **count matches (M+N)** for *this* config, not an old run's count. If it
-doesn't match (the config has grown/shrunk since the layout was built), this should already
-have been flagged in Stage 3's plan — don't silently under- or over-provision panes relative to
-the current config.
-
-**Do (build the layout, row first)**, using Stage 1's resolved `layout` (the nested array, every
-orchestrator name included as a real slot alongside every session name — **not** an assumed
-single fixed orchestrator pane, and **not** raw `[[session]]`/`[[orchestrator]]` file order,
-which says nothing about columns). Flatten `layout` column by column, top to bottom within each
-column, into an ordered list of slots — each slot is either an orchestrator name or a session
-name. **The first slot in that flattened list is the pre-existing base pane** — it needs no
-split, it already exists; every other slot needs exactly one split to create its pane. Build
-the grid row first:
-- Create the first row by splitting right from the last pane of the row, one pane per column.
-- Then split each first-row pane down, once per further slot in its column, from the
-  most-recently-created pane in that column.
-
-The column-by-column order nests unevenly: Herdr nests every split inside the target pane's own
-cell, so a column split down before the next column is split right leaves the later columns
-spanning only part of the height.
-
+**Do (prove that Holler reaches this Herdr).** This is the first Holler pane call; it goes through the
+door like every other (Stage 6 says why):
 ```bash
-# layout = [["o1"], ["alpha", "beta"]]  (this skill's example: o1 alone in column 1 — the
-# pre-existing base pane, no split — alpha/beta stacked in column 2)
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <base-pane> --direction right   # -> alpha's pane (column 2, row 1), e.g. <p3>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction down              # -> beta's pane (column 2, row 2), e.g. <p4>
-
-# layout = [["o1"], ["alpha", "beta"], ["o2"], ["gamma", "delta"]]  (2 orchestrators, 4 sessions)
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <base-pane> --direction right   # -> alpha's pane (col 2), e.g. <p3>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction right          # -> o2's pane (col 3), e.g. <p5>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p5> --direction right          # -> gamma's pane (col 4), e.g. <p6>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p3> --direction down              # -> beta's pane (col 2, row 2), e.g. <p4>
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane split --pane <p6> --direction down              # -> delta's pane (col 4, row 2), e.g. <p7>
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane doctor
 ```
-Keep a running map of pane id → slot name as you go (`<base-pane>` -> whatever slot 1 actually
-is, `<p3>` -> slot 2, and so on) — this is what both the orchestrator-launch step below and
-Stage 9's attach step key off, instead of assuming which pane is which.
+Its first line prints Herdr's version: that is the one read that proves Holler's adapter reaches *this*
+instance's Herdr session through the socket `<herdr_env>` names. A `herdr-version-unsupported` finding
+is a Gate: no Holler verb upgrades Herdr; report it and ask. An `unregistered-herdr-pane` finding is
+expected here (the server's own first pane, and any restored pane).
 
-**Do (label every pane, right after the splits):** give each pane, orchestrator or session, its
-slot name as its label, through `herdr.sh label <pane-id> <label>` (not under `run`; the label
-matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`), once per pane and with the usual `<herdr_env>` in
-front, e.g. `<base-pane>` gets `o1` and `<p3>` gets `alpha`:
+**Restored saved session.** Starting the server restores the previous saved session of that name (its
+workspaces and panes, and an agent in a pane may resume). List them through Holler:
 ```bash
-<herdr_env> bash $WIZARD_LIB/herdr.sh label <base-pane> o1
-<herdr_env> bash $WIZARD_LIB/herdr.sh label <p3> alpha
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane list --format=json
 ```
+They are `data.unmanaged`, each with its `workspace` and `label`. Never reuse or close them, and
+report them to the user. When their labels are the config's pane names they are the previous wizard's
+layout — Stage 3's case 4: stop and ask (a second instance, or stop). When a restored workspace has the
+config's `workspace` name, stop and ask for another name (Stage 3's case 5). Otherwise Stage 7 builds
+the workspace beside them.
 
-**Verify:** `herdr.sh run pane list` (count panes in that workspace only, when the wizard created one) shows exactly (M+N−1) new panes beyond the pre-existing base pane
-(M+N total in the workspace, M of which map to `[[orchestrator]]` entries and N of which map to
-real sessions), in the expected layout, and every pane's label equals its slot name. Then read
-`herdr.sh run pane list` again and tell the user if the widths look uneven: chained right-splits
-may leave columns at about 1/2, 1/4, 1/8, 1/8 of the width unless Herdr rebalances. This is
-unverified until the operator story #734 and the new-user run #778 check it with the real Herdr.
+**What a fresh server holds is not established** (UNVERIFIED until the operator's repeat of the
+new-user run, #778): it may already show one workspace with one pane. That pane is the server's, not the
+wizard's: the wizard's workspace is a new one that Holler's adapter creates on the first create, Stage 9
+counts that pane as an expected `unregistered-herdr-pane`, and Stage 11 says how to close it.
 
-**Gate:** if `herdr.sh run pane split` errors, or the pane count (in that workspace only) doesn't match M+N, stop and confirm
-the target workspace/pane with the user before retrying — don't chain more splits on a layout
-you haven't confirmed, and don't silently build fewer/more panes than the config calls for.
+**Gate:** if the server does not start, read its log (`herdr.sh log-path`) before anything else. If
+`pane doctor` answers `unavailable`, the hub (Stage 4) or the socket in `<herdr_env>` is wrong: check
+both, never fall back to a Herdr command.
 
-**Do (launch every orchestrator in whichever pane the build above mapped it to)**, looped over
-every `[[orchestrator]]` entry — don't leave any of these panes an unlabeled empty shell, a
-human landing on one with no instructions will improvise (confirmed live 2026-09-22: typed a
-bare `claude`, got a disconnected session with none of this setup's context, not "the Claude
-that was set up"). For each orchestrator's mapped pane (call it `<orch-pane>` for that
-orchestrator), first check it isn't already doing something real:
+## Stage 6 — Create the profile
+
+**Ask:** nothing further — Stage 3's plan already listed every call of this stage.
+
+**Every Holler pane and profile call goes through one door**, written in full as
+`<herdr_env> bash $WIZARD_LIB/herdr.sh holler <words>`: it runs `holler <words>` unchanged in a
+scrubbed environment — the same allow-list as the Herdr server's, without any `HERDR_*`, so none of the
+driving agent's own variables (its credentials, its own Herdr pane, its tmux client) passes — with the
+instance's literals set: `HOLLER_STATE_DIR`, `HOLLER_HERDR_SESSION` (`default` for the default
+instance), `HOLLER_HERDR_WORKSPACES`, and `HOLLER_HERDR_SOCKET` or `HOLLER_TMUX_SOCKET`. Holler's verbs
+are configured from the environment of the process that runs them, and the first call that creates a
+pane starts the instance's tmux server with that environment, which every pane then inherits
+(UNVERIFIED: tmux's own rule, checked by the operator's repeat of #778). A bare `holler pane ...` from
+your own shell would carry your variables into every pane: it is never run.
+
+**Do:** print the calls (the agent orders nothing; `panes.sh` does):
 ```bash
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <orch-pane>
+bash $WIZARD_LIB/panes.sh plan <config> <profile>            # a first run
+bash $WIZARD_LIB/panes.sh plan <config> <profile> --rerun    # case 2: <profile> exists
 ```
-If it's already running something (a real shell session mid-task, an existing orchestrator
-process, anything beyond an idle prompt), don't launch over it — flag this to the user instead
-of overwriting active work, the same way Stage 3 would have.
+Each printed line is `TAG ARGS`: `profile-create`, then one `spec` per pane in layout order, then
+`dry-run` and `apply` (those two are Stage 7's). The ARGS are already shell-quoted: run each line of
+this stage, in order, as `<herdr_env> bash $WIZARD_LIB/herdr.sh holler ARGS`, copying the ARGS as
+printed. For the example grid of "The config file" the first lines are:
+```bash
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile create <profile>
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane launch r1c1 --profile <profile> --spec-only --workspace <workspace> --grid r1c1 --project <dir> --role orchestrator --model <model> --effort medium --ctx-soft 800000 --ctx-hard 900000 --port-policy fixed:<port>
+```
+A `spec` line writes the pane's spec into `<profile>` and touches nothing live: no Herdr call, no tmux
+session, no server, so it needs no `--herdr-session`. A Claude Code pane's line carries
+`--harness claude --port-policy none` and no `--agent`; an OpenCode pane's carries
+`--port-policy fixed:<port>` and its `--agent` when it has one. The wizard passes no `--env` at all.
+On a rerun, `profile create` would refuse `profile-exists`: the `--rerun` plan leaves that line out, and
+the `spec` lines rewrite the specs in place. Each call answers within its own bound.
 
-**If Stage 3's agent-instructions question was answered yes:** brief this orchestrator on Holler
-self-awareness before launching its `cmd` (so it's in context from the first prompt) — ensure an
-`AGENTS.md` exists in that orchestrator's own `dir` (creating one if none exists, appending a
-clearly-marked section if one does — never overwrite unrelated content) containing at least:
+**Verify:**
+```bash
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile show <profile>
+```
+Lists every pane of the config, at its cell, with its harness and role.
+
+**Gate:** any line that exits non-zero — show its message and the code it names (for example
+`port-policy-unsupported` or `agent-unsupported`, which `panes.sh check` should already have caught),
+then stop and ask. Never edit a printed line to get past a refusal.
+
+## Stage 7 — Build the panes
+
+**Ask:** nothing further — Stage 3's plan named the workspace and listed any restored panes beside it,
+and the "Proceed with this plan?" yes covers creating it; a "no" means stop. The workspace is always a
+new workspace in that server: Holler's adapter creates it when the apply makes its first pane, whether
+the server is fresh, holds restored panes, or is a foreign unnamed server the user said to build in; the
+wizard never touches a pane it did not create.
+
+**First, if Stage 3's agent-instructions question was answered yes, the briefing.** An orchestrator's
+agent reads its `AGENTS.md` when it starts, and no command is ever typed into a pane, so the briefing is
+written before the apply launches the orchestrators: ensure an `AGENTS.md` exists in each orchestrator's
+own `dir` (creating one if none exists, appending a clearly-marked section if one does — never overwrite
+unrelated content) containing at least:
 ```markdown
 ## Holler self-status
 
@@ -1609,141 +1238,252 @@ The text names no orchestrator: orchestrators that share a `dir` share one file,
 name would be wrong for all but one. **The briefing never carries the state directory's
 path**: `AGENTS.md` may be shared with another instance's orchestrator (the same project directory),
 and a path written into it would send that orchestrator to this hub. The pane's own environment
-carries the value (the launch command below exports it).
+carries the value: every pane starts with the instance's `HOLLER_STATE_DIR`, from the tmux server that
+`herdr.sh holler` started (UNVERIFIED until #778's repeat; Stage 10's fresh-session check is the proof).
 
 - **Only one instance uses this `AGENTS.md`** (the default instance, or a directory no other
-  instance's orchestrator reads): if it already has a `## Holler self-status` section, skip this
+  instance's orchestrator reads): if it already has the plain self-status section, skip this
   sub-step; if Stage 3's answer was no, skip it too.
 - **The section must be instance-specific** (another instance's orchestrator reads this file too):
   head it `## Holler self-status (instance <name>)` with the instance's own `<name>`, and add it
   alongside the other section. If another instance's section already exists (a different
   `(instance ...)` heading, or the plain heading written for the first instance), do not edit it:
   stop and ask the user which sections to keep. If a section with this instance's own heading
-  already exists, skip this sub-step. Two things verified
-live 2026-09-22, both worth getting right in the briefing rather than guessing: there
-is no `holler status <name>` verb (`roster --prefix` is the real per-session filter), and
-`--prefix` matches the roster's live namespaced session id, not the config file's bare `name` —
-a bare-name `--prefix` silently matches nothing rather than erroring.
+  already exists, skip this sub-step. Two things verified live 2026-09-22, both worth getting right in
+  the briefing rather than guessing: there is no `holler status <name>` verb (`roster --prefix` is the
+  real per-session filter), and `--prefix` matches the roster's live namespaced session id, not the
+  config file's bare `name` — a bare-name `--prefix` silently matches nothing rather than erroring.
 
-If it's genuinely idle, launch
-using that orchestrator's own `cmd` from its own `dir` (both read from the config file back in
-Stage 1 — that's where this is decided per orchestrator, never guessed here, and never assumed
-to be `claude` even though that's today's common case):
+**Then the dry run, once more, before the first live change** (the `dry-run` line Stage 6 printed):
 ```bash
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane run <orch-pane> "cd <that orchestrator's dir> && export HOLLER_STATE_DIR=<state_dir> && <that orchestrator's cmd>"
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane send-keys <orch-pane> enter    # `pane run` types the command; it does NOT press Enter
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile apply <profile> --dry-run --herdr-session <apply_session> --format=json
 ```
-The `export` in the pane makes a bare `holler` the orchestrator types reach this instance's hub
-too (the briefing says the same in words). This is a **fresh session with equivalent working context** (the right directory, so any
-project `CLAUDE.md`/MCP config in scope) — **not** a resume of whichever session is driving
-this wizard right now. Don't claim it's "the same session" to the user; say plainly it's a new
-one rooted in the same project. Repeat this whole sub-step for every orchestrator — one launch
-per `[[orchestrator]]` entry, each in its own mapped pane, each with its own `dir`/`cmd`.
+Read `data.steps`. On a fresh build every step is `create`, in creation order: the workspace's column 1
+by row, then every other cell by row and column, which is the order Herdr can build in. Stop and ask
+if the steps differ from the table Stage 3 showed (a pane added or missing; on a fresh build an
+`adopt`, `report` or `relaunch` step means a record of that name exists, which is Stage 3's case 3), or
+if a step is `refused` or `reported`: a dry run exits 0 whatever it plans, so its steps are the Gate
+here. A dry run issues no split, so it cannot show `grid-unreachable`: only the real run finds that.
 
-**Verify**, for every orchestrator's pane:
+**Then the apply, once:**
 ```bash
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <orch-pane>
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile apply <profile> --herdr-session <apply_session>
 ```
-Shows a real startup banner/prompt for that orchestrator's `cmd`, not a bare shell prompt.
+It creates every pane of the grid on its own, in that creation order, adopts a healthy pane that already
+exists and matches, and relaunches an unhealthy agent. The wizard launches no pane outside this one
+call.
 
-**Gate:** if a pane still shows a bare shell after a few seconds, check you sent `enter` (the
-same common miss as the OpenCode attach panes) before assuming that orchestrator's `cmd` itself
-failed to start. A partial launch (2 of 2 panes built but only 1 of 2 orchestrators actually
-started) is a real gap for the un-launched one, not a partial success.
+**How long it takes, and its timeout.** Apply has no overall cap: reading the profile and observing its
+panes takes up to 10 s, and each `create` adds up to the launch's own 10 s budget (a cold `opencode serve`
+may need all of it), plus a port check and, on a refusal, a rollback — call it 15 s per create. State
+the expected duration before running it (10 s plus 15 s per `create` step of the dry run: a 16-pane
+build is about four minutes), and give the command a timeout above it, or run it in the background with
+its output in `<scratch>/<prefix>-apply.out` and read that when it ends. Your shell tool's own timeout
+(two minutes by default in Claude Code) must never end an apply: a killed apply can leave a step that
+had acted unreconciled.
 
-## Stage 9 — Attach each pane to its real remote session
+**The Gate reads the exit code and what the run printed:**
+- **Exit 0**: it printed `profile <profile>: N steps, applied` and one `PANE: ACTION, OUTCOME` line
+  per step. A step whose outcome is `reported` (a healthy pane that differs from its spec, left alone)
+  is a Gate: show its differences, name `holler profile show <profile>` and
+  `holler pane relaunch PANE --profile <profile>`, and ask. Every other step is `created`, `adopted` or
+  `relaunched`; a `refused` or `failed` step never appears in an exit-0 run.
+- **Exit 3**: at least one `refused` step and no failed one. Every step ran, nothing was rolled back,
+  and the run printed only one line, `error: apply refused <N> step(s): <pane> (<code>), ...; <M> other
+  step(s) ran`. Each refused code is a Gate: `orchestrator-not-relaunched` (apply never relaunches an
+  unhealthy orchestrator: report it and ask; with the user's yes it is relaunched with
+  `holler pane relaunch PANE`, through the door), `pane-in-other-profile` (Stage 3's case 3; `--take-over` only if the
+  user asks), `harness-change-refused` (a recorded pane whose spec now names another harness: close it
+  and launch it again, with the user's yes), `grid-unreachable` (a new row below a live row of two or
+  more panes: apply moves nothing live to make room, so ask — the pane can go in a new column, or the
+  user may close and rebuild that column), `grid-occupied` (the cell holds a pane Holler does not
+  drive), and a launch's own refusals, such as `port-in-use` or `process-in-use` (a tmux session of
+  that name already runs Claude Code: the wizard adopts or doubles nothing). The panes created around a
+  refusal stay, and a rerun adopts them; `holler pane list` shows what was built.
+- **Exit 1**: a `failed` step stopped the run, the later steps were skipped, and only that failure was
+  printed (`apply stopped at <pane> (<action>): ...`). `harness-dialog-open` means a Claude Code pane
+  stopped at its first-run or trust dialog and its launch was rolled back: the answer is by hand —
+  answer the dialog once in that directory in a plain terminal, then re-run Stage 7. A `timeout` on a
+  cold server is a Gate with a question too. Once the user fixed the cause, a rerun of Stage 7
+  continues where it stopped.
+- **Exit 2**: a usage error — the line was not typed as `panes.sh` printed it.
 
-Stage 9's Herdr commands use `<herdr_env> bash $WIZARD_LIB/herdr.sh run ...` exactly as Stage 8
-does (same inline settings, same session flag; `herdr.sh run session attach` for viewing). The
-instance's own Herdr server is never stopped through the wrapper: it is a ledger process and stops
-through `stop-owned.sh` (ownership rule), never `herdr.sh run server stop` and never a bare
-`herdr server stop`.
+A Gate: show it, name the command it names, ask; never work around it, and never fall back to a Herdr
+command. Apply's own creation order builds every grid `panes.sh check` accepts, so no other build order
+exists to fall back to.
 
-**Ask:** nothing — you have the N session panes from Stage 8 (mapped to session names via
-`layout`, not raw file order) and the N session ids from Stage 5.
+**Verify:** the run exited 0 and every step is `created`, `adopted` or `relaunched`.
 
-**With no sessions, this stage does nothing: report it as skipped (⏭️), never as failed.**
+## Stage 8 — Join and run the body
 
-**Only implemented for `harness = "opencode"` today.** If a session's harness isn't `opencode`,
-this is a real gate — stop and tell the user this wizard doesn't have a live-view mechanism for
-that harness yet (its Holler-side session may still be real and working; it just has no known
-"watch it live in a pane" command here). Don't improvise an attach-like command for an
-unfamiliar harness.
+**Ask:** nothing — you have everything from Stages 1, 4 and 7.
 
-**Do**, for every (pane, `opencode`-harness session) pair in order — plain local panes running
-`opencode attach` against *that session's own* `remote_tailnet_host` (not a single shared
-value — a session on a different host uses a different URL here; `opencode attach --help`
-confirms the positional URL argument is an example, not a hostname restriction):
+**One body on this machine drives every OpenCode pane.** A body is how the hub drives a session: it
+attaches to the session each pane's server holds (attach mode, ADR 0014; it is not that server's
+parent). **A Claude Code pane has no body row yet** (#850): Stage 3 said so, and Stage 10's round trip
+covers OpenCode panes only. One body serves all the OpenCode panes, so restarting it reconnects every
+one of them at once. With no OpenCode pane in the grid, this stage has nothing to do: report it skipped
+(⏭️), never failed.
+
+**Do, in three parts.** First, **derive the body config from the registry**, never from the config
+file: for each OpenCode pane,
 ```bash
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane run <pane> "opencode attach http://<that session's remote_tailnet_host>:<port> -s <session_id>"
-<herdr_env> bash $WIZARD_LIB/herdr.sh run pane send-keys <pane> enter    # `pane run` types the command; it does NOT press Enter
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane get <name> --format=json
 ```
+and read `data.pane.harness.port` and `data.pane.session_of_record`. A pane with no port or no session
+of record is a Gate: no body is started without one. Write one `[[session]]` row per OpenCode pane, and
+nothing else, to `<body_config>`:
+```toml
+[[session]]
+name = "<name>"
+harness = "opencode"
+mode = "attach"
+endpoint = "http://127.0.0.1:<data.pane.harness.port>"
+session_id = "<data.pane.session_of_record>"
+```
+`<body_config>`, the body config's path, is defined once, here:
+`<state_dir>/herdr/setup/<prefix>-sessions.toml`, in the wizard's own directory (every file the wizard
+keeps lives there). Re-read it before using it: only `[[session]]` rows, each `endpoint` ending in its
+own pane's port and each `session_id` its pane's session of record.
 
-**Verify**, for every pane — use `herdr.sh run pane read <pane>` (not `herdr.sh run pane get`, which only
-returns metadata/title, not actual scrollback content) and confirm the title is a distinctive,
-real conversation identifier, not a generic shell prompt.
+Second, **mint one token for this body**, with a label that names the instance, `<prefix>-local`, so a
+roster entry, a token list row or a process inspected later says which instance it belongs to. Check
+what is there first (`HOLLER_STATE_DIR=<state_dir> holler hub token list`), then:
+```bash
+HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
+```
+`<label>` is the Stage 8 token label: `<prefix>-local`, written as a literal in the command (never a
+bare `body` or a host name, which says nothing about which hub and instance the body belongs to).
 
-**Gate:** any pane still showing a generic title/prompt means the attach didn't land — check
-you actually sent `enter` (the single most common miss) before assuming something deeper is
-wrong.
+**A label stays taken until its token's record is deleted.** `revoke` keeps the record by design (an
+audit trail of what was cut off), so a revoked token still holds its label; `hub token delete` removes
+an `unused` or `revoked` token's record and frees the label (holler #454, releases after v0.3.0). A
+mint over a taken label fails with `label "<prefix>-local" already in use by <state> token <token_id>;
+free it with: ...`, naming the exact commands. To reuse the label of a body you've confirmed is done,
+revoke the old token if `HOLLER_STATE_DIR=<state_dir> holler hub token list` still shows it `bound`,
+delete it, then mint again:
+```bash
+HOLLER_STATE_DIR=<state_dir> holler hub token revoke <old_token_id>   # only if it is still bound
+HOLLER_STATE_DIR=<state_dir> holler hub token delete <old_token_id>
+HOLLER_STATE_DIR=<state_dir> holler hub token mint --label <label>
+```
+The new token has a new token id, so the body joins again with the new join line. On holler v0.3.0
+and earlier nothing frees a label: there, append a counter and mint `<prefix>-local-2`, then `-3`.
+A minted token's join secret is valid for 24 hours by default (`--ttl`), and once a body has joined its
+token does not expire (holler #453): the body keeps authenticating until
+`HOLLER_STATE_DIR=<state_dir> holler hub token revoke <token_id>` ends it.
+
+Third, **join and run the body** on this machine, with the hub's own `<state_dir>` (`mkdir -p
+<logs_dir>` first):
+```bash
+HOLLER_STATE_DIR=<state_dir> holler body join --server ws://127.0.0.1:<hub_port> --token <token_id>:<secret> --hub-key <hub_key>
+{ HOLLER_STATE_DIR=<state_dir> nohup holler body run --config <body_config> --debug quiet > <logs_dir>/<prefix>-holler-body.log 2>&1 & echo $!; }
+```
+`<token_id>:<secret>` and `<hub_key>` are what the mint printed. The join URL is loopback `ws://` to the
+hub's own port: the body runs on the hub's machine. `body join` and `body run` get the **same**
+`HOLLER_STATE_DIR`: the token's pairing is stored under it, and a body started with another directory
+finds no pairing. Note the pid the last command prints, and after the body shows up in
+`HOLLER_STATE_DIR=<state_dir> holler roster` (Verify, below), **record** it and confirm with `list` that
+the recorded `cmd` starts with `holler`:
+```bash
+HOLLER_STATE_DIR=<state_dir> bash $WIZARD_LIB/ledger.sh record --pid <pid> --role body --stage 8 --session <the first OpenCode pane's name>
+```
+Reuse rule: a `live` `body` row whose recorded `cmd` names the expanded path of `<body_config>` (the
+recorded command line holds the absolute path) means the body is reused — but only when the body config
+it reads still matches the registry. A pane added or removed, or relaunched onto a new session of record,
+needs a new body config: derive it again, stop the recorded body through `stop-owned.sh`, and run it
+again. A restarted wizard that finds the row `stale` runs it again and records the new pid.
+
+**Verify:**
+```bash
+HOLLER_STATE_DIR=<state_dir> holler roster
+```
+Shows `<label>/<name>` `connected` for every OpenCode pane; since #648 a roster row joined to a pane
+also prints the pane's cells. The hub lists only the bodies paired to its own state directory: a body
+of another instance can neither appear here nor join, its token does not exist in this store.
+
+**Gate:** every OpenCode pane must show as `connected` — a partial roster is a real failure for the
+missing panes, not a partial success. A `no such token` error means the mint and the join ran against
+different state: stop and check `HOLLER_STATE_DIR` on both commands rather than re-minting blindly.
+
+## Stage 9 — Check the registry
+
+**Ask:** nothing. This stage reads the registry through Holler; it types into no pane and reads no
+pane's screen.
+
+**Do:**
+```bash
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane doctor --format=json
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane list --format=json
+<herdr_env> bash $WIZARD_LIB/herdr.sh holler profile show <profile>
+```
+`pane doctor` exits 0 with or without findings: read `data.findings`. The gate is **no finding except
+`unregistered-herdr-pane`**: that kind is expected for the Herdr server's own first workspace pane and
+for restored panes (Stage 11 says how to close them). Any other finding — `shown-driven-mismatch`,
+`profile-drift`, `pane-waiting`, `server-down`, `claude-login-missing`, and any kind a later Holler adds
+— is a Gate: show it, name the command it names, ask. `pane list` shows every pane of the config, at its
+cell (`pos.pos`), with `profile` = `<profile>` and SYNC `ok` (SHOWN, the session the pane's screen
+shows, equals its session of record). DRIVEN prints `-` until #839 wires it: a `-` there is not a
+failure. `profile show <profile>` lists no differing field. Each call answers within its own bound.
+
+**The login is never touched.** The skill never runs `claude auth` or `claude login`, never reads,
+prints or copies a login, and never names a credential variable's value: a Claude Code pane's process is
+started without the variables that would change its login, so it uses the login Claude Code itself holds.
+Whether that login is usable comes only from `holler pane doctor`'s `claude-login-missing` (asked once
+per pass when a Claude Code pane is in scope). The answer is: log in once, by hand, in a plain terminal
+outside the wizard, then re-run Stage 9.
+
+**Verify:** the three reads above agree: every pane present at its cell in `<profile>`, SYNC `ok`, and
+no finding but `unregistered-herdr-pane`.
+
+**Gate:** any other finding, a missing pane, a pane at another cell, or SYNC not `ok` — show it and ask.
+Never repair a pane by typing into it, and never fall back to a Herdr command: the command a finding
+names, run through the door with the user's yes, is the repair.
 
 ## Stage 10 — End-to-end verification, don't just assume it worked
 
 **Ask:** nothing.
 
-**With no sessions, verify what exists:** the hub answers
-(`HOLLER_STATE_DIR=<state_dir> holler hub status` shows `listening: 127.0.0.1:<hub_port>`) and every
-orchestrator pane is alive (`<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <orch-pane>` shows its live prompt); this stage does not look for sessions, a roster or a `say`.
+**First, verify what exists:** the hub answers (`HOLLER_STATE_DIR=<state_dir> holler hub status`
+shows `listening: 127.0.0.1:<hub_port>`) and every orchestrator pane is alive (Stage 9's `pane list`
+shows it healthy at its cell, and `pane doctor` found nothing about it).
 
-**Do**, for every session in the config:
-(`<label>` is the Stage 7 token label.)
+**Do**, for every OpenCode pane:
+(`<label>` is the Stage 8 token label.)
 ```bash
 HOLLER_STATE_DIR=<state_dir> holler say <label>/<name> "reply with just: <name> ready"
 ```
 
-**Verify:** the reply appears in the CLI output here for every session, regardless of harness.
-For `opencode`-harness sessions, additionally confirm it appears in the matching pane's real
-content: run `<herdr_env> bash $WIZARD_LIB/herdr.sh run pane read <pane>` and confirm your exact
-prompt text and its reply both appear, with a "Last finished HH:MM:SS" timestamp matching when you ran `say`. That match is
-what proves the pane is a genuine live view of the session Holler is driving, not a
-disconnected second conversation. Repeat for every session — a partial pass (2 of 3 verified)
-is a real gap for the untested one, not good enough. A non-`opencode` session that isn't Stage
-9-attached to any pane is verified on the CLI half alone — say so plainly rather than treating
-it the same as a fully pane-verified one. Also confirm every orchestrator pane from Stage 8 is
-still showing a live prompt, not a crashed/exited shell.
+**Verify:** the reply appears in the CLI output here for every OpenCode pane, a real round trip through
+the hub, the body and the pane's own server. Repeat for every OpenCode pane — a partial pass (2 of 3
+verified) is a real gap for the untested one, not good enough. A Claude Code pane has no round trip yet
+(no body row until #850): say so plainly, and count it verified by Stage 9 alone.
 
 **If Stage 3's AGENTS.md briefing was installed, prove it with a genuinely new session — a
-resumed one proves nothing.** Herdr (and `claude --resume`) can bring back an orchestrator with
-its old conversation history intact; that session may already "know" about Holler from its own
-past turns, not from the briefing. Confirmed live 2026-09-23: the auto-resumed orchestrator's
-recap already mentioned earlier `holler say` calls, so it would have passed any check regardless
-of whether `AGENTS.md` worked. To actually test the briefing: exit that session (`/exit`), launch
-a fresh `claude` (no `--resume`) in the same pane, and give it a task with **no Holler context
-at all** — e.g. "Send a hello to alpha". Pass only if it discovers the roster on its own
-(`HOLLER_STATE_DIR=<state_dir> holler roster`), finds the namespaced name (`<label>/alpha`), and
-gets a real reply.
+resumed one proves nothing.** An orchestrator with old conversation history may already "know" about
+Holler from its own past turns, not from the briefing. Confirmed live 2026-09-23: an auto-resumed
+orchestrator's recap already mentioned earlier `holler say` calls, so it would have passed any check
+regardless of whether `AGENTS.md` worked. A pane this run created is a fresh session; on a rerun that
+adopted the orchestrator, ask before giving it one (`holler pane reset PANE` through the door, which
+drops its conversation). Then ask the user to attach (Stage 11's first row) and give that orchestrator a
+task with **no Holler context at all** — e.g. "Send a hello to `<an agent pane's name>`". Pass only if it
+discovers the roster on its own (`holler roster` in its own pane), finds the namespaced name
+(`<label>/<name>`), and gets a real reply.
 
-**Gate:** if the CLI reply lands but `herdr.sh run pane read` never shows it for a given `opencode`
-session, that pane's attach (Stage 9) is stale or pointed at the wrong session id — don't
-declare success on the CLI half alone for a session that was supposed to be pane-attached, and
-don't rely on `pane get`'s `revision` field either (it does not reliably bump on new
-content — confirmed live 2026-09-22, a real new turn landed with `revision` unchanged).
+**Gate:** a CLI reply that never lands for a given OpenCode pane means its body row is stale (the pane
+was relaunched onto a new session of record, or the body was not restarted after a change): derive the
+body config again and restart the body (Stage 8) before anything else.
 
-**Every stage green or skipped = done.** Report the final layout (which pane is which orchestrator or
-session) and every session id, so the user has them on hand for a later "recover a dead pane"
-run. Then give the user precise instructions to actually **see** the workspace, since
-everything above ran headlessly over Herdr's socket API — nothing was visible on screen yet:
+**Every stage green or skipped = done.** Report the final layout (which cell holds which pane, its
+harness and role) and every pane's session of record (from `pane list`), so the user has them on hand
+for a later repair. Then give the user precise instructions to actually **see** the workspace, since
+everything above ran headlessly through Holler and Herdr's socket — nothing was visible on screen yet:
 
-1. Focus the right workspace over the API first, so the human lands on it immediately instead
-   of whatever workspace Herdr defaults to:
-   ```bash
-   <herdr_env> bash $WIZARD_LIB/herdr.sh run workspace focus <workspace_id>   # the workspace_id from pane list / workspace list above
-   ```
-2. Tell the user to open a terminal and attach (Stage 11's first row has the exact command, with
-   the instance's `herdr_session` when it has one), then say what they should see immediately:
-   the workspace focused in step 1 (M+N panes arranged in `layout`'s columns/rows), not an empty
-   default workspace.
-3. Then continue to Stage 11, which holds every command for looking around and cleaning up.
+1. Tell the user to open a terminal and attach (Stage 11's first row has the exact command, with
+   the instance's `herdr_session` when it has one), then switch to the workspace `<workspace>`
+   (`prefix+w`, or click it in the sidebar), where the grid is: every pane in `layout`'s columns and
+   rows. A fresh server may also hold its own first workspace (one pane, not the wizard's).
+2. Then continue to Stage 11, which holds every command for looking around and cleaning up.
 
 ## Stage 11 (final): Basic Herdr commands
 
@@ -1765,89 +1505,83 @@ binding):
 | Detach, leave everything running | `prefix+q` |
 | Every binding | `prefix+?` |
 
-Then add two notes:
+Then add three notes:
 
+- **The wizard's panes are Holler's.** Moving between them, zooming one and detaching are fine; to
+  close, restart or replace one, use Holler (`holler pane close`, `holler pane relaunch`, with the
+  instance's `HOLLER_STATE_DIR` in your own shells), never `prefix+x`, or the registry keeps a record of
+  a pane that is gone (`holler pane doctor` then reports it).
 - **A restored workspace:** if `herdr.sh run workspace list` shows any workspace the wizard did
-  **not** create beside the new one (a restored saved session), name it with its id and pane count
-  and say how to close it if the user wants (`prefix+shift+d` on it, or `herdr workspace close
-  <id>`). Never close it for them.
-- **Teardown:** the wizard's own teardown is `stop-owned.sh teardown`; warn again that it closes
-  the restored workspace too (the server it stops holds it).
+  **not** create beside the new one (a restored saved session, or the fresh server's own first
+  workspace), name it with its id and pane count and say how to close it if the user wants
+  (`prefix+shift+d` on it, or `herdr workspace close <id>`). Never close it for them.
+- **Teardown:** the wizard's own teardown closes the panes through Holler, then runs
+  `stop-owned.sh teardown`; warn again that it closes the restored workspace too (the server it
+  stops holds it).
 
 ## If a stage fails
 
-- **Stage 2's SSH check fails for one host among several:** don't let one bad host block
-  diagnosing the others — finish checking every distinct `remote_host` first, then address
-  failures. For the failing host, distinguish the real cause before doing anything else —
-  `Connection timed out`/`No route to host` means that machine or tailnet is actually
-  unreachable (check `tailscale status` for that host specifically); `Permission denied
-  (publickey)` means the key isn't authorized for that account on that host (an `ssh-copy-id`
-  or an agent-forwarding fix, not a retry); a hang despite `-o BatchMode=yes` still exiting
-  cleanly (rather than instantly refusing) can mean the alias in `~/.ssh/config` points
-  somewhere unexpected — `ssh -v <that host>` to see what it actually resolved to. Don't retry
-  the same failing check hoping for a different result; diagnose, fix, then re-run Stage 2 from
-  the top (all hosts, not just the one that failed — a fix might have side effects).
-- **A viewer pane dies but `HOLLER_STATE_DIR=<state_dir> holler roster` still shows that session `connected`:** only the TUI
-  pane died, the backend is fine. Reopen and reattach (Stage 9's commands, fresh pane) — no
-  restart of `opencode` or Holler needed. Never use `--continue` in place of `-s <session_id>`
-  if more than one session exists on that backend — it may resume the wrong one.
-- **`HOLLER_STATE_DIR=<state_dir> holler roster` shows `connected`/`idle` for a session but its pane AND a direct `curl` to
-  its endpoint both fail:** that backend process itself is dead (this happened once, from
-  `herdr-mirror` reconciliation — not from anything in this recipe). `curl` the endpoint
-  directly rather than trusting roster alone right after any disruption, then redo Stage 4 for
-  that one entry (no need to restart the others) — and tell the user before doing so, the same
-  way Stage 3 would have.
-  Restart it through `stop-owned.sh restart` (ownership rule, top of this file), never by name,
-  and then run Stage 4's own start command again (`RESTART-CMD` only identifies the entry).
+- **A pane died, or `holler pane doctor` names one, and the others are fine:** that is a real gap for
+  that one pane only. Doctor names the finding (`server-down`, `herdr-pane-missing`,
+  `tmux-session-missing`, ...) and the command to run (usually `holler pane relaunch PANE`): run it
+  through the door, with the user's yes, and touch nothing else. Apply never relaunches an orchestrator,
+  so an orchestrator's relaunch is always that one command. A relaunched OpenCode pane may hold a new
+  session of record: derive Stage 8's body config again and restart the body.
+- **`HOLLER_STATE_DIR=<state_dir> holler roster` shows a pane `connected` but its server does not
+  answer:** the pane's server itself is down. `holler pane doctor` confirms it (`server-down` or
+  `server-wedged`); relaunch it as above, never by name and never with a hand-written `kill`.
 - **Tearing the instance down:** first, the Herdr server the wizard started also holds any restored
   workspace of the user (with any auto-resumed agent), and teardown stops that server: list those
-  panes (`pane list`) and ask before teardown. For the default instance, offer to leave the server
-  running and stop only the hub (`stop-owned.sh stop <state_dir> <hub pid>` instead of `teardown`). Otherwise run `bash $WIZARD_LIB/stop-owned.sh teardown <state_dir>` on
-  **every host the run touched** (this machine, and each distinct `remote_host` through the
-  remote form at the ownership rule, with that host's own `<state_dir>`). It stops only ledger
-  processes, in reverse start order (this includes the instance's Herdr server, so the named
-  Herdr session stops with it; what Herdr keeps of that session's saved layout is Herdr's own,
-  report it and do not delete it by hand), removes only that host's ledger, and prints what it
-  left (stale entries, foreign processes, other files, other instances). Pass `--purge-state`
-  only when the user asked to remove the instance's whole state directory; it is refused for the
-  default state directory. The instance's `tailscale serve` entry is not a process of the
-  wizard: it is the instance's own serve entry, so teardown leaves it and says so, and to continue
-  (a rebuild reuses it, Stage 3 reports it as the instance's own port pair) nothing more is needed;
-  to remove it, with the user's yes, turn off **only that entry**
-  with `tailscale serve --https=<serve_https_port> off`. Once the Herdr server has stopped, the
-  named session stays listed as `stopped`: with the user's yes, delete it with
-  `<herdr_env> bash $WIZARD_LIB/herdr.sh session-delete` (own session, stopped only), never with a
-  bare `herdr session delete`. Never `tailscale serve reset`: it wipes
-  every serve entry, the first instance's included.
-- **A join fails with `no such token` for one host:** that host's own token mint and its join
-  must run against the same hub: the mint on the hub machine with the hub's `<state_dir>`, the
-  join on that host with that host's own resolved `<state_dir>` (Stage 7). Each host has its own
-  mint/join pair; the hub's state dir/pepper is still one shared thing. Every command touching
-  the hub (mint, serve, token list) carries `HOLLER_STATE_DIR=<state_dir>` inline — check that
-  before re-minting, and don't assume a token problem on one host means anything about the
-  others.
-- **The config changed (an orchestrator or session was added/removed) since the Herdr workspace
-  was last built:** don't try to reconcile pane count implicitly — go back to Stage 3, present
-  a fresh plan reflecting the new M/N, and get assent again before touching the workspace.
-- **A config entry names a harness other than `opencode`:** this wizard's Stage 4/Stage 9 don't
-  have implemented start/attach logic for it — don't improvise. Tell the user plainly which
-  entry and harness, and that manual setup (or a wizard enhancement) is needed for that one.
-- **An orchestrator's pane crashed or its process exited but the others are fine:** that's a
-  real gap for that one orchestrator only — reopen its pane and relaunch just its `cmd`/`dir`
-  (Stage 8's launch step), don't touch the others.
-- **A live, working setup already exists and nothing is actually broken** (e.g. a peer session
-  reports "I can't see alpha/beta" because it used Herdr's `agent list` instead of `pane list`/`pane
-  read` — a plain `opencode attach` pane is never tracked as an agent by
-  Herdr, by design, regardless of how well it's working): don't re-run this wizard against a
-  working setup. Verify with `HOLLER_STATE_DIR=<state_dir> holler roster` and `herdr.sh run pane read` before concluding anything
-  is actually wrong, and if it isn't, say so instead of rebuilding.
+  panes (`holler pane list` shows them as unmanaged) and ask before teardown. For the default instance,
+  offer to leave the server running and stop only the hub, with the body that dials it
+  (`stop-owned.sh stop <state_dir> <pid>` for the body, then for the hub, instead of a whole teardown,
+  after the panes are closed). Then, **with the hub still
+  live**, close the panes through Holler: `bash $WIZARD_LIB/panes.sh teardown <config> <profile>` prints
+  one `pane close NAME --profile <profile>` per pane (reverse layout order), then `profile delete
+  <profile>`; run each line, in order, through the door (`<herdr_env> bash $WIZARD_LIB/herdr.sh holler
+  ARGS`). A close stops the pane's harness, closes its Herdr pane and removes its record; a
+  `pane-not-found` for a pane this run never built is not a failure. Only then run
+  `bash $WIZARD_LIB/stop-owned.sh teardown <state_dir>`: it stops only ledger processes, in reverse
+  start order (the body, the Herdr server — so the named Herdr session stops with it; what Herdr keeps
+  of that session's saved layout is Herdr's own, report it and do not delete it by hand — and the
+  hub), removes only the ledger, and prints what it left (stale entries, foreign processes, other files,
+  other instances). **If the hub is gone** (a stale `hub` row), the panes cannot be closed through
+  Holler: say so and ask; never fall back to a Herdr command, and never close a pane by hand. **The
+  instance's tmux server keeps running:** a close ends a pane's processes but not its tmux session, and no
+  ledger row records the tmux server, so the wizard never stops it. Say what stays and how the user ends
+  it: for a named instance, its own server on `<state_dir>/tmux.sock` (`tmux -S <state_dir>/tmux.sock ls`
+  shows its sessions, and the user may end it by hand with `tmux -S <state_dir>/tmux.sock kill-server`);
+  for the default instance, the sessions named as the panes in the user's own tmux server, which stays
+  theirs. Pass `--purge-state` only when the user asked to remove the instance's whole state directory,
+  and not while that tmux server still runs (its socket is inside it); it is refused for the default
+  state directory. Once the Herdr server has stopped, the named session stays listed as `stopped`: with
+  the user's yes, delete it with `<herdr_env> bash $WIZARD_LIB/herdr.sh session-delete` (own session,
+  stopped only), never with a bare `herdr session delete`. An old serve entry of the instance (from the
+  previous wizard) is not the wizard's: never `tailscale serve reset`, which wipes every serve entry.
+- **A join fails with `no such token`:** the token mint and the join must run against the same hub,
+  with the same `<state_dir>` (Stage 8). Every command touching the hub (mint, token list, join, run)
+  carries `HOLLER_STATE_DIR=<state_dir>` inline — check that before re-minting.
+- **The config changed (a pane added, removed or moved) since the panes were built:** don't reconcile
+  implicitly — go back to Stage 3: the `--rerun` plan and the dry run show what changes, a removed pane
+  keeps its spec in `<profile>` until `holler pane close NAME --profile <profile> --spec-only` (with the
+  user's yes), and a pane added below a live row of two or more panes is `grid-unreachable` (Stage 7).
+  A pane whose harness changed is closed first (`holler pane close NAME --profile <profile>`, with the
+  user's yes): a recorded pane never changes its harness (`harness-change-refused`), and its stored spec
+  refuses the other harness's port policy. Get assent again before touching the workspace.
+- **A Claude Code pane stops at its first-run or trust dialog** (`harness-dialog-open`): answer the
+  dialog once in that directory in a plain terminal, by hand, then re-run Stage 7. The wizard types into
+  no pane.
+- **A live, working setup already exists and nothing is actually broken:** don't re-run this wizard
+  against a working setup. Verify with `HOLLER_STATE_DIR=<state_dir> holler roster` and Stage 9's reads
+  before concluding anything is actually wrong, and if it isn't, say so instead of rebuilding.
 
 ## Related
 
 - Operational rules and the reasoning behind each step: this repo's `docs/setup-wizard.md`
-- Holler repo: `Performant-Labs/holler` — `docs/adr/ADR-0005.md` (attach mode's normative design,
-  the per-session `harness` field, and the session-config TOML shape this wizard's config file
-  matches), `ADR-0006` (the `wss://`/TLS-proxy hub design this recipe relies on).
+  (its "How the wizard builds panes" is the design)
+- The pane and profile verbs, their exit codes and findings: `docs/pane-control.md`; the contract:
+  `docs/adr/ADR-0021.md` (section 11 says how attach mode relates to registry panes)
+- `docs/adr/ADR-0014.md` (attach mode, which the body uses to drive each OpenCode pane's session)
 - Herdr itself (the workspace/pane tool Stage 0 can install): `https://herdr.dev` /
   `https://github.com/herdrdev/herdr` — a separate project from Holler; its own install script
   (`https://herdr.dev/install.sh`) is what Stage 0 runs on a yes.

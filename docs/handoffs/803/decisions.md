@@ -100,3 +100,52 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
 - **Evidence:** `cargo test -p holler-cli --test wizard_scripts` (231 passed, 72 failed); `cargo clippy -p holler-cli
   --test wizard_scripts -- -D warnings` (clean); `bash scripts/lint.sh` (exit 0, no new warning);
   `skilltext_w5_rename` (7 passed with the new files staged); the files are staged by explicit path.
+
+## F, implement (Phase 6): 2026-10-12T09:55-06:00
+
+- **Decided:**
+  - **`lib/panes.sh` is new and is the only reader of `[[pane]]` and `layout`.** It reads `[instance]` and
+    `workspace` only from the lines `instance.sh` prints (W6), and takes the first instance's port base from
+    `instance.sh /dev/null` rather than a second `47001`. Its value parser (`trim`, `value_of`) is the copy
+    A allowed; the port rule is `instance.sh`'s, applied to the OpenCode panes in layout order.
+  - **The profile P is the workspace label (W2)**, and `plan` / `teardown` refuse any other P (exit 2), so P
+    stays computed by `panes.sh` alone.
+  - **W1, as A proposed, and a departure from D8's "that same allow-list".** There is still one list, not a
+    copy: `base_env` in `herdr.sh`. `server-start` adds `HERDR_*` to it (unchanged behaviour); `holler` adds
+    the instance's `HOLLER_*` literals and no `HERDR_*`. `holler` refuses (exit 2, nothing run) a
+    `WIZARD_STATE_DIR` that is unset, empty or relative, a named instance whose `WIZARD_TMUX_SOCKET` is not
+    absolute, and the default instance whose `WIZARD_HERDR_SOCKET` is not absolute, and it runs `check_pane`
+    first (A's optional guard).
+  - **One new variable, `WIZARD_HOLLER_BIN`** (the `holler` binary when it is off `PATH`), the twin of
+    `HERDR_BIN`: the skill already handles a Homebrew `holler` off `PATH`, and the door could not run one
+    without it.
+  - **`run` is an allow-list** of `status`, `session list` and `workspace list` (words after them pass);
+    `label` is gone.
+  - **The skill's stages follow D2**, the briefing is written at the start of Stage 7 (D10), and every pane
+    call in a code block is `<herdr_env> bash $WIZARD_LIB/herdr.sh holler ...`. Stage 0's
+    `holler pane --help` is in prose, not a code block: a code line naming `holler pane` must go through the
+    door with `<herdr_env>`, which does not exist before Stage 1, and `--help` touches no hub, Herdr or tmux.
+  - **The README's scenario menu has no letters**: the test forbids `(B)` there, and a menu A, C, D reads as
+    a mistake.
+  - **Two pins that conflict with other tests are both met by a line break inside a code span** (ADR-0021
+    decision 34's `holler profile apply`, against `docs_cli_test`; the skill's "never `herdr.sh run server
+    stop`", against the 803 ban on `herdr.sh run `). Reported to T in handoff-F.md.
+  - **Scope cap not applied.** The story touches more than six files, but O, A and T already settled its
+    scope, and T's RED covers all of it; a split now would leave tests red.
+- **Assumed:**
+  - **The CLI's flag shapes and outputs as A checked them** (`--spec-only` upserts the spec, `pane get`'s
+    record keys, `pane list`'s `unmanaged` keys, apply's text and exit codes); quoted in evidence.md.
+  - **A body may share the hub's `HOLLER_STATE_DIR` on one machine**, as the README's Quick Start runs both
+    with the default state directory.
+- **Hedged:**
+  - **Everything the brief lists as U1 to U8** stays UNVERIFIED in the text (the default socket path, tmux
+    inheriting the door's environment, a real 4 x 4, a fresh server's first pane, Claude Code end to end, a
+    credential after the scrub, the 10 s budget). Only the operator's repeat of #778 settles them.
+  - **The apply timeout figure** (10 s plus about 15 s per create) is my reading of A's W10, not a measured
+    number.
+  - **#839 and #850 are not merged**, so Stage 9's DRIVEN sentence and D13's "no body row for a Claude Code
+    pane" stand as the brief wrote them.
+- **Evidence:** `cargo test -p holler-cli --test wizard_scripts` (303 passed, 0 failed; RED was 231 / 72);
+  `docs_cli_test` and `docs_pane_control_test` green; the script modules also pass with mawk and busybox awk
+  first on `PATH`, and `panes.sh` prints byte-identical output under gawk, mawk and busybox awk; the full
+  Tier 1 results are in handoff-F.md; evidence.md quotes the unchanged code relied on.

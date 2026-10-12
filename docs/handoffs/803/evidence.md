@@ -1,0 +1,129 @@
+# Evidence: #803 (behaviour outside the diff that the change relies on)
+
+Phase 6 (F) entries. Each fact is quoted from unchanged source at the branch's base.
+
+- **Fact:** `instance.sh` prints the resolved instance on one line, keys in a fixed order, and the workspace on its own line; `panes.sh` reads `[instance]` and `workspace` only from these lines.
+  **Source:** `agent-skills/herdr-setup/lib/instance.sh:206-208`
+  **Verbatim excerpt:**
+  > print "instance: name=" name " prefix=" prefix " hub_port=" hub_port " serve_https_port=" serve \
+  >     " state_dir=" state_dir " herdr_session=" herdr " backend_port_base=" base
+  > if (has_ws) print "workspace: " ws
+
+- **Fact:** with no `[instance]` table the backend port base is 47001, so `panes.sh` takes the first instance's range from `instance.sh /dev/null` instead of a second literal.
+  **Source:** `agent-skills/herdr-setup/lib/instance.sh:63`
+  **Verbatim excerpt:**
+  > D_hub_port = 41807; D_serve = 443; D_base = 47001
+
+- **Fact:** with `WIZARD_SERVE_HTTPS_PORT` empty, `collide.sh` never marks a serve entry as the instance's own ("this instance's port pair, no live hub"), which is why Stage 3 lists an old serve entry as present, not touched.
+  **Source:** `agent-skills/herdr-setup/lib/collide.sh:48`, `agent-skills/herdr-setup/lib/collide.sh:155-156`, `agent-skills/herdr-setup/lib/collide.sh:185-187`
+  **Verbatim excerpt:**
+  > serve_port=${WIZARD_SERVE_HTTPS_PORT:-}
+  >
+  > own_serve_port=""
+  > if [ -n "$serve_port" ] && ! foreign_hub_port; then
+  >
+  >       st="present, not touched"
+  >       if [ "$own_serve_port" = "$a" ] && [ "$own_hub" = 0 ]; then
+  >         st="this instance's port pair, no live hub"
+
+- **Fact:** the Herdr adapter takes its socket from `HOLLER_HERDR_SOCKET`, else `HERDR_SOCKET_PATH`, else the named session's default path; `herdr.sh holler` therefore drops every `HERDR_*` and sets `HOLLER_HERDR_SOCKET` itself for the default instance.
+  **Source:** `crates/holler-cli/src/pane/wiring/env.rs:170-176`
+  **Verbatim excerpt:**
+  > fn herdr_socket(env: Lookup<'_>, session: &str) -> Result<PathBuf, PaneError> {
+  >     for variable in [HERDR_SOCKET, HERDR_SOCKET_PATH] {
+  >         if let Some(value) = env(variable) {
+  >             return absolute(variable, value);
+  >         }
+  >     }
+  >     let config = config_home(env).ok_or_else(|| {
+
+- **Fact:** the configuration directory is `$XDG_CONFIG_HOME` only when it is absolute, else `$HOME/.config`; `panes.sh env` follows the same rule for the default socket.
+  **Source:** `crates/holler-cli/src/pane/wiring/env.rs:189-198`
+  **Verbatim excerpt:**
+  > /// `$XDG_CONFIG_HOME`, else `$HOME/.config`, each only when it is an absolute path: the XDG base
+  > /// directory rule ignores a value that is empty or relative.
+  > fn config_home(env: Lookup<'_>) -> Option<PathBuf> {
+  >     let directory = |variable: &str| {
+  >         env(variable)
+  >             .map(PathBuf::from)
+  >             .filter(|dir| dir.is_absolute())
+  >     };
+  >     directory("XDG_CONFIG_HOME").or_else(|| directory("HOME").map(|home| home.join(".config")))
+  > }
+
+- **Fact:** `HOLLER_HERDR_WORKSPACES` is `label=RxC` items joined by `,`, and the empty value is no workspace, so the door may pass an empty `WIZARD_HERDR_WORKSPACES` through.
+  **Source:** `crates/holler-cli/src/pane/wiring/env.rs:200-206`
+  **Verbatim excerpt:**
+  > /// `HOLLER_HERDR_WORKSPACES`: items `label=RxC` (rows by columns) joined by `,`, the empty value
+  > /// being no workspace. `usage` naming the variable for the first item that is empty, has no `=`,
+  > /// more than one `=` or no `x`, has an empty label or a count that is not a whole number from 1 to
+  > /// 65535, or repeats a label.
+  > fn workspaces(list: &str) -> Result<BTreeMap<String, Extent>, PaneError> {
+  >     let mut workspaces = BTreeMap::new();
+  >     if list.is_empty() {
+
+- **Fact:** a spec-only launch sets (upserts) the profile's spec and changes nothing live, so the rerun plan's `spec` lines rewrite the specs in place.
+  **Source:** `crates/holler-cli/src/pane/launch.rs:51`
+  **Verbatim excerpt:**
+  > /// `--spec-only` sets P's spec and changes nothing live. The harness is opencode unless
+
+- **Fact:** without `--harness` an existing spec keeps its harness, which is why the skill tells the user to close a pane whose harness changed before a rerun.
+  **Source:** `crates/holler-cli/src/pane/args.rs:76-77`
+  **Verbatim excerpt:**
+  > /// The harness the pane runs: opencode or claude. Without it, a new spec runs opencode and
+  > /// an existing spec keeps its own; a relaunch never changes a live pane's harness.
+
+- **Fact:** the text-mode apply prints a summary line and one `PANE: ACTION, OUTCOME` line per step, and one `error:` line on exit 1 or 3; Stage 7's Gate reads exactly that.
+  **Source:** `crates/holler-cli/src/profile/apply.rs:56-59`
+  **Verbatim excerpt:**
+  > /// Prints `profile NAME: N steps, applied` (or `planned (dry run; nothing changed)`), then one
+  > /// line per step, `PANE: ACTION, OUTCOME`, with the code and the detail of a refused step, and
+  > /// under a reported step one `FIELD: spec VALUE, live VALUE` line per difference. A run that
+  > /// exits 1 or 3 prints one `error:` line instead.
+
+- **Fact:** a whole-registry `pane list --format=json` carries the unmanaged Herdr panes with their workspace and label, which Stages 2, 3 and 5 read to judge restored panes and a previous wizard's layout.
+  **Source:** `crates/holler-cli/src/pane/list.rs:82-86`
+  **Verbatim excerpt:**
+  > /// `"drained"` or `{"parked": {...}}`); an empty value is null. A whole-registry list adds
+  > /// `"unmanaged"`, an array left out when empty, of `{"state": "unmanaged", "pane_id",
+  > /// "session", "workspace", "pos", "label", "cwd", "last_screen_change" (milliseconds since the
+  > /// Unix epoch), "idle_seconds"}` (`null` for what Herdr does not report), and
+  > /// `"unmanaged_unavailable"` (the failed call's code) when Herdr could not be read.
+
+- **Fact:** `pane get --format=json` prints `{"pane": RECORD, ...}`, the record holding the pane's harness port and session of record that Stage 8 reads.
+  **Source:** `crates/holler-cli/src/pane/get.rs:53-58`
+  **Verbatim excerpt:**
+  > /// `--format=json` prints one envelope whose data is `{"pane": RECORD, "profile": NAME or
+  > /// null, "spec": SPEC or null, "sync": "ok", "mismatch" or "unobserved"}`, the four keys
+  > /// always present. RECORD is the pane record as the registry holds it, with its model, env
+  > /// names, context ceilings (`"context": {"soft": N, "hard": N}`), command and probe; an
+  > /// unset optional field is left out. SPEC is the profile's spec for the pane, with its own
+  > /// context ceilings.
+
+- **Fact:** `pane close --profile P` needs P to hold a spec for the pane and a live close needs a record, so a teardown close of a pane never built answers `pane-not-found`, which the skill says is not a failure.
+  **Source:** `crates/holler-cli/src/pane/close.rs:5-8`
+  **Verbatim excerpt:**
+  > //! - **Plan.** `PANE` and `--profile` are typed (`usage`). With `--profile P`, P is read
+  > //!   (`profile-not-found`) and must hold a spec for the pane (`pane-not-in-profile`): this is
+  > //!   checked here, before any write, because `ProfileScope::edit_spec` removes a missing spec as
+  > //!   a no-op that still writes P. A live close then reads the record (`pane-not-found`).
+
+- **Fact:** `profile delete` is refused while any pane belongs to the profile, which is why the teardown closes every pane before deleting the profile.
+  **Source:** `crates/holler-cli/src/profile/delete.rs:1-3`
+  **Verbatim excerpt:**
+  > //! `holler profile delete NAME [--keep-panes]` (story #662, epic #633): delete a profile, refused
+  > //! while any pane belongs to it; with `--keep-panes`, each such pane is detached first and keeps
+  > //! running.
+
+- **Fact:** the docs doc-test extracts inline `holler ...` spans one line at a time and stops at a line with no closing backtick, which is why ADR-0021 decision 34's `holler profile apply` span, wrapped across two lines, is not parsed (the bare form would fail clap: `<NAME>` is required).
+  **Source:** `crates/holler-cli/tests/docs_cli_test.rs:117-125`
+  **Verbatim excerpt:**
+  >         while let Some(start) = rest.find('`') {
+  >             let after = &rest[start + 1..];
+  >             let Some(end) = after.find('`') else { break };
+  >             let span = &after[..end];
+  >             if span.starts_with("holler ") {
+  >                 out.push(Doc { file: file.clone(), line_no, raw: span.to_string() });
+  >             }
+  >             rest = &after[end + 1..];
+  >         }

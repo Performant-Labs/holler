@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# herdr.sh - the setup wizard's one door to Herdr (story #730, epic #726).
+# herdr.sh - the setup wizard's one door to Herdr (story #730, epic #726), and the door through
+# which it runs Holler's pane and profile verbs (`holler pane ...`, `holler profile ...`, #803).
 #
-# Adds `--session <herdr_session>` to every Herdr command it runs, `server stop` and
-# `session attach` included, so one instance's stage can never touch another instance's server
-# or panes. A bare `herdr server stop` is never issued: which server it would stop is not
-# established, and it could stop another instance's.
+# Adds `--session <herdr_session>` to every Herdr command it runs, so one instance's stage can
+# never touch another instance's server. Herdr itself is reached only for the read-only words
+# and the server start: every pane is built, changed and read through Holler. A bare
+# `herdr server stop` is never issued: which server it would stop is not established.
 #
 # UNVERIFIED until operator story #734 checks it with the real binary: what `--session` does
 # (which server and socket it selects), what a pane sees in HERDR_PANE_ID / HERDR_SESSION, and
@@ -16,29 +17,46 @@
 #   WIZARD_INSTANCE_NAME    the instance `name`; REQUIRED. An unset or empty value is refused
 #                           (exit 2): the literal "default" is the default instance
 #   HERDR_BIN               the herdr binary when it is not on PATH (default: herdr)
+#   WIZARD_HOLLER_BIN       the holler binary when it is not on PATH (default: holler)
 #   WIZARD_LIB              where ledger.sh lives (default: this script's own directory)
 #   WIZARD_HERDR_SESSION    the instance `herdr_session` (empty = no named session)
 #   WIZARD_INSTANCE_PREFIX  the instance `prefix` (default: the instance name)
 #   WIZARD_LEDGER           the ledger file (default: ${WIZARD_STATE_DIR}/herdr/setup/wizard-ledger.toml)
-#   WIZARD_STATE_DIR        the instance state directory (default: $HOME/.holler)
+#   WIZARD_STATE_DIR        the instance state directory (default: $HOME/.holler; `holler`
+#                           requires it, absolute)
 #   WIZARD_LOG_DIR          where the server log goes (default: <state dir>/logs, created)
+#   WIZARD_HERDR_WORKSPACES the workspace and its extent, `<label>=<R>x<C>` (`panes.sh env`)
+#   WIZARD_HERDR_SOCKET     the default instance's Herdr socket (`panes.sh env`); `holler`
+#                           requires an absolute one for the default instance
+#   WIZARD_TMUX_SOCKET      a named instance's own tmux socket (`panes.sh env`); `holler`
+#                           requires an absolute one for any instance but the default
 #
 # Verbs:
-#   run <herdr args...>   run `herdr --session <name> <args...>`
+#   run <words...>        `herdr --session <name> <words...>` for the read-only words only:
+#                         `status`, `session list` and `workspace list`. Any other word (a
+#                         pane or workspace change, `server stop`, `session attach`) exits 2
+#                         and runs no Herdr: use `holler pane` through the `holler` verb
+#   holler <args...>      run `holler <args...>` unchanged in a scrubbed environment: the base
+#                         list below and the instance's literals, HOLLER_STATE_DIR,
+#                         HOLLER_HERDR_SESSION (`default` for the default instance),
+#                         HOLLER_HERDR_WORKSPACES and, when set, HOLLER_HERDR_SOCKET and
+#                         HOLLER_TMUX_SOCKET. No HERDR_* and none of the caller's own HOLLER_*:
+#                         the tmux server the first pane starts keeps this environment, and
+#                         every pane inherits it
 #   server-start          start the headless server in the background, logging to log-path,
-#                         in a scrubbed environment (PATH HOME USER LOGNAME SHELL TERM LANG LC_*
-#                         TMPDIR XDG_* HERDR_* plus the session set a pane needs: SSH_AUTH_SOCK
-#                         DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS COLORTERM TZ EDITOR
-#                         VISUAL LANGUAGE, the proxy variables in both cases and SSL_CERT_FILE
-#                         SSL_CERT_DIR NODE_EXTRA_CA_CERTS; nothing else); prints the server's pid alone on the first
-#                         stdout line
-#   label <pane> <label>  rename a pane (`herdr pane rename`); label ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
+#                         in a scrubbed environment (the base list plus HERDR_*); prints the
+#                         server's pid alone on the first stdout line
 #   check-session         refuse when the named session exists and the ledger did not create it
 #   check-pane            refuse when this process runs in a pane of a different session
 #   session-delete [name] delete this instance's own STOPPED session (`herdr session delete`);
 #                         refuses a running or listed-live-in-the-ledger session, any other
 #                         name, the default session and a session that is not listed
 #   log-path              print the server log path for this instance
+#
+# The base list (both scrubbed environments): PATH HOME USER LOGNAME SHELL TERM LANG LC_* TMPDIR
+# XDG_* plus the session set a pane needs: SSH_AUTH_SOCK DISPLAY WAYLAND_DISPLAY
+# DBUS_SESSION_BUS_ADDRESS COLORTERM TZ EDITOR VISUAL LANGUAGE, the proxy variables in both cases
+# and SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; nothing else.
 set -u
 
 die() {
@@ -187,6 +205,54 @@ EOF4
   herdr_cmd session delete "$session"
 }
 
+# The base list (header) into `keep`, as NAME=value words: what a shell and a pane need, and
+# nothing of the driving agent's own (its credentials, its Herdr pane, its tmux client). Each verb
+# adds its own: `server-start` HERDR_*, `holler` the instance's HOLLER_* literals (#771, #803).
+base_env() {
+  keep=()
+  for name in $(compgen -e); do
+    case "$name" in
+      PATH | HOME | USER | LOGNAME | SHELL | TERM | LANG | LC_* | TMPDIR | XDG_* | \
+        SSH_AUTH_SOCK | DISPLAY | WAYLAND_DISPLAY | DBUS_SESSION_BUS_ADDRESS | COLORTERM | TZ | \
+        EDITOR | VISUAL | LANGUAGE | \
+        HTTP_PROXY | HTTPS_PROXY | NO_PROXY | ALL_PROXY | \
+        http_proxy | https_proxy | no_proxy | all_proxy | \
+        SSL_CERT_FILE | SSL_CERT_DIR | NODE_EXTRA_CA_CERTS)
+        keep+=("$name=${!name}")
+        ;;
+    esac
+  done
+}
+
+# Refuses (exit 2, nothing run) a `holler` call whose instance literals are missing: a lost value
+# must never reach the default hub, the default instance's Herdr socket, or tmux's default server.
+holler_guard() {
+  case "${WIZARD_STATE_DIR:-}" in
+    /*) ;;
+    *)
+      echo "herdr.sh: WIZARD_STATE_DIR is not set to an absolute path; refusing to run holler (it would reach the default hub)" >&2
+      exit 2
+      ;;
+  esac
+  if [ -n "$instance" ]; then
+    case "${WIZARD_TMUX_SOCKET:-}" in
+      /*) ;;
+      *)
+        echo "herdr.sh: WIZARD_TMUX_SOCKET is not set to an absolute path for instance '$instance' (panes.sh env prints it); refusing to run holler on tmux's default server" >&2
+        exit 2
+        ;;
+    esac
+  else
+    case "${WIZARD_HERDR_SOCKET:-}" in
+      /*) ;;
+      *)
+        echo "herdr.sh: WIZARD_HERDR_SOCKET is not set to an absolute path for the default instance (panes.sh env prints it); refusing to run holler" >&2
+        exit 2
+        ;;
+    esac
+  fi
+}
+
 log_path() {
   if [ -n "${WIZARD_LOG_DIR:-}" ]; then
     dir="$WIZARD_LOG_DIR"
@@ -213,19 +279,27 @@ case "$verb" in
         --session | --session=*) die "do not pass --session; herdr.sh adds it" ;;
       esac
     done
-    # Without a session name, commands that act on one server are refused outright.
-    if [ -z "$session" ]; then
-      case "$1 ${2:-}" in
-        "server stop" | "session attach")
-          die "'herdr $1 $2' without --session is never issued; configure herdr_session"
-          ;;
-      esac
-    fi
-    # Nothing that changes a layout runs from a pane of another session.
+    # Only Herdr's read-only words reach Herdr: every pane is Holler's (#803).
     case "$1 ${2:-}" in
-      "pane split" | "pane run" | "pane send-keys") check_pane ;;
+      "status "* | "session list" | "workspace list") ;;
+      *)
+        echo "herdr.sh: 'run $1${2:+ $2}' is refused: run takes only status, session list and workspace list; build, change and read panes with holler pane, through herdr.sh holler" >&2
+        exit 2
+        ;;
     esac
     herdr_cmd "$@"
+    ;;
+  holler)
+    [ $# -gt 0 ] || die "holler needs Holler's words, for example: holler pane list --format=json"
+    holler_guard
+    # Nothing runs from a pane of another Herdr session (the guard the pane verbs had).
+    check_pane
+    base_env
+    keep+=("HOLLER_STATE_DIR=$WIZARD_STATE_DIR" "HOLLER_HERDR_SESSION=${session:-default}"
+      "HOLLER_HERDR_WORKSPACES=${WIZARD_HERDR_WORKSPACES:-}")
+    if [ -n "${WIZARD_HERDR_SOCKET:-}" ]; then keep+=("HOLLER_HERDR_SOCKET=$WIZARD_HERDR_SOCKET"); fi
+    if [ -n "${WIZARD_TMUX_SOCKET:-}" ]; then keep+=("HOLLER_TMUX_SOCKET=$WIZARD_TMUX_SOCKET"); fi
+    exec env -i "${keep[@]}" "${WIZARD_HOLLER_BIN:-holler}" "$@"
     ;;
   server-start)
     # The default instance (empty session) starts an unnamed server; a named instance's server
@@ -234,17 +308,10 @@ case "$verb" in
     mkdir -p "$(dirname "$log")" || die "cannot create the log directory for $log"
     # Only a named set of variables reaches the server (and so every pane it opens): the driving
     # agent's own variables must not leak into the operator's orchestrators.
-    keep=()
+    base_env
     for name in $(compgen -e); do
       case "$name" in
-        PATH | HOME | USER | LOGNAME | SHELL | TERM | LANG | LC_* | TMPDIR | XDG_* | HERDR_* | \
-          SSH_AUTH_SOCK | DISPLAY | WAYLAND_DISPLAY | DBUS_SESSION_BUS_ADDRESS | COLORTERM | TZ | \
-          EDITOR | VISUAL | LANGUAGE | \
-          HTTP_PROXY | HTTPS_PROXY | NO_PROXY | ALL_PROXY | \
-          http_proxy | https_proxy | no_proxy | all_proxy | \
-          SSL_CERT_FILE | SSL_CERT_DIR | NODE_EXTRA_CA_CERTS)
-          keep+=("$name=${!name}")
-          ;;
+        HERDR_*) keep+=("$name=${!name}") ;;
       esac
     done
     # HERDR_BIN's directory stays reachable.
@@ -258,27 +325,9 @@ case "$verb" in
       { env -i "${keep[@]}" nohup "$herdr_bin" server >"$log" 2>&1 & echo $!; }
     fi
     ;;
-  label)
-    [ $# -eq 2 ] || die "usage: herdr.sh label <pane-id> <label>"
-    [ -n "$1" ] || die "label needs a pane id"
-    [ -n "$2" ] || die "label must not be empty"
-    # Like the other pane verbs: never rename a pane from a pane of another session.
-    check_pane
-    # The character classes are spelled out: a bracket range follows collation in a UTF-8 locale
-    # on bash 3.2, so a non-ASCII letter could pass a range such as A-Za-z.
-    case "$2" in
-      [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) ;;
-      *) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
-    esac
-    case "$2" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) die "label '$2' is not valid (^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\$)" ;;
-    esac
-    [ "${#2}" -le 32 ] || die "label '$2' is longer than 32 characters"
-    herdr_cmd pane rename "$1" "$2"
-    ;;
   check-session) check_session ;;
   check-pane) check_pane ;;
   session-delete) session_delete "$@" ;;
   log-path) log_path ;;
-  *) die "usage: herdr.sh run|server-start|label|check-session|check-pane|session-delete|log-path" ;;
+  *) die "usage: herdr.sh run|holler|server-start|check-session|check-pane|session-delete|log-path" ;;
 esac
