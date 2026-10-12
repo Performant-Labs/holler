@@ -101,3 +101,56 @@ Run handoff directory `docs/handoffs/839` · branch `issue-839-implementation` �
   - **Docs:** ADR-0003, ADR-0005, ADR-0014 and ADR-0021 (sections 2 and 11, the header).
   - **Issue and siblings:** issue #839 (`gh issue view`); the sibling branches #667, #835, #648, #665 and #831 (`git log`, `git diff --stat` from the merge base, `git grep`).
   - Commands: `grep -n`, `sed -n`, `wc -l`, `git show`, `git grep`, `git diff --stat`, `gh issue view`.
+
+## A, up-front plan review, third pass: 2026-10-11T21:25-06:00 (MDT)
+
+- **Decided:** BLOCK, with 2 `block` and 6 `warn` findings (`docs/handoffs/839/handoff-A.md`, which replaces the second pass's file; that version is at `8b021d5`).
+  - **The second pass's ten findings are all answered.**
+    - The block is resolved by P4: the relaunch case is found by rule (ii), and the one-body case is `Unproven`.
+    - Warns 2 to 9 are resolved, each checked against the code.
+    - 10 was re-read at the amendment, but is stale again.
+  - **The blocks:**
+    1. **P4's exclusion, stated two ways.** D3, P4 and section 11 remove only a body that advertises another pane's session of record. Acceptance 20(b)'s last case, D2's restart text and question 5 assume that a body proven by another pane's recorded DRIVEN is removed too.
+       - Under the rule as written, that body is `Unproven`.
+       - The `Unproven` remedy then pairs it with the wrong pane: `check_unclaimed` checks records only, and rule (iii) claims the body.
+       - T's test and F's verbatim rule cannot both hold.
+    2. **`HubRefusal::NotDriven` by code.** The hub sends `-32004 not_connected`, with no `data`, both at resolve time and after delivery (`say`'s `Timeout` and `Cancelled`; `interrupt`'s `AckTimeout` and `PromptFailed`).
+       - A `say --pane` past `--timeout` would print `pane-not-driven` with exit 3 while the turn runs on.
+       - `reset --first`'s `Send` built with the 2 s wait as its `timeout_ms` would race the hub's own turn timeout.
+  - **The warns:**
+    - #831's `ports/router.rs:118` forward breaks D5's `.send_prompt(` scan, whose strip rule is also ambiguous.
+    - The `send_prompt`-driven `hold_tests` cannot move to `panes/` (they are private to `circuit`), and each `#[cfg(test)] mod …;` line must be last in its file, for `code_of`.
+    - `FakeHub`'s selection (record only, one pane) is a second, different copy of the gate's selection.
+    - The brief's line 444 fails the wizard's rename scan, so `cargo test --workspace` fails.
+    - The clashes table: #667 merged, #831 built, #835 reworked again, #648 S PASS, #803's brief exists and resolves the deferred dependency.
+    - `SESSION_DRIVEN_ELSEWHERE` belongs in `tx_switch.rs`; `token_id`, not `token`; advertised ids are untrusted text.
+- **Confirmed against the code, and left standing:**
+  - The circuit matches replies to the pending query by correlation id, so the slot design holds.
+  - `talk::say`'s prelude moves cleanly into `admit`, and `would_refuse` consumes no grant.
+  - `with_fix` recomputes `remedy`, so setting it afterwards is right.
+  - `SessionManager::start` builds the presence before the spawn.
+  - `store.rs::call` decodes a `PaneReply`, so a separate send over the three helpers is right.
+  - `tx_switch` has no early return for the current record, so the switch remedy runs the whole path.
+  - The session task `select!`s over its mailbox during a turn, so a busy rebind can answer `session_busy`.
+  - `circuit.rs`'s `Say` destructure and `HoldGate` literal are single lines, so +0 lines is feasible.
+  - ADR-0021 has one "stays in force, unchanged" (:868).
+  - #667's landed `scenario.rs` matches E155, and its new scenario files touch none of `--first`, `send_prompt`, `Ports` or DRIVEN.
+  - #803's D13 keeps one attach row per OpenCode pane, with `session_id` from the registry.
+- **Assumed:**
+  - Phase 3 warns reach no later phase: the script stops only on BLOCK, and `feature.md` and `tester.md` do not read `handoff-A.md`. So the warns are written for this amendment.
+  - Local refs are current. I did not fetch.
+  - On servers that share a data directory, P2's recorded DRIVEN differing from its record, with a body on it, is rare in production; block 1's certain cost is the T/F contradiction.
+- **Hedged:**
+  - Block 1 could be read as a `warn` on production reach alone. It is a `block` because the brief contradicts itself on the rule this story exists for, and the contradiction reaches GREEN with no one to resolve it.
+  - Both blocks offer two fixes, and I recommend one of each: (a) the exclusion extended, with this pane's evidence first; (a) an additive `data.reason` on the resolve-time `-32004`.
+  - I ran no build or test (no code exists yet). The rename scan was reproduced with `git ls-files` and `grep`.
+- **Evidence:**
+  - Read the brief's decision sections in full (lines 1 to 515).
+  - **Hub:** `live.rs` (`query`, `insert`, `replace_session`, `resolve_session`, the inline tests), `circuit.rs` (the `Query` and `Say` arms), `circuit/dispatch.rs` (`pane_gate`, `send_prompt`, `handle_presence_notification`, `handle_response`, `handle_error_response`, `hold_tests`), `talk.rs` (`answer`, `say`, `send_turn`, `not_connected_detail`), `holds.rs` (`would_refuse`), `control_server.rs` (`say`, `interrupt` and `answer` mappings, `encode_error`, `test_drop`), `control.rs` (`say_with`, `token_ping`, `revoke_live`, `CLIENT_TIMEOUT`), `control_hold.rs`, `roster.rs` (`advertise`, `Row`), `panes/mod.rs`.
+  - **Body:** `session_manager.rs` (`start`, `presence_doc`), `session_manager/task.rs` (`SessionPresence`, the run loop).
+  - **Pane crate and kit:** `tx_switch.rs` (`check_unclaimed`, `check_listed`, `check_idle`, the codes, `parse_session_id`), `tx_launch.rs` (`session_of_record`), `error.rs`, `findings.rs`, `ports.rs`; the testkit's `fault.rs` and `lib.rs`.
+  - **CLI:** `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs`, `prompt_target.rs`, `pane/wiring/store.rs`, `cli.rs`; the tests `hold_single_path_test.rs` and `wizard/skilltext_w5_rename.rs`.
+  - **Proto:** `docs.rs` (`Presence`, `SessionAd`).
+  - **Workflow:** `coding-pipeline.workflow.mjs`, `feature.md`, `tester.md`, `.aftersight/pipeline.config.json`.
+  - **Siblings (local refs):** `origin/main` (`0f5835e`, #667's diff and its `scenario.rs`); #831 at `d137a1d` (`ports/router.rs`, `ports.rs`, the `Ports` literals, the `.send_prompt(` calls); #835 at `d71b091`; #648 at `823e0a3`; #803's brief at `9af2ad7`.
+  - Commands: `grep -n`, `sed -n`, `wc -l`, `git show`, `git grep`, `git log`, `git diff --stat`, `git merge-base`, `git ls-files`.
