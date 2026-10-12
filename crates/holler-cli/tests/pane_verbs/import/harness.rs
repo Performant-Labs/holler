@@ -1,13 +1,14 @@
 //! A pane whose tmux session runs Claude Code (#835). The import reads the command name of
-//! every pane process in the pane's tmux session (`HostPort::foreground_commands`):
+//! the foreground process of each tmux pane in the pane's session
+//! (`HostPort::foreground_commands`):
 //!
 //! - a session with a pane whose command is exactly `claude` is left alone by default: one
 //!   `info` finding `harness-claude-code`, the row's action `skipped`, no record, no harness
 //!   call for it, and it blocks nothing;
 //! - every other answer (`bash`, which the old launcher's OpenCode panes show, `opencode`, a
 //!   session with no process) is imported as OpenCode, as before;
-//! - `--adopt-claude-code` is refused as `usage` (exit 2) naming #831 until that story lands,
-//!   before any file is read or any port is called;
+//! - `--adopt-claude-code` is refused as `usage` (exit 2), naming #831,
+//!   until #831's adoption step lands, before any file is read or any port is called;
 //! - a pane whose harness could not be read is never recorded on a guess: `harness-unreadable`,
 //!   a problem, and a real run is refused (`import-blocked`).
 //!

@@ -279,3 +279,20 @@ section 15, item 17 (`docs/adr/ADR-0021.md:1359-1368`: the adoption is #831's st
   >   ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
   >   last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
   > ```
+
+## T-green, cycle 5 (after F cycle 6), 2026-10-12
+
+T changed only the module doc of `crates/holler-cli/tests/pane_verbs/import/harness.rs` (S's Advisory 3). Its first
+sentence now says what the port reads, which is unchanged code from `main` (#857):
+
+- **Fact:** `HostPort::foreground_commands` answers the command name of the foreground process of each live tmux pane
+  in the session, one per pane; not every process in the session.
+  **Source:** `crates/holler-pane/src/ports.rs:387-392` (`origin/main` `:330-334`)
+  **Verbatim excerpt:**
+  > ```rust
+  >     /// The command name of the foreground process of every live pane in the session `name`,
+  >     /// one per pane, in the order tmux lists them (#835): what tmux reports as
+  >     /// `#{pane_current_command}`, the basename of that process's `argv[0]`. Names only, never
+  >     /// an argv, a command line or a program's configuration (I7). A session with no pane
+  >     /// process answers an empty list; a missing session is `pane-not-found`, as `ps` answers.
+  > ```

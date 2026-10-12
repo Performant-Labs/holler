@@ -1,89 +1,81 @@
-# Handoff-T-green: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (cycle 4: after F cycle 5, the merge of `origin/main` after #857)
+# Handoff-T-green: #835 - `holler pane import` leaves Claude Code panes alone, with `--adopt-claude-code` (cycle 5: after F cycle 6, the `harness-claude-code` message)
 
-**Date:** 2026-10-12 (05:12 MDT)
-**Branch:** `issue-835-implementation` at `59d8d59`. That is F cycle 5's two-parent commit: `cea1c17` (brief round 5) and
-`origin/main` `b76f4d2` (PR #857). `git fetch` at about 04:50 MDT shows `origin/main` still at `b76f4d2`, and
-`git merge-tree --write-tree HEAD origin/main` exits 0, so the branch is the PR's merge result.
+**Date:** 2026-10-12 (05:58 MDT)
+**Branch:** `issue-835-implementation` at `5dd002e` (F cycle 6's commit). `git fetch` at about 05:52 MDT: `origin/main`
+is still `b76f4d2`, an ancestor of `HEAD`, and `git merge-tree --write-tree HEAD origin/main` exits 0.
 **Issue:** #835
-**Handoff-F reviewed:** `docs/handoffs/835/handoff-F.md` (cycle 5)
+**Handoff-F reviewed:** `docs/handoffs/835/handoff-F.md` (cycle 6)
 **Handoff-T-red:** `docs/handoffs/835/handoff-T-red.md` (cycle 2)
 
-**Verdict: PASS.** This handoff replaces cycle 3's PASS (at `e6d5fa0`). This cycle is S's cycle-3 REWORK: the merge of
-`main` after #857, plus prose.
+**Verdict: PASS.** This handoff replaces cycle 4's PASS (at `6787d99`). F cycle 6 changed one production string: the
+message of `Outcome::claude_code` (`crates/holler-pane/src/import/assess.rs:104-106`), per S's cycle-4 REWORK item 1.
 
 ## Tests repaired in this phase
 
-None. F's "Tests that look wrong (for T)" says none, and I found none. No test was authored this cycle.
+F's "Tests that look wrong (for T)" says none, and no test is wrong. I applied S's Advisory 3 (test-only, optional),
+which changes only the module doc of `crates/holler-cli/tests/pane_verbs/import/harness.rs`; no assertion changed:
 
-## Merge resolutions in test files (checked)
+- line 2: "the command name of every pane process in the pane's tmux session" is now "the command name of the
+  foreground process of each tmux pane in the pane's session", which is what `HostPort::foreground_commands` reads
+  (`ports.rs:387-392`, `evidence.md` section "T-green, cycle 5");
+- line 9: "naming #831 until that story lands" is now "naming #831, / until #831's adoption step lands", with the
+  phrase on one source line, so `git grep -n "until #831's adoption step lands"` now finds the test's doc beside the
+  help, the message and the documents (S's Advisory 2 list).
 
-S's item 1e asked T-green to confirm GREEN on the merged tree because test files changed in the merge.
-
-- `crates/holler-cli/tests/pane_integration/wired.rs`, `crates/holler-pane/tests/ports_test.rs` and
-  `crates/holler-pane/tests/claude_code_rule_test.rs` are byte-identical to `origin/main`'s (`git diff --quiet origin/main
-  HEAD -- <file>`). So is `crates/holler-pane/src/unmanaged.rs`. All four leave the PR's diff.
-- `crates/holler-cli/tests/docs_pane_control_test.rs` differs from `main`'s only by this story's
-  `section_3_names_every_flag_of_pane_import`. `main`'s `built_lines_marked_proposed` and its two tests are kept. The file
-  runs 19 tests, all passing.
-- `git show --remerge-diff 59d8d59` shows conflict-marker removal and, as code, only `observe.rs`'s merged `use` lines.
-  `pane.rs` differs from `main` only by the three-limit doc paragraph of `is_claude_code_command`. There is one constant
-  and one predicate.
+No test pins the message's wording, and none should: the message is a constant whose only contract is its finding
+code and level, which `harness.rs:163` (the text prefix `  info harness-claude-code: `) and the JSON assertions pin.
+Pinning the prose would make #831's adoption step edit a test for a wording change.
 
 ## GREEN confirmation
 
 ```
 $ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load   (CI's step)
-exit 0. 167 result groups: 2600 passed, 0 failed, 36 ignored
+exit 0. 167 result groups: 2600 passed, 0 failed, 36 ignored     (on 5dd002e, before the doc edit)
 
-$ cargo test -p holler-cli --test docs_cli_test     -> 3 passed
-$ cargo test -p holler-cli --test wire_selftest     -> 3 passed
+$ cargo test -p holler-cli --test pane_verbs                       -> 347 passed, 0 failed  (after the doc edit)
+$ cargo test -p holler-cli --test pane_verbs -- import::harness    -> 7 passed
+$ cargo test -p holler-cli --test docs_cli_test                    -> 3 passed
+$ cargo test -p holler-cli --test wire_selftest                    -> 3 passed
 ```
 
-Every test from T-red cycles 1 and 2 runs in the workspace pass and passes, including `pane_verbs`
-(`import::harness::*`, `import::the_adrs_name_the_switch_and_the_two_new_codes`), `pane_integration`,
-`docs_pane_control_test`, `claude_code_rule_test`, `import_test`, `ports_test` and the `holler-pane` doctests
-(both `compile_fail,E0046`).
-
-**Behaviour-removal spot check, repeated on the merged tree.** The import now calls `main`'s copy of
-`is_claude_code_command`, so I checked that the tests still depend on it. I changed its body to `false` and ran
-`cargo test -p holler-cli --test pane_verbs -- import::harness`. Result: 3 failed, 4 passed. The 3 that failed were
-`a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode`,
-`a_dry_run_reports_the_pane_left_alone_and_writes_nothing` and `a_pane_left_alone_blocks_nothing_even_unlabelled`.
-The 4 that passed pin the refusal and the unreadable paths, which do not depend on the rule. I restored the file with
-`git checkout`, and the tree is clean.
+**Behaviour-removal spot check, repeated on `5dd002e`.** I changed `is_claude_code_command`'s body
+(`crates/holler-pane/src/pane.rs:244-246`) to `false` and ran `import::harness`: 3 failed
+(`a_pane_running_claude_is_left_alone_and_the_others_import_as_opencode`,
+`a_dry_run_reports_the_pane_left_alone_and_writes_nothing`, `a_pane_left_alone_blocks_nothing_even_unlabelled`),
+4 passed (the refusal and the three unreadable paths, which do not depend on the rule). I restored the file with
+`git checkout -- crates/holler-pane/src/pane.rs`, then re-ran the whole `pane_verbs` target: 347 passed.
 
 ## Tier 1 results
 
 | Check | Command | Result |
 |---|---|---|
 | Workspace tests | as above | exit 0, PASS |
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, PASS |
-| Lint | `bash scripts/lint.sh` | exit 0, PASS (size warnings only) |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` (after the doc edit) | exit 0, PASS |
+| Lint | `bash scripts/lint.sh` (after the doc edit) | exit 0, PASS (size warnings only; `harness.rs` is 341 lines) |
 | Changelog | `bash scripts/changelog-check.sh` | `changelog-check: ok`, PASS |
 | Docs canary | `cargo test -p holler-cli --test docs_cli_test` | 3 passed, PASS |
-| Guide tests | `docs_pane_control_test`, in the workspace run | 19 passed, PASS |
 | Wire canary | `cargo test -p holler-cli --test wire_selftest` | 3 passed, PASS |
 | Unused deps | `cargo machete` | none found, PASS |
 | Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p holler-pane` | exit 0, PASS |
-| Whitespace | `git diff --check origin/main...HEAD -- . ':(exclude)docs/handoffs'` | clean, PASS |
+| Whitespace | `git diff --check origin/main -- . ':!docs/handoffs'`; `git diff --check` | clean, clean, PASS |
+| Stale claim | `git grep -n "cannot drive" -- crates/holler-pane/src/import` | prints nothing (exit 1), PASS |
 | Merge | `git merge-tree --write-tree HEAD origin/main` | exit 0, PASS |
 
-**Cross-check of F's results:** every command F reported gives the same result here: 2600 passed, 36 ignored in 167
-groups; 19 guide tests and 3 docs tests; clippy, lint, changelog-check, machete and rustdoc clean; the PR's diff is 21 files
-outside the handoffs. The built binary's `holler pane import --help` says "refused (usage) until #831's adoption step
-lands", as F reports. There is no discrepancy.
+**Cross-check of F's results:** every command F reported gives the same result here: 2600 passed, 0 failed,
+36 ignored in 167 groups; `import::harness` 7 passed; clippy, lint, changelog-check, machete and rustdoc clean; the
+"cannot drive" grep is empty; `origin/main` unchanged. There is no discrepancy.
 
 ## Tier 2 results
 
 | Check | Method | Result |
 |---|---|---|
-| Coverage per criterion | Unchanged since cycle 2. Every backing test passes on the merged tree | PASS |
-| Test quality | No test authored or changed by this story this cycle. The one test function kept in the merge (`section_3_names_every_flag_of_pane_import`) is unchanged from cycle 2 and still passes beside `main`'s new tests. No test duplicates `main`'s `claude_code_rule_test` (one file, `main`'s) | PASS |
+| S's four conditions on the message | Read `assess.rs:104-106`. (1) No claim that Holler cannot drive Claude Code. (2) It says the import does not adopt such a pane until #831's adoption step lands, naming `--adopt-claude-code`, true on the merged tree (`CHANGELOG.md:11-15`, ADR-0021 section 15 item 17). (3) "until #831's adoption step lands" is on one source line (`:105`). (4) A `&str` literal with no observed text | PASS |
+| Coverage per criterion | Unchanged since cycle 2; every backing test passes | PASS |
+| Test quality | The only test change is a doc comment. No test added, none redundant | PASS |
 | Behaviour not implementation | The mutation above | PASS |
-| Prose against S's item 2 | `git grep "lands" ... \| grep 831`: every hit names #831's adoption (or last) step, except ADR-0021:1145, `main`'s accurate "whichever of #835 and #831 lands second". No place still says the adoption waits for the Claude Code harness | PASS |
-| Type safety / API / protocol | No interface change. No golden drift | PASS |
-| Security / I7 | The text still says "a name only, never a command line". There is no secret in the new text | PASS |
-| File size | `lint.sh` passes. Every `.rs` file in the PR's diff is under 900 lines | PASS |
+| Type safety / API / protocol | No interface change; the finding code and level are unchanged; no golden drift | PASS |
+| Security / I7 | The message is a constant: no observed text, no command line, no secret | PASS |
+| File size | Every `.rs` in the PR's diff is under 900 lines | PASS |
 
 ## Acceptance criteria status
 
@@ -108,9 +100,8 @@ None.
 
 ## Advisory notes
 
-- **F's Known issue 1** (two of `main`'s sentences go stale when this PR merges: ADR-0021 section 15 item 17's "until
-  this harness exists" and #831's CHANGELOG "waits for #835") is for S to rule on. No test pins either.
-- **The guide is 986 lines.** It is markdown, so the 900 guard does not apply.
-- Earlier advisories still stand: the `rustfmt` drift in new test files, `harness.rs:2`'s "every pane process" (S's
-  advisory 2, test-only and optional), and A-dup's test-only twins.
-- **Evidence:** no test in this cycle relies on new unchanged-code facts, so `evidence.md` gets no new entry.
+- S's Advisory 3 is done (above). S's Advisory 6 (the `rustfmt` drift in new test code, the test-only Herdr wrappers,
+  A-dup's W2 twins) is carried, unchanged and non-blocking.
+- The doc edit is uncommitted, for the phase commit, with this handoff and the `evidence.md` and `decisions.md`
+  appends.
+- `evidence.md`: one new entry (section "T-green, cycle 5") for the port doc the test header now paraphrases.

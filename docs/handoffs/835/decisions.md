@@ -1041,3 +1041,27 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - ADR-0021 `:1006-1024` and `:1359-1362`, `CHANGELOG.md:8-16`, `unmanaged.rs:68-73`, the guide `:352`.
   - `evidence.md`, section "F, cycle 6": one entry (`CHANGELOG.md:11-15`), and the shift of cycle 1's `assess.rs`
     lines.
+
+## T-green, cycle 5 (after F cycle 6), 2026-10-12 05:58 MDT
+
+- **Decided:**
+  - **PASS.** The suite is GREEN on `5dd002e`, Tier 1 matches F's report, and the new `harness-claude-code` message
+    meets S's four conditions.
+  - **S's Advisory 3 is applied** (test-only, doc comment of `pane_verbs/import/harness.rs`, lines 2 and 9): the header
+    now says what `foreground_commands` reads, and carries "until #831's adoption step lands" on one line, so the grep
+    S's Advisory 2 relies on also finds the test's doc. No assertion changed.
+  - **No test pins the message's wording.** Its contract is the code and level, which are pinned; pinning prose would
+    make #831's step edit a test for a wording change.
+- **Assumed:**
+  - The phase commit stages `harness.rs` with this handoff and the `evidence.md` and `decisions.md` appends.
+- **Hedged:**
+  - The workspace run was on `5dd002e` before the doc edit; after it I re-ran `pane_verbs` (347 passed), clippy
+    `--all-targets` and `lint.sh`. A doc-comment change cannot change any other target's result.
+- **Evidence:**
+  - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0,
+    167 groups, 2600 passed, 0 failed, 36 ignored.
+  - `lint.sh`, `changelog-check`, clippy `-D warnings`, `docs_cli_test` (3), `wire_selftest` (3), `cargo machete`,
+    rustdoc `-D warnings -p holler-pane`, `git diff --check`: all clean.
+  - Mutation: `is_claude_code_command` set to `false` fails 3 of the 7 `import::harness` tests; restored, 347 passed.
+  - `git grep -n "cannot drive" -- crates/holler-pane/src/import`: empty. `origin/main` `b76f4d2`, merge-tree exit 0.
+  - `evidence.md`, section "T-green, cycle 5": `ports.rs:387-392`, copied from source.
