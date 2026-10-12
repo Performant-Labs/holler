@@ -12,8 +12,9 @@
 //! **Two kinds of test.** The default run (CI) is pure pins (`pins`, and the scratch guards
 //! this target shares with `pane_integration`, pinned in that target's `guards.rs`). The
 //! scenario (`scenario`, steps 1 to 5 and 7 of the issue) and the probe test (`probe`, step 6)
-//! are `#[ignore]` and run only with `HOLLER_TEST_PANE_INTEGRATION=1` exactly, one test at a
-//! time (the scratch set plants a credential sentinel in this process's environment):
+//! are `#[ignore]` and run only with `HOLLER_TEST_PANE_INTEGRATION=1` exactly, and so is
+//! #853's whole-grid test (`grid`), one test at a time (the scratch set plants a credential
+//! sentinel in this process's environment):
 //!
 //! ```text
 //! HOLLER_TEST_PANE_INTEGRATION=1 cargo test -p holler-cli --test profile_apply_scenario -- --ignored --test-threads=1
@@ -35,6 +36,7 @@ mod out;
 #[path = "../pane_integration/scratch/mod.rs"]
 mod scratch;
 
+mod grid;
 mod pins;
 mod plan;
 mod probe;

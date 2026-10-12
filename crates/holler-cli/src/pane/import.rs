@@ -1,13 +1,15 @@
 //! `holler pane import --from STATE_ROOT --herdr-session NAME [--launcher FILE]
-//! [--orchestrator PANE]... [--dry-run]` (story #650): adopt the fleet the old launcher runs.
-//! Read each pane's files, join each pane to what Herdr, tmux and the harness show, and write
-//! one record per pane and the profile `fleet`, or (with `--dry-run`) only report.
+//! [--orchestrator PANE]... [--dry-run] [--adopt-claude-code]` (stories #650, #835): adopt the
+//! fleet the old launcher runs. Read each pane's files, join each pane to what Herdr, tmux and
+//! the harness show, and write one record per pane and the profile `fleet`, or (with
+//! `--dry-run`) only report. A pane whose tmux session runs Claude Code is left alone (#835).
 //!
 //! In order:
 //!
-//! 1. **Arguments.** `--herdr-session` is required, as on `launch`; STATE_ROOT must be a
-//!    directory; each `--orchestrator` must name a pane directory. Each is `usage` (exit 2),
-//!    before any file is read or any port is called.
+//! 1. **Arguments.** `--adopt-claude-code` is refused until #831's adoption step lands
+//!    (ADR-0021 section 15, item 17). `--herdr-session` is required, as on `launch`; STATE_ROOT
+//!    must be a directory; each `--orchestrator` must name a pane directory. Each is `usage`
+//!    (exit 2), before any file is read or any port is called.
 //! 2. **The files** (`sources`, `pane_env`, `launcher`): read here, so `holler-pane` knows no
 //!    file format (ADR-0021 section 5). The verb never writes them.
 //! 3. **The plan**: `holler_pane::import::plan`, which reads Herdr, the pane store, tmux and the
@@ -34,7 +36,7 @@ use holler_pane::{PaneError, PaneName, Ports, Profile};
 use serde::Serialize;
 
 use super::list::{optional_text, NO_VALUE};
-use crate::output::{emit, ErrorBody, VerbCtx};
+use crate::output::{emit, not_implemented_message, ErrorBody, VerbCtx};
 use crate::profile::list::count;
 use crate::profile::show::push_spec;
 use launcher::LauncherTable;
@@ -42,6 +44,11 @@ use sources::Listing;
 
 /// The launcher table's file in the state root, when `--launcher` does not name one.
 const LAUNCHER_FILE: &str = "launcher.toml";
+
+/// The story of the Claude Code harness: until its adoption step lands (ADR-0021 section 15,
+/// item 17), `--adopt-claude-code` is refused, and that step replaces this one refusal in
+/// [`Input::read`] (#835).
+const CLAUDE_CODE_STORY: u32 = 831;
 
 /// What separates two fields of a pane's line in the text form.
 const GAP: &str = "  ";
@@ -57,6 +64,20 @@ const GAP: &str = "  ";
 /// label, and takes its position from there, never from its name. Its session of record is the
 /// one `last-session` names, when every other file names it too and its healthy server has it.
 /// Every pane is an agent unless --orchestrator names it.
+///
+/// A pane whose tmux session runs Claude Code is left alone. The old files cannot tell it from
+/// an OpenCode pane, so the import reads the command name of the foreground process of each
+/// tmux pane in the pane's tmux session (a name only, never a command line). A pane whose tmux
+/// session has a foreground process named exactly `claude` gets the finding harness-claude-code
+/// (info), the action `skipped` and no record, and blocks nothing; `pane doctor` then reports
+/// it as unregistered-herdr-pane. Any other name (`bash`, which the launcher's OpenCode panes
+/// show), or no process, is imported as OpenCode. The rule is a default, not a proof: tmux
+/// names only the foreground process, so a Claude Code pane is taken for OpenCode when its
+/// `claude` has exited (it shows its shell), is not in the foreground (a wrapper script runs
+/// it, or it is suspended) or was started under another name. Read the dry run first. A pane
+/// whose tmux session cannot be read gets the problem harness-unreadable and is never recorded
+/// on a guess. --adopt-claude-code would adopt the Claude Code panes too; it is refused (usage)
+/// until #831's adoption step lands.
 ///
 /// The run never starts, stops, types into or moves anything, and changes no file. With
 /// --dry-run it writes nothing and reports what a real run would write. A real run writes the
@@ -93,6 +114,10 @@ pub struct PaneImport {
     /// Report what a real run would write, and write nothing.
     #[arg(long)]
     pub dry_run: bool,
+    /// Also adopt the panes whose tmux session runs Claude Code. Refused (usage) until #831's
+    /// adoption step lands.
+    #[arg(long)]
+    pub adopt_claude_code: bool,
 }
 
 /// Run `holler pane import`: read the files, plan, write (unless `--dry-run`) and print the
@@ -149,6 +174,13 @@ struct Input {
 impl Input {
     /// Step 1, then step 2.
     fn read(args: &PaneImport) -> Result<Self, PaneError> {
+        if args.adopt_claude_code {
+            return Err(usage(&format!(
+                "--adopt-claude-code: {}; without it the import leaves a pane that runs Claude \
+                 Code alone",
+                not_implemented_message(CLAUDE_CODE_STORY)
+            )));
+        }
         let herdr_session = args
             .herdr_session
             .clone()

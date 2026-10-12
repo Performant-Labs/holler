@@ -11,7 +11,9 @@ use holler_pane::tx_apply::{Action, Outcome};
 use holler_pane::GridPos;
 use serde_json::{json, Value};
 
-use crate::plan::{assert_on_binary_path, assert_plan_agrees_with_show, Applied, Still};
+use crate::plan::{
+    assert_on_binary_path, assert_plan_agrees_with_show, assert_refused_run, Applied, Still,
+};
 use crate::scratch::rig::{free_port, no_model_can_be_reached, refused};
 use crate::scratch::Scratch;
 
@@ -235,7 +237,11 @@ fn step_2_dry_runs(run: &Run, shown: &Value) {
     let plan = run.apply_in_session(P, &["--dry-run"]);
     assert!(plan.dry_run);
     assert_eq!(plan.profile, P);
-    assert_eq!(plan.panes(), [A1, A2, B1, X], "(workspace, row, col) order");
+    assert_eq!(
+        plan.panes(),
+        [A1, A2, B1, X],
+        "apply's order: by workspace, then column 1 by row"
+    );
     assert_plan_agrees_with_show(&plan, shown, &[B1]);
     // The stated exception: show says B1 is missing (not a member); apply adopts its record.
     assert_eq!(plan.step(B1).row(), (Action::Adopt, Outcome::Planned));
@@ -398,7 +404,8 @@ fn step_4(run: &Run) {
     let plan = run.apply(P, &["--dry-run"]);
     let b1 = plan.step(B1);
     assert_eq!(b1.row(), (Action::Relaunch, Outcome::Planned));
-    let why = format!("its harness server on port {} did not answer", run.port(B1));
+    // The engine's wording since #857 (`tx_apply/observe.rs`): the record's endpoint.
+    let why = format!("its harness at port {} did not answer", run.port(B1));
     assert!(
         b1.detail.as_deref().is_some_and(|d| d.contains(&why)),
         "{b1:?}"
@@ -447,19 +454,7 @@ fn step_4(run: &Run) {
 
 /// Step 5: apply Q, whose panes are P's: refused without `--take-over`, moved with it.
 fn step_5(run: &Run) {
-    let before = run.still(Q);
-    let refused_run = run.apply_in_session(Q, &[]);
-    assert_eq!(refused_run.panes(), [A1, A2]);
-    for pane in [A1, A2] {
-        let step = refused_run.step(pane);
-        assert_eq!(step.row(), (Action::Refuse, Outcome::Refused), "{pane}");
-        assert_eq!(
-            step.code.as_deref(),
-            Some("pane-in-other-profile"),
-            "{pane}"
-        );
-    }
-    assert_eq!(run.still(Q), before, "a refusal changes no record");
+    let before = step_5_refused(run);
 
     let taken = run.apply_in_session(Q, &["--take-over"]);
     assert_eq!(taken.step(A1).row(), (Action::Adopt, Outcome::Adopted));
@@ -494,6 +489,30 @@ fn step_5(run: &Run) {
             "{pane} is not Q's and stays in P"
         );
     }
+}
+
+/// Step 5, without `--take-over`: the dry run plans both refusals, and the real run exits 3
+/// printing only them (#853) and changes no record. Returns the reading taken before it.
+fn step_5_refused(run: &Run) -> Still {
+    let before = run.still(Q);
+    let plan = run.apply_in_session(Q, &["--dry-run"]);
+    assert_eq!(plan.panes(), [A1, A2]);
+    for pane in [A1, A2] {
+        let step = plan.step(pane);
+        assert_eq!(step.row(), (Action::Refuse, Outcome::Refused), "{pane}");
+        assert_eq!(
+            step.code.as_deref(),
+            Some("pane-in-other-profile"),
+            "{pane}"
+        );
+    }
+    let argv = ["profile", "apply", Q, "--herdr-session", run.session()];
+    let refused_run = run.scratch.json(&argv, 3);
+    let both = [(A1, "pane-in-other-profile"), (A2, "pane-in-other-profile")];
+    let rest = assert_refused_run(&refused_run, &both, 0);
+    assert_eq!(rest, "", "a refusal of the plan carries no detail");
+    assert_eq!(run.still(Q), before, "a refusal changes no record");
+    before
 }
 
 /// Step 7: the changed pane rolled back to Q's known-good spec, then Q applied.

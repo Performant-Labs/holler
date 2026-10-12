@@ -9,6 +9,9 @@
 //!   (§4, C1; entry 18), the envelope of a run that exits 0 (C6) and its text form.
 //! - `apply/rows.rs`: one case per row of §3 and per per-pane answer of §4 (entries 1-3, 5, 8-10,
 //!   12, 13, 16, 30, 32).
+//! - `apply/order.rs`: the steps' order, column 1 first, and the grid limit that stays (#853).
+//! - `apply/refused.rs`: a real run with a `refused` step exits 3 and prints only the refusal
+//!   (#853), with C25's refusal after the act began.
 //! - `apply/takeover.rs`: `--take-over` and the registry writes of rows c, d, e and f (entries 6,
 //!   14, 15, 25, 29).
 //! - `apply/failures.rs`: a `failed` step stops the run (entries 17, 21, 22, 23, 33).
@@ -22,6 +25,8 @@ mod bound;
 mod dry_run;
 mod failures;
 mod observe;
+mod order;
+mod refused;
 mod rows;
 mod takeover;
 

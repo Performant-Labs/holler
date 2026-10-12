@@ -9,7 +9,8 @@ use common::{cell, chain, pane, split};
 use holler_adapter_herdr::layout::{grid_of, Direction, GridMap, LayoutNode};
 use holler_adapter_herdr::plan::{plan_splits, Extent, Step, Target, GRID_UNREACHABLE};
 use holler_pane::error::{class_of, ErrorClass};
-use holler_pane::{GridPos, PaneError};
+use holler_pane::{GridPos, HerdrPort, HerdrSpec, PaneError};
+use holler_pane_testkit::herdr::{FakeHerdr, Placement};
 
 const TOLERANCE: f64 = 1e-9;
 
@@ -331,8 +332,10 @@ fn ac11d_a_workspace_of_only_unplaced_panes_is_never_created_again() {
 
 #[test]
 fn ac12_the_fakes_sequence_stops_where_real_herdr_nests() {
-    // `FakeHerdr`'s split-only test: r1c1, r1c2, r2c2, r2c1. Real Herdr nests the r2c2
-    // that a `down` split of r1c2 makes, so the adapter refuses it (Decision 6).
+    // The sequence `FakeHerdr`'s split-only placement accepted before #853: r1c1, r1c2,
+    // r2c2, r2c1. Real Herdr nests the r2c2 that a `down` split of r1c2 makes, so the
+    // adapter refuses it (Decision 6), and since #853 the fake refuses it too (the
+    // cross-check below).
     assert_plan(
         plan_splits(&map_of(&[1]), &target(2, 2, &[(1, 2)])),
         &[right((1, 1), 1.0 / 2.0, (1, 2))],
@@ -349,4 +352,90 @@ fn ac13_the_refusal_code_is_the_test_kits() {
         GRID_UNREACHABLE.as_str(),
         holler_pane_testkit::herdr::GRID_UNREACHABLE.as_str()
     );
+}
+
+/// The widths (panes per row) of every grid a split-only workspace of at most `rows` rows
+/// of at most `cols` panes can hold with no hole (each built by successive splits), the
+/// empty workspace first.
+fn grids_up_to(rows: usize, cols: usize) -> Vec<Vec<usize>> {
+    let mut grids = vec![vec![]];
+    let mut last = vec![vec![]];
+    for _ in 0..rows {
+        last = last
+            .iter()
+            .flat_map(|widths: &Vec<usize>| {
+                (1..=cols).map(move |width| {
+                    let mut grown = widths.clone();
+                    grown.push(width);
+                    grown
+                })
+            })
+            .collect();
+        grids.extend(last.iter().cloned());
+    }
+    grids
+}
+
+/// A fresh `FakeHerdr` with one workspace of `extent` holding the grid `widths`, placed
+/// absolutely, then switched to split-only placement.
+fn split_only_fake(extent: u16, widths: &[usize]) -> FakeHerdr {
+    let herdr = FakeHerdr::new("scratch")
+        .with_workspace("w", extent, extent)
+        .unwrap();
+    for (row, &width) in (1..).zip(widths) {
+        for col in (1..).take(width) {
+            herdr.ensure_pane(&fake_spec(row, col)).unwrap();
+        }
+    }
+    herdr.set_placement(Placement::SplitOnly);
+    herdr
+}
+
+fn fake_spec(row: u16, col: u16) -> HerdrSpec {
+    HerdrSpec {
+        session: "scratch".to_owned(),
+        workspace: "w".to_owned(),
+        grid: cell(row, col),
+    }
+}
+
+/// #853 (ADR-0021 section 10): `FakeHerdr`'s split-only placement accepts a free cell
+/// exactly when `plan_splits` plans it in one step, and refuses it with the planner's code
+/// otherwise, so a test of `profile apply` on the fake meets the adapter's rule. Every grid
+/// with no hole of up to 3 rows of up to 3 panes (and the empty workspace), every free cell of
+/// a 3-by-3 extent and the ring just outside it. A fresh fake per probe: an accepted probe
+/// adds a pane.
+#[test]
+fn the_split_only_fake_accepts_a_cell_exactly_when_the_planner_plans_it() {
+    const EXTENT: u16 = 3;
+    for widths in grids_up_to(3, 3) {
+        let existing = if widths.is_empty() {
+            GridMap::default()
+        } else {
+            map_of(&widths)
+        };
+        for row in 1..=EXTENT + 1 {
+            for col in 1..=EXTENT + 1 {
+                let occupied = usize::from(row)
+                    .checked_sub(1)
+                    .and_then(|r| widths.get(r))
+                    .is_some_and(|&width| usize::from(col) <= width);
+                if occupied {
+                    continue;
+                }
+                let planned = plan_splits(&existing, &target(EXTENT, EXTENT, &[(row, col)]));
+                let placed = split_only_fake(EXTENT, &widths).ensure_pane(&fake_spec(row, col));
+                let at = format!("r{row}c{col} on the grid {widths:?}");
+                match (&planned, &placed) {
+                    (Ok(steps), Ok(_)) => assert_eq!(steps.len(), 1, "{at}: {steps:?}"),
+                    (Err(plan), Err(fake)) => {
+                        assert_eq!(plan.code(), fake.code(), "{at}: {plan} / {fake}")
+                    }
+                    _ => panic!(
+                        "{at}: the planner answered {planned:?}, the fake {placed:?}"
+                    ),
+                }
+            }
+        }
+    }
 }

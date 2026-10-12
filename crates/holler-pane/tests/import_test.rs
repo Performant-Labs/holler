@@ -12,6 +12,10 @@
 //! that reconcile already names keeps reconcile's spelling"): a missing tmux session is
 //! reconcile's `tmux-session-missing`, not a second name, and `session-not-found` is the
 //! closed `PaneError` code. So the import adds ten new codes, not twelve.
+//!
+//! #835 adds two more (brief, round 2, R2-4): `harness-claude-code`, an `info` finding for a
+//! pane whose tmux session runs Claude Code and that the import leaves alone, and
+//! `harness-unreadable`, a `problem` for a pane whose harness could not be read.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +26,7 @@ use holler_pane::import::IMPORT_BLOCKED;
 use holler_pane::PaneError;
 
 /// The codes only the import has.
-const NEW_CODES: [&str; 10] = [
+const NEW_CODES: [&str; 12] = [
     "pane-unlabelled",
     "pane-label-ambiguous",
     "sources-disagree",
@@ -33,6 +37,8 @@ const NEW_CODES: [&str; 10] = [
     "name-cell-differs",
     "already-imported",
     "ignored-entry",
+    "harness-claude-code",
+    "harness-unreadable",
 ];
 
 /// The codes the import shares with reconcile and the closed error codes, each from its
@@ -60,6 +66,7 @@ fn levels() -> BTreeMap<String, &'static str> {
         "sources-disagree",
         "source-unreadable",
         "source-missing",
+        "harness-unreadable",
         FindingKind::TmuxSessionMissing.code(),
     ] {
         levels.insert(code.to_owned(), "problem");
@@ -75,7 +82,14 @@ fn levels() -> BTreeMap<String, &'static str> {
         levels.insert(code.to_owned(), "warning");
     }
     levels.insert("harness-not-opencode".to_owned(), "skipped");
-    for code in ["ignored-entry", "already-imported", "name-cell-differs"] {
+    // `harness-claude-code` is `info`, as the issue says, not `skipped` like
+    // `harness-not-opencode` (brief section 3: a deliberate, recorded difference).
+    for code in [
+        "ignored-entry",
+        "already-imported",
+        "name-cell-differs",
+        "harness-claude-code",
+    ] {
         levels.insert(code.to_owned(), "info");
     }
     levels

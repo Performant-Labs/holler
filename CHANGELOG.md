@@ -128,6 +128,22 @@ fills this file in at release time.
   refused (`import-blocked`, a new open code, exit 3) while a pane has a problem, a failed write is undone, and running it
   again writes nothing. It only reads Herdr, tmux and the harness, and changes no file. A file that cannot be read is
   named with a line number or position only, never its text. Nothing a user runs changes yet: #649 wires the adapters in.
+- Pane control, the import leaves Claude Code panes alone (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import` no longer records a pane whose tmux session runs Claude Code as an OpenCode pane
+  ([#835](https://github.com/Performant-Labs/holler/issues/835)). The launcher's files cannot tell the two apart, so the
+  import now reads the command name of the foreground process of each tmux pane in a pane's tmux session (a name only,
+  never a command line), through `HostPort::foreground_commands`. A pane whose tmux session has a foreground
+  process named exactly `claude` gets the new finding `harness-claude-code` (info) and no record, and blocks nothing.
+  Any other name, or no process, is imported as OpenCode, as before. A pane whose tmux session cannot be read gets the
+  new problem `harness-unreadable` and no record, so a real run is refused (`import-blocked`); a failed `ps`, a warning
+  until now, is that problem too. `--adopt-claude-code`, which will adopt those panes, is refused (`usage`, exit 2)
+  until the adoption step of [#831](https://github.com/Performant-Labs/holler/issues/831) lands. The rule has
+  limits: tmux names only the foreground process, so a Claude Code pane is taken for OpenCode when its `claude` has
+  exited (it shows its shell), is not in the foreground (a wrapper script runs it, or it is suspended) or was started
+  under another name. Read the dry run first.
+  As a follow-up to [#832](https://github.com/Performant-Labs/holler/issues/832), `HerdrPort::observe_pane` is now required
+  as well: a port wrapper that does not forward it no longer compiles, where it would have listed an unmanaged pane with no
+  working directory and no screen change.
 - Pane control, `holler profile apply NAME [--dry-run] [--take-over] [--herdr-session NAME]` (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633)): converge the live panes on a profile, declaratively and
   idempotently, without ever killing a healthy pane. For each spec of the profile, in workspace, row and column order,
@@ -580,6 +596,23 @@ fills this file in at release time.
   the decisions. Until the hub's stores and the adapters are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+
+### Bug Fixes
+- `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#853](https://github.com/Performant-Labs/holler/issues/853)). Apply created the missing panes in workspace, row and
+  column order, but Herdr adds a row only below a row of one pane, so for a profile of a 2-by-2 grid it created `r1c1`
+  and `r1c2`, then refused `r2c1` and `r2c2` as `grid-unreachable`. Its steps now run in creation order, the Herdr
+  adapter's own: by workspace, then the workspace's column 1 by row, then every other cell by row and column (`r1c1`,
+  `r2c1`, `r1c2`, `r2c2`), which is also the order of `steps` in the output and in a dry run's plan. One limit stays:
+  apply cannot add a row below a row that already holds two or more live panes, and it moves nothing live to make room
+  (that create is still refused, `grid-unreachable`). **Behaviour change:** a real run with a `refused` step and no
+  failed one now exits 3, not 0, and, as a failed run does, prints only one line, `apply refused <N> step(s): <pane>
+  (<code>), ...; <M> other step(s) ran`, coded as the first refused step and followed by the detail of each refused step
+  whose launch or relaunch had begun (it ends with the command that reconciles). Every step still runs and nothing is
+  rolled back. A script that needs the steps as data runs `--dry-run` first, which still exits 0 and prints the plan.
+  The test kit's split-only fake Herdr now follows the adapter's rule, and a test checks the two against each other.
+  [ADR 0021](docs/adr/ADR-0021.md) records both decisions (32 and 33).
 
 ## [0.4.0] - 2026-09-29
 

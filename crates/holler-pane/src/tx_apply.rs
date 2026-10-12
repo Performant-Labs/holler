@@ -18,8 +18,11 @@
 //!   A shown session that cannot be read (`Ok(None)` or an error) cannot tell, so it does not
 //!   make a pane unhealthy, and the step's detail says so. A `health` or `snapshot` call that
 //!   fails makes the step of a recorded pane `failed`, unless row a refuses it.
-//! - **The steps**, one per spec pane in `(workspace, row, col)` order; the first row that
-//!   matches applies. (a) A record of another profile, without `--take-over`: `refused`
+//! - **The steps**, one per spec pane in creation order (#853): by workspace, then the
+//!   workspace's column-1 cells by row, then its other cells by row and column, the order the
+//!   Herdr adapter's split planner builds a grid in, so a profile can create a whole grid from
+//!   an empty workspace; specs of one cell keep P's order. The first row that matches applies.
+//!   (a) A record of another profile, without `--take-over`: `refused`
 //!   (`pane-in-other-profile`). A record whose spec names another harness than the pane runs:
 //!   `refused` (`harness-change-refused`, #831: a live pane's harness is never rewritten, by
 //!   apply or by a relaunch). (b) No record: `create`, by `tx_launch::launch`. (c) Healthy and
@@ -100,7 +103,8 @@ pub struct Applied {
     /// P's stored name.
     pub profile: ProfileName,
     pub dry_run: bool,
-    /// One per spec pane, in `(workspace, row, col)` order.
+    /// One per spec pane, in creation order: by workspace, then its column-1 cells by row, then
+    /// its other cells by row and column (#853).
     pub steps: Vec<Step>,
 }
 
@@ -328,7 +332,7 @@ impl Row {
     }
 }
 
-/// Every spec's row (§3), in `(workspace, row, col)` order: P's order is not the steps' (C6).
+/// Every spec's row (§3), in creation order ([`cell_key`]): P's order is not the steps' (C6).
 /// The comparison is `diff_profile`'s, whose rows come one per spec in P's order, so they pair
 /// with the specs; a sort by cell is stable, so specs of one cell keep P's order.
 fn plan(profile: &Profile, records: &[Pane], observed: &Observed, take_over: bool) -> Vec<Planned> {
@@ -346,10 +350,16 @@ fn plan(profile: &Profile, records: &[Pane], observed: &Observed, take_over: boo
     chosen.into_iter().map(|(_, planned)| planned).collect()
 }
 
-/// A spec's place in the run: its workspace, then its row and column.
-fn cell_key(spec: &ProfileSpec) -> (&str, u16, u16) {
-    let grid = spec.herdr.grid;
-    (spec.herdr.workspace.as_str(), grid.row, grid.col)
+/// A spec's place in the run (#853): its workspace, then its column-1 cells by row, then every
+/// other cell by row and column. It mirrors `plan_splits` in the Herdr adapter
+/// (`holler-adapter-herdr/src/plan.rs`), which places a workspace's column-1 cells (its new
+/// rows) before the rest because Herdr adds a row only below a row of one pane. Apply creates
+/// one cell per step through `HerdrPort::ensure_pane`, so in this order a profile builds a
+/// whole grid from an empty workspace; in the old order (workspace, row, column) `r1c2` came
+/// before `r2c1`, which the planner then refused (`grid-unreachable`).
+fn cell_key(spec: &ProfileSpec) -> (&str, bool, u16, u16) {
+    let (workspace, grid) = (spec.herdr.workspace.as_str(), spec.herdr.grid);
+    (workspace, grid.col != 1, grid.row, grid.col)
 }
 
 /// The row of `spec`, whose row of `diff_profile` is `diff`: the first of the step table that
