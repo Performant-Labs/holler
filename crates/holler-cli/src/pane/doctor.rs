@@ -11,6 +11,11 @@
 //! - **The periodic pass.** There is no hub timer (ADR-0021 section 12): a scheduler runs
 //!   `holler pane doctor --format=json`, without `--fix`, as often as wanted, and each run
 //!   records what changed.
+//! - **The repair of a single process** (#831). A Claude Code pane's mismatch (its process holds
+//!   another session than the session of record, after a person's `/clear`) is repaired, with
+//!   `--fix` and while the process is idle, by relaunching the pane on its session of record:
+//!   the pass reaches `tx_launch::relaunch_recorded` through the relaunch this verb hands it
+//!   (`reconcile_with`), so the reconcile engine never imports the launch engine.
 //! - **Text mode** prints one line each: Herdr's version, each host's recorded Herdr API
 //!   version, each finding (`<pane> <pos> <kind>: <message>`, then what `--fix` did and the
 //!   command to run), and a summary. Untrusted values are quoted (`findings::quoted`), so no
@@ -18,8 +23,9 @@
 
 use clap::Args;
 use holler_pane::findings::{quoted, Finding, FixState};
-use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
-use holler_pane::{PaneError, PaneName, Ports, ProfileName};
+use holler_pane::reconcile::{reconcile_with, ReconcileRequest, Report};
+use holler_pane::tx_launch::{relaunch_recorded, ProcessSession, TxOptions};
+use holler_pane::{Pane, PaneError, PaneName, Ports, ProfileName};
 use holler_proto::clock::now_millis;
 
 use super::args::ProfileOpt;
@@ -31,7 +37,8 @@ pub struct PaneDoctor {
     /// Check only this pane (default: every pane in scope).
     #[arg(value_name = "PANE")]
     pub pane: Option<String>,
-    /// Repair what the record decides (selects the session of record; never changes it).
+    /// Repair what the record decides (selects the session of record, or relaunches an idle
+    /// Claude Code pane on it; never changes it).
     #[arg(long)]
     pub fix: bool,
     #[command(flatten)]
@@ -65,7 +72,18 @@ fn pass(args: &PaneDoctor, ports: Ports<'_>) -> Result<Report, PaneError> {
         now_ms: now_millis(),
         unmanaged_stalled_after_secs: args.unmanaged_stalled_after,
     };
-    reconcile(ports, &request)
+    let relaunch = |record: &Pane| relaunch_on_record(ports, record);
+    reconcile_with(ports, &request, Some(&relaunch))
+}
+
+/// `--fix`'s repair of a single process (#831): relaunch `record` as recorded on its session of
+/// record, through the launch engine. Returns the record the relaunch stored.
+fn relaunch_on_record(ports: Ports<'_>, record: &Pane) -> Result<Pane, PaneError> {
+    let launched = relaunch_recorded(ports, record, &ProcessSession::Keep, &TxOptions::default())
+        .map_err(|failure| failure.error)?;
+    launched.pane.ok_or_else(|| PaneError::Unavailable {
+        what: format!("the relaunch of {} stored no record", record.name),
+    })
 }
 
 /// The text form of `report`, one line each.

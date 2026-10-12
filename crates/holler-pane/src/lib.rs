@@ -32,8 +32,9 @@
 //! **Frozen when #637 merges.** After that a change to a signature or a code goes
 //! through the epic's amend-first rule. `HerdrPort` stays provisional until the spike
 //! #636 reports; `HarnessPort` is final (the spike #635 confirmed it, and #642 built it),
-//! amended since by #645 (the prompt seam) and #802 (`serve_command` and
-//! `verify_serving`, with `HostPort::run`'s directory).
+//! amended since by #645 (the prompt seam), #802 (`serve_command` and `verify_serving`,
+//! with `HostPort::run`'s directory) and #831 (a second harness, Claude Code: every call
+//! keyed by a `HarnessEndpoint`, and the methods of a single-process harness).
 //!
 //! **Serde policy.** The stored records and the params structs refuse unknown fields:
 //! a record read, changed and written back by a peer that does not know a field would
@@ -69,8 +70,8 @@ pub use generation::next_generation;
 pub use grid::GridPos;
 pub use pane::{HerdrPane, Pane, PaneEvent, PaneId, PaneName};
 pub use ports::{
-    Cursor, HarnessPort, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, PaneObservation,
-    PaneStore, Ports, Prober, ServeSpec, SystemProber, Watch,
+    Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPort, HerdrSnapshot, HerdrSpec,
+    HostPort, Key, PaneObservation, PaneStore, Ports, Prober, ServeSpec, SystemProber, Watch,
 };
 pub use probe::{run_probe, ProbeResult};
 pub use profile::{

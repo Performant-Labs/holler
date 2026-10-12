@@ -163,7 +163,10 @@ fn watch_params_decode_from_an_empty_object_as_from_the_beginning() {
 /// test compiling until it is listed here, and then the vocabulary check applies.
 fn every_kind() -> Vec<HarnessKind> {
     match HarnessKind::Opencode {
-        HarnessKind::Opencode => vec![HarnessKind::Opencode],
+        // #831: the Claude Code pane harness (ADR-0021 section 15 item 1).
+        HarnessKind::Opencode | HarnessKind::Claude => {
+            vec![HarnessKind::Opencode, HarnessKind::Claude]
+        }
     }
 }
 

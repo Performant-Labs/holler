@@ -2,20 +2,21 @@
 //! file, filed by slug, makes every write a compare-and-swap on the record's generation,
 //! appends each applied write to the profile's change log, and offers a change feed.
 //!
-//! The control socket forwards `profile/get`, `list`, `cas_put`, `delete`, `watch` and `log`
-//! here (`crate::pane_dispatch`, #669). [`ProfileState`] is the registry and implements the
-//! `holler_pane::ProfileStore` port. [`dispatch`] answers the six methods with a
-//! `PaneReply`, carried as a JSON-RPC result, and routes `profile/rename` (PROPOSED, #665)
-//! to [`rename`], which answers `not-implemented`. The hub is the store only: it keeps what
-//! a verb wrote and never reads the pane registry on a profile write. Unlike the pane
-//! registry it stamps times itself (D4): a record's `created` and `updated` and each log
-//! entry's `at`. The submitted times, slug and generation are ignored.
+//! The control socket forwards `profile/get`, `list`, `cas_put`, `delete`, `watch`, `log` and
+//! `rename` here (`crate::pane_dispatch`, #669). [`ProfileState`] is the registry and
+//! implements the `holler_pane::ProfileStore` port. [`dispatch`] answers the seven methods
+//! with a `PaneReply`, carried as a JSON-RPC result. The hub is the store only: it keeps what
+//! a verb wrote, and only `profile/rename` (#665, [`rename`]) reaches the pane registry, to
+//! move a renamed profile's member panes in the same transaction. Unlike the pane registry it
+//! stamps times itself (D4): a record's `created` and `updated` and each log entry's `at`. The
+//! submitted times, slug and generation are ignored.
 //!
 //! - `store.rs`: the table behind one lock, its compare-and-swap writes and their log
-//!   entries, and the long-poll wait. It is the twin of `panes::store`.
+//!   entries, the rename, and the long-poll wait. It is the twin of `panes::store`.
 //! - `entry.rs`: the file's entry, `<state dir>/hub/profiles.json` (D2), and the checks
 //!   that make a corrupt one fail closed; the stamps (D4) and an update's summary (D5).
 //! - `handlers.rs`: the six handlers, each #639's `panes::handlers::run` with a closure.
+//! - `rename.rs`: `profile/rename`'s handler (#665), the same pipeline.
 //!
 //! The registry is built from #639's shared parts and copies none of them: the file's load
 //! and save (`panes::persist`), the feed's ring and its rules (`panes::feed`), the handler
@@ -53,7 +54,8 @@
 //!   Profile writes are paced by an operator's verbs, never by a timer, and nothing prunes a
 //!   log or a tombstone, so the file grows with the history it keeps.
 //! - The lock is held across the save, as in the pane registry: a wedged save blocks every
-//!   caller, with no `timeout`.
+//!   caller, with no `timeout`. A `profile/rename` (#665) holds it, and the pane lock, across
+//!   two saves.
 //! - Each pending `profile/watch` holds one blocking-pool thread for up to `WATCH_WAIT`, the
 //!   pane registry's window.
 //!
@@ -152,30 +154,34 @@ impl ProfileStore for ProfileState {
         self.store.log(name)
     }
 
-    /// PROPOSED (#665): `not-implemented`, touching nothing, whatever the registry holds.
-    /// #665 adds the rename to the store when it is confirmed (D12).
+    /// The record half only (#665): the record, the two log entries and the events of
+    /// `store.rs`'s "Renames"; members are not moved. The hub calls this nowhere:
+    /// `profile/rename` is the hub's only renaming path, and it moves the members too.
     fn rename(
         &self,
-        _from: &ProfileName,
-        _to: &ProfileName,
-        _expected_generation: u64,
-        _actor: &Actor,
+        from: &ProfileName,
+        to: &ProfileName,
+        expected_generation: u64,
+        actor: &Actor,
     ) -> Result<Profile, PaneError> {
-        Err(PaneError::NotImplemented)
+        self.store
+            .rename(from, to, expected_generation, actor, None)
     }
 }
 
 /// Answer one `profile/*` request with its handler. `obj` is the whole request frame.
 ///
 /// `panes` is the pane registry, which `profile/rename` (#665) reaches to move a profile's
-/// member panes to the new name; no other method reads it. `profile/watch` is long-poll:
-/// one `{events, cursor}` reply per request, after at most `WATCH_WAIT`.
+/// member panes to the new name; no other method reads it. It is an `&Arc`, so that handler
+/// can move a handle into the blocking pool (`pane_dispatch::forward`'s seam).
+/// `profile/watch` is long-poll: one `{events, cursor}` reply per request, after at most
+/// `WATCH_WAIT`.
 pub async fn dispatch(
     method: &str,
     cid: &CorrelationId,
     obj: &Value,
     profiles: &ProfileState,
-    panes: &PaneState,
+    panes: &Arc<PaneState>,
 ) -> String {
     let store = Arc::clone(&profiles.store);
     match method {

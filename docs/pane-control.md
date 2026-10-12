@@ -17,16 +17,19 @@ The `holler profile` verbs do not widen the rule. They change panes only through
 and it adopts a pane by one compare-and-swap write of the record's `profile` field;
 `holler profile create NAME --from-current` and `holler profile delete NAME --keep-panes` write only that field.
 
-The registry is the one source of truth for what a registry pane is: its name, its place in Herdr, its harness server
-and its **session of record**, the one session its TUI shows and the hub drives (I2). Herdr, tmux and the harness are
+The registry is the one source of truth for what a registry pane is: its name, its place in Herdr, its harness (an
+OpenCode server, or one Claude Code process) and its **session of record**, the one session it shows and the hub drives
+(I2). Herdr, tmux and the harness are
 observed, never inferred from files (I6).
 
-**The boundary.** The rule is about registry panes. A registry pane is an OpenCode pane with a record: the record's
-harness kind is a closed set with one member, `opencode`. A pane that does not run OpenCode (in the fleet, a pane that
-runs Claude Code) has no record and can have none, so it is outside the rule: no `holler pane` verb restarts it, and
-for a Claude Code pane `scripts/pane-restart` is still the way to restart it, now and after the cutover's sign-off.
-The import (`pane import`) creates no record for a pane whose files name another harness (the finding `harness-not-opencode`,
-section 10). A Herdr pane that no record names is **unmanaged**, a state that is observed and never stored:
+**The boundary.** The rule is about registry panes, the panes with a record. A record's harness kind is `opencode` (an
+OpenCode server and its TUI) or, since issue [#831](https://github.com/Performant-Labs/holler/issues/831), `claude` (one Claude Code process that
+`holler pane launch PANE --harness claude` started, section 2). A pane that no record names (in the fleet, a Claude Code
+pane set up by hand) is outside the rule: no `holler pane` verb restarts it, and for such a Claude Code pane
+`scripts/pane-restart` is still the way to restart it, now and after the cutover's sign-off. Adopting those panes into
+the registry is a re-run of the import with `--adopt-claude-code`, the last step of #831, which waits for #835 and is not
+built (section 12). The import (`pane import`) creates no record for a pane whose files name another harness (the finding
+`harness-not-opencode`, section 10). A Herdr pane that no record names is **unmanaged**, a state that is observed and never stored:
 `holler pane list` over the whole registry shows it in a table of its own (section 4), and `holler pane get PANE` shows it
 when PANE is its label or its Herdr pane id. A verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
 `close`) refuses it with `pane-unmanaged` (exit 3), and a name that is neither a record nor an unmanaged pane is
@@ -42,8 +45,46 @@ still has a member. A launch is a transaction: it makes the Herdr pane and the t
 server, creates the session of record over the harness API, attaches the TUI to it, observes that the TUI shows it, and
 only then writes the record. A step that fails undoes what the run made and writes no record.
 
-**The model is recorded, not applied yet.** A pane's model, effort, environment variable names and context ceilings are
-written to its record (and to its profile's spec), but no port carries them to the harness server yet: the server a
+**A Claude Code pane** (issue [#831](https://github.com/Performant-Labs/holler/issues/831)) is a pane whose harness is one Claude Code process, the
+harness, the TUI and the session holder at once. `--harness claude` on `launch` makes one (the default is `opencode`):
+
+```bash
+holler pane launch demo-beta --herdr-session demo --workspace demo --grid r1c2 --project /srv/demo --model anthropic/claude-sonnet-5-5 --effort medium --ctx-soft 800000 --ctx-hard 900000 --harness claude --port-policy none
+```
+
+- **No server and no port.** The process runs in the pane's tmux session and is stopped with it, like a server. Its port
+  policy is `none`, the only one it takes, and its record names the process's pid instead of a port. `fixed:PORT` for a
+  Claude Code pane, or `none` for an OpenCode pane, is refused `port-policy-unsupported`.
+- **The launch.** It runs the process on a fresh session id (a UUID Holler chooses), waits until `claude agents --json`
+  lists the process holding that session and idle, checks that it holds it, and only then writes the record. A process
+  held by Claude Code's first-run or trust dialog is `harness-dialog-open`, and the launch is rolled back: answer the dialog
+  once by hand in that directory, then launch again. A tmux session that already runs Claude Code is refused
+  `process-in-use`: a process left behind is never doubled and never adopted. The check knows Claude Code by the name
+  tmux gives the session's foreground process, the program file's name, so it does not recognise a Claude Code started
+  from a `HOLLER_CLAUDE_BIN` whose file has another name.
+- **The model is applied.** `--model PROVIDER/ID` and `--effort` reach the process as its `--model ID` and `--effort`
+  (the provider is recorded, not passed). `--agent` is refused `agent-unsupported`.
+- **The login.** The process is started without the environment variables that would change Claude Code's login
+  (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY`), so every Claude Code pane uses the login Claude Code itself
+  holds, and a spec that names one of them with `--env` is refused `claude-login-env-refused`. Whether that login is the
+  subscription one is what `doctor` checks: it reports `claude-login-missing` when it is not (section 5).
+- **Its session is chosen when it starts**, so a Claude Code pane is never switched in place: `relaunch`, `switch`,
+  `reset` and its interrupt restart the process on the session they choose (section 3). It accepts a message from another
+  session without a dialog and is launched without Claude Code's question tool, so it never waits on a question the hub
+  cannot answer.
+- **The prompt verbs.** `holler interrupt --pane NAME` on a Claude Code pane relaunches it on its session of record (the
+  operator's decision: no keypress, and a signal would end the process), dropping the turn in flight; with text it is
+  refused `interrupt-text-unsupported`, and `holler answer --pane NAME CHOICE` is refused `answer-unsupported`.
+  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: the hub drives no body for its session until
+  [#839](https://github.com/Performant-Labs/holler/issues/839) and [#850](https://github.com/Performant-Labs/holler/issues/850)
+  (section 12).
+- A pane's harness kind is never changed: `relaunch` with another `--harness`, or `profile apply` of a spec that names
+  another harness for a recorded pane, is refused `harness-change-refused`. Close the pane and launch it again instead.
+
+**The model of an OpenCode pane is recorded, not applied yet.** A pane's model, effort, environment variable names and
+context ceilings are written to its record (and to its profile's spec), but no port carries them to an OpenCode server
+yet: the server a
 launch or relaunch starts receives the agent only (below), and the model it uses is whatever its OpenCode
 configuration selects. Applying them is issue [#829](https://github.com/Performant-Labs/holler/issues/829), not built. Until it lands, `--model` and `--effort` change
 what the record says, not what the server runs (section 11 says what that means for a restart on another model).
@@ -76,13 +117,14 @@ agent (`none` is a valid key, so it never means "no agent"); in JSON the value i
 
 **What a verb needs.** Every `pane` and `profile` verb needs the hub: the registry lives there. With no hub running a verb
 answers `unavailable` (exit 1) and its message names the missing hub; it touches no adapter. The hub is the only thing a
-verb needs before it starts: Herdr, tmux and OpenCode are reached when a verb first uses them. So the read verbs
+verb needs before it starts: Herdr, tmux, OpenCode and Claude Code are reached when a verb first uses them. So the read verbs
 (`holler pane list`, `holler pane get PANE`, `holler pane watch`, `holler profile list`, `holler profile show NAME`) work
 with no Herdr running. `pane list` over the whole registry and `pane get` of a name with no record also read Herdr, for
 the unmanaged panes (section 4); without Herdr, `list` still lists every record and says on one `warning:` line that the
 unmanaged panes are not listed.
 
-The Herdr session, the tmux socket and the OpenCode binary the adapters use come from environment variables. The one to
+The Herdr session, the tmux socket and the OpenCode and Claude Code binaries the adapters use come from environment
+variables (`HOLLER_CLAUDE_BIN` names the Claude Code binary, else `claude` on `PATH`). The one to
 know is `HOLLER_HERDR_SESSION`, the Herdr session the panes live in (Herdr's own `HERDR_SESSION` is not read); with it
 unset, each Herdr call answers `usage` naming it. A variable that is missing or malformed never stops a verb from
 starting: the port it configures answers the error at its first use. The full list, with each variable's default, is the
@@ -104,8 +146,7 @@ session**, and a mismatch is not answered the same way by every verb:
 ## 3. The verbs
 
 `holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`
-and `import`. `holler profile` has `create`, `delete`, `list`, `show` and `apply`, and three verbs that are PROPOSED and
-not built (`rename`, `export` and `import` under `profile`, #665), at the end of this section.
+and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
 
 Each verb's `--help` is the full reference for its flags; this section names the flags that change what it does.
 Two flag groups are shared:
@@ -167,10 +208,11 @@ holler pane watch demo-alpha --since 42 --format=json
 
 Create a pane: its Herdr pane, its tmux session, its harness server and its session of record, then its record
 (section 2). Its flags are one per field of a pane spec: `--workspace`, `--grid`, `--project`, `--model`, `--effort`,
-`--role`, `--agent`, `--env` (a variable's name, never its value), `--ctx-soft`, `--ctx-hard`, `--port-policy`, the command
-and the health check (section 8). Without `--profile` every position, directory, model, effort, ceiling and port-policy
-flag is needed; with `--profile P` the profile's spec for the pane fills the ones not given. The one port policy is
-`fixed:PORT`. `--herdr-session NAME` is required unless `--spec-only`.
+`--role`, `--agent`, `--env` (a variable's name, never its value), `--ctx-soft`, `--ctx-hard`, `--port-policy`, `--harness`,
+the command and the health check (section 8). Without `--profile` every position, directory, model, effort, ceiling and
+port-policy flag is needed; with `--profile P` the profile's spec for the pane fills the ones not given. `--harness` is
+`opencode` (the default) or `claude` (section 2); an OpenCode pane's port policy is `fixed:PORT`, a Claude Code pane's
+`none`. `--herdr-session NAME` is required unless `--spec-only`.
 
 ```bash
 holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 --project /srv/demo --model anthropic/claude-sonnet-5-5 --effort medium --ctx-soft 800000 --ctx-hard 900000 --port-policy fixed:8095
@@ -179,8 +221,10 @@ holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 
 The checks come first and change nothing when one fails: a name that has a record (`pane-exists`), a failing health
 check (`probe-failed`), an unsupported Herdr (`herdr-version-unsupported`), an occupied cell (`grid-occupied`), a port a
 server already answers on (`port-in-use`). Then `agent-key-invalid` and `agent-unusable` (section 2), the grid codes
-(section 7) and the codes of `--profile` (`profile-not-found`, `pane-in-other-profile`, `profile-conflict`). Once the
-live change has started, a failure's message ends with the command that reconciles.
+(section 7) and the codes of `--profile` (`profile-not-found`, `pane-in-other-profile`, `profile-conflict`). A Claude Code
+pane's own refusals are `port-policy-unsupported`, `claude-login-env-refused`, `process-in-use`, `agent-unsupported` and
+`harness-dialog-open` (section 2). Once the live change has started, a failure's message ends with the command that
+reconciles.
 
 ### `holler pane relaunch PANE`
 
@@ -193,8 +237,10 @@ pane keeps its directory, and moves to another cell only with `--grid`.
 holler pane relaunch demo-alpha --model anthropic/claude-opus-5-5 --effort high
 ```
 
-A new `--model` or `--effort` is recorded, not yet applied to the server (#829, section 2). Its codes are `launch`'s,
-and `pane-not-found` and `pane-unmanaged` (3).
+A new `--model` or `--effort` is recorded, not yet applied to an OpenCode server (#829, section 2). A Claude Code pane's
+process is stopped, checked gone, and started again on the session of record, resumed when the session has a
+conversation (a new session id when the record has none), and its new `--model` and `--effort` are applied. Its codes are
+`launch`'s, `harness-change-refused` for another `--harness`, and `pane-not-found` and `pane-unmanaged` (3).
 
 ### `holler pane switch PANE SESSION`
 
@@ -209,6 +255,11 @@ Refused (3) with `session-not-found` (the pane's server does not have it), `sess
 (without `--as-operator`) or `server-unhealthy` (relaunch it first). A TUI that does not show the session afterwards is
 `unavailable` (1) and records nothing.
 
+A Claude Code pane is switched by a relaunch: its process is stopped and started again resuming SESSION, a Claude Code
+session id that has a conversation in the pane's directory (`session-not-found` otherwise, before anything is stopped),
+and recorded with its new pid. Since the relaunch drops a running turn, the switch is also refused while the pane is not
+idle: `session-busy`, `session-holds-question`, or `session-holds-permission` while it waits on a permission prompt.
+
 ### `holler pane reset PANE`
 
 Start a pane on a fresh session: create it, show it, record it. `--first TEXT` queues a first message to the new session
@@ -219,7 +270,9 @@ holler pane reset demo-alpha --first "Read the brief and start."
 ```
 
 Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
-an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is.
+an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. A Claude Code pane is reset by a relaunch on
+a fresh session id, refused as `switch` is (`session-holds-permission` included); `--first` goes to the relaunched
+process, through the same direct path as below.
 
 **Do not use `--first` on a parked or held pane.** The first message goes to the harness directly, outside the hub's
 prompt path, so the gate that refuses a prompt to a parked or held pane does not see it (ADR-0021 section 8, "The prompt
@@ -375,13 +428,74 @@ run or change the exit code; a `failed` step stops the run and exits 1. Its own 
 `orchestrator-not-relaunched` and `spec-not-launchable`. It exits 2 (`usage`) when the plan has a create and no
 `--herdr-session`, 3 for `profile-not-found`, 1 for a failed step, and 0 otherwise.
 
-### The PROPOSED profile verbs
+### `holler profile rename OLD NEW`
 
-`holler profile rename`, `holler profile export` and `holler profile import` are PROPOSED (#665) and not built: each
-answers `not-implemented`.
-- `holler profile rename` (PROPOSED) would change a profile's name and every member's `profile` in one transaction.
-- `holler profile export` (PROPOSED) would write a profile's specs to a file, named by a planned output flag.
-- `holler profile import` (PROPOSED) would read a profile's specs from a file, refusing an env value and an existing name.
+Rename a profile. The hub changes the profile's name and every member pane's `profile` in one transaction: the panes
+stay attached and nothing live is touched (no pane is detached, relaunched or switched), and each member's record
+moves one generation. The profile keeps its specs. Its change log is filed by its name: the old name's log ends with
+the rename, and the new name's log gets one entry saying who renamed it and from what (after the log of a profile
+deleted earlier under the new name, if there was one). A new name that differs only in spelling is a rename too. If a
+rename is interrupted between its two writes, running the same command again completes it.
+
+```bash
+holler profile rename fleet fleet-2
+```
+
+Ends with `profile-not-found` or `profile-exists` (3), `usage` (2) for a new name equal to the old one, or
+`generation-conflict` (1) when the profile changed after it was read: run it again.
+
+### `holler profile export NAME`
+
+Write a profile to a file as one JSON document of its specs, with `--out FILE` (mode 0600, replacing a file there),
+or print the document without it. The file holds names and non-secret values only: an environment variable by its
+name, never its value, and no generation, timestamp or log. A position is written `r2c1`. `holler profile import FILE`
+reads it back.
+
+```bash
+holler profile export fleet --out fleet.json
+```
+
+Ends with `profile-not-found` (3), `usage` (2) when FILE's directory does not exist or FILE is a directory, or
+`unavailable` (1) when FILE cannot be written.
+
+### `holler profile import FILE`
+
+Create a profile from a file `export` wrote, named as the file says or as `--name NAME` says. The profile is created
+**detached**: no pane joins it, and a spec may name a pane that belongs to another profile or has no record;
+`holler profile apply NAME` is what makes its panes match it. A position may be written `r2c1`, `c1r2` or `2,1`. A
+file that carries an environment value (`NAME=value`) is refused without echoing it, and no refusal quotes what a spec
+holds: a bad position or member is named by the spec's number. The document:
+
+```json
+{
+  "format": "holler-profile",
+  "version": 1,
+  "name": "Fleet",
+  "panes": [
+    {
+      "pane": "demo-c1r1",
+      "herdr": {"workspace": "main", "grid": "r1c1"},
+      "host": {"cwd": "/srv/demo"},
+      "harness": {"kind": "opencode", "port_policy": "fixed:8095"},
+      "model": {"provider": "demo-provider", "model_id": "demo-model", "effort": "medium"},
+      "role": "agent",
+      "env": ["DEMO_API_KEY"],
+      "context": {"soft": 100000, "hard": 150000},
+      "command": ["opencode", "serve"],
+      "check": ["curl", "-s", "http://127.0.0.1:8095/v1/models"],
+      "expect": ["demo-model"]
+    }
+  ]
+}
+```
+
+```bash
+holler profile import fleet.json --name fleet-copy
+```
+
+Ends with `profile-exists`, `profile-secret-refused`, `command-not-argv`, `env-name-invalid`, `grid-ambiguous` or
+`grid-out-of-range` (3), `usage` (2) when FILE does not exist, is not a regular file, is over 1 MiB or is not a
+profile document, or `unavailable` (1) when FILE cannot be read.
 
 ## 4. Reading the table
 
@@ -393,8 +507,8 @@ answers `not-implemented`.
 | POS | Its grid cell, row first: `r2c1` is row 2, column 1 (section 7). |
 | PROFILE | The profile it belongs to. |
 | PROJECT | The directory it works in. |
-| HEALTH | `healthy`, `unhealthy` or `unknown`, as the harness server last reported it (`pane get` shows the reason). |
-| SHOWN | The session the pane's TUI showed when reconcile last observed it. |
+| HEALTH | `healthy`, `unhealthy` or `unknown`, as the harness server last reported it (`pane get` shows the reason); for a Claude Code pane, whether its process still ran. |
+| SHOWN | The session the pane's TUI showed when reconcile last observed it; for a Claude Code pane, the session its process held. |
 | DRIVEN | The session the hub drives, printed as the record holds it and never compared. |
 | SYNC | SHOWN against the session of record: `ok`, `MISMATCH` (loud on purpose) or `-` when nothing was observed. |
 | HOLD | `none`, `parked` or `drained`. |
@@ -429,7 +543,22 @@ A `holler pane watch` line prints the same cells as `key=value`, the column name
 cursor=4 put demo-alpha pos=r1c1 profile=fleet project=/srv/demo health=healthy shown=ses_0a1b2c driven=- sync=ok hold=none
 ```
 
-The roster extension (the PANE, POS, PROFILE, HEALTH, SHOWN and DRIVEN columns on `holler roster`, #648) is later: read SHOWN against DRIVEN from `holler pane list` and `holler pane doctor`.
+**The roster.** `holler roster` appends six columns after HOLD: PANE (the pane's name), POS (`r2c1`, row first; a pane
+named `hj-c1r2` is a name, and it sits at `r2c1`), PROFILE, HEALTH, SHOWN and DRIVEN. They are the registry's values,
+the same cells `pane list` prints for the same record, and an empty cell is `-`; a session with no pane (the io body, an
+alpha or beta agent) shows `-` in all six. A roster row is joined to a pane when the part of its name before the first
+`/` is the pane's name. The rows are the hub's, one per session a body serves, so a pane that no body serves has no row:
+a Claude Code pane has none until a body drives its session ([#850](https://github.com/Performant-Labs/holler/issues/850)),
+and `pane list` shows it meanwhile. The roster calls no adapter and shows no unmanaged pane (`pane list` does), and it
+reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
+DRIVEN are both known and differ, the first line of the output says so:
+`2 pane(s) show a different session than the hub drives: demo-alpha, demo-beta`.
+`holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
+`profile-not-found` (exit 3). `holler roster --format=json` prints the envelope of section 9 with `data` =
+`{"rows": [...], "mismatches": ["demo-alpha", "demo-beta"]}`; `holler roster --json` keeps its shape and gains the keys
+`pane`, `pos`, `profile`, `health`, `shown` and `driven` (`null` for a row with no pane). DRIVEN is `-` for every pane
+until the hub's DRIVEN session is recorded ([#839](https://github.com/Performant-Labs/holler/issues/839)), so the
+summary line does not appear before then; read SYNC from `holler pane list` and `holler pane doctor`.
 
 The Herdr display plugin (`plugins/herdr-holler`, #651) shows each pane's project, SHOWN against DRIVEN and hold in
 Herdr's sidebar; it only reports metadata and reads, and its actions run the `holler pane` verbs.
@@ -458,13 +587,29 @@ The finding kinds:
 | `shown-driven-mismatch` | The TUI shows another session than the session of record, or its home screen. | `holler pane doctor PANE --fix` |
 | `stray-session` | A session on a pane's server that is the session of record of no pane. | none |
 | `unmanaged-stalled` | An unmanaged pane whose screen has not changed for the threshold or longer. Whole-fleet passes with `--unmanaged-stalled-after SECONDS` only. | none |
+| `pane-waiting` | A Claude Code pane whose process waits on a person: a permission prompt or a question. | none |
+| `claude-login-missing` | Claude Code's processes do not use the subscription login; about no pane, asked once per pass when a Claude Code pane is in scope. | none |
+| `profile-drift` | A pane's record differs from its profile's spec on at least one field; the message names the fields, not the values. | none |
 
 **`--fix` repairs only `shown-driven-mismatch`.** It selects the session of record in the pane's TUI, so the TUI shows
 the session the record already names, and observes the TUI again. It never changes which session is the session of
-record, never writes the record's session, and never creates, starts, stops or types into anything. It leaves the
-orchestrator's pane alone unless the run names that pane (the bracket then says `skipped`).
+record, never writes the record's session, and never creates, starts, stops or types into anything, with the one
+exception of a Claude Code pane below. It leaves the orchestrator's pane alone unless the run names that pane (the
+bracket then says `skipped`).
 
-`--fix` does not repair any other kind: each of those names the command to run instead, and four name none. A
+**A Claude Code pane** (section 2) is observed through its process: `server-down` when the process no longer runs (with
+no `server-wedged`, and no mismatch reported beside it), `shown-driven-mismatch` when the process holds another session
+than the session of record (a person's `/clear` or `/resume` moves it), and `pane-waiting` while it waits on a person. It
+has no server list, so `session-of-record-missing`, `tui-foreign-session` and `stray-session` never fire for it. It has
+no TUI to select a session in, so `--fix` repairs its mismatch by relaunching the process on the session of record, and
+only while the process is idle: a pane that works or waits is `not-fixable`, its line names `holler pane relaunch PANE`,
+and nothing is restarted.
+
+**`claude-login-missing`** is asked once per pass, through `claude auth status`, only when a pane in scope is a Claude
+Code pane, and only whether the login is the subscription one is read. No Holler verb sets a login, so it names no
+command: log Claude Code in by hand, on the machine the panes run on.
+
+`--fix` does not repair any other kind: each of those names the command to run instead, and seven name none. A
 `shown-driven-mismatch` is also `not-fixable` when its server is not healthy or does not have the session of record; its
 line then carries no bracket, and the command it names is `holler pane relaunch PANE`. The bracket is `fixable` (a run
 without `--fix` would repair it), `skipped`, `fixed` or `fix failed: CODE`.
@@ -494,7 +639,14 @@ the threshold. There is no default threshold: without the flag nothing is report
 is never stalled, and Herdr 0.8.2 reports no time of the last screen change, so **this kind cannot fire against real
 Herdr yet** (ADR-0021 section 14).
 
-`profile-drift` (a live pane that differs from its spec) is PROPOSED (#665): it is a code of the closed list and not yet a doctor kind.
+**`profile-drift`** is raised for a pane whose record differs from its profile's spec on any field
+`holler profile show NAME` compares, and it is the same comparison, so `show` and `doctor` agree. A spec with no pane
+and a pane with no spec are not drift. A pass reports one `profile-drift` finding per drifted pane, naming every
+differing field and no value, and it reports the same finding again in every later pass for as long as the difference
+stands (a pass keeps no memory, above): that is what "once per episode" means here. No Holler verb picks a side for
+you: `holler profile show NAME` lists the values, and `holler pane relaunch PANE` changes the pane (and, with
+`--profile`, its spec with it). When a pass cannot read the profiles it says `observe-failed`, naming
+`profile_store.list`, and concludes nothing about drift.
 
 ## 6. Profiles
 
@@ -510,6 +662,9 @@ the records whose `profile` names it.
 - `list` and `show` read only. `show` prints the specs, the live panes and, per pane, every field that differs from its
   spec.
 - `apply` converges the live panes on the profile, as the reference below says.
+- `rename` changes the profile's name and every member's `profile` in one transaction, touching nothing live (section 3).
+- `export` writes the profile's specs to a file, names and non-secret values only (section 3).
+- `import` creates a detached profile from such a file, refusing an environment value and a taken name (section 3).
 - A spec-editing verb with `--profile P` (`pane launch`, `pane relaunch`, `pane close`) edits P's spec for the pane and the
   live pane in one transaction: a failed run puts P's specs back (I8).
 
@@ -540,6 +695,8 @@ One step per spec pane, in workspace, row and column order; the first matching r
   and `observe` (a recorded pane whose health or snapshot call failed). The outcomes are `created`, `relaunched`,
   `adopted`, `reported`, `refused`, `failed`, `skipped` (a step after a failed one) and `planned` (a dry run's step that
   would act; row d's stays `reported`). `detail` is the step's own line, inside `data`.
+- **A recorded pane whose spec names another harness** is a `refuse` step, outcome `refused` (`harness-change-refused`,
+  #831), before its health is judged: apply never changes a live pane's harness.
 - **Refusals do not stop the run.** A `refused` or `reported` step leaves the exit code alone. A refusal from the launch
   transaction is a `refused` step with that code; a `usage` answer of the launch for a step's spec is refused with the
   open code `spec-not-launchable`.
@@ -564,7 +721,8 @@ Positions are 1-based and written row first. Text prints `r2c1` (row 2, column 1
 Input accepts `r<row>c<col>`, `c<col>r<row>` (labelled, either order) and a bare `<row>,<col>`, which is always row
 first, never column first. Upper case and surrounding whitespace are accepted. Two refusals: `grid-ambiguous` for text
 that cannot be read one way (interior whitespace, a missing half, a repeated label, unlabelled digits, anything
-unreadable), and `grid-out-of-range` for a zero, a number above 65535, or a cell outside the workspace.
+unreadable), and `grid-out-of-range` for a zero, a number above 65535, or a cell outside the workspace. A profile file
+(`holler profile import FILE`) takes a position in any of these forms; `holler profile export NAME` writes `rRcC`.
 
 **Pane names such as `hj-c1r2` predate this standard and list the column first, so `hj-c1r2` sits at `r2c1`.** No pane is
 renamed, and a name is never read as a position: a pane's position comes from Herdr's snapshot. The name itself is
@@ -663,14 +821,17 @@ change.
 | `session-not-found` | refusal (3) | The named harness session does not exist. |
 | `store-corrupt` | failure (1) | Stored state cannot be read back; the store fails closed. |
 | `unavailable` | failure (1) | The hub, Herdr or a harness cannot be reached, or the live state is not there after the act. |
-| `profile-drift` | failure (1) | PROPOSED (#665): a doctor finding listed in the closed set; never an error today. |
+| `profile-drift` | failure (1) | A doctor finding (section 5); never an error a verb returns. |
 
 **Open codes.** The list above is the closed set. A verb or an adapter owns further codes, which are not in that list and
 are always a refusal, exit 3: among them `agent-unusable` and `agent-key-invalid` (section 2), `orchestrator-not-relaunched`
 and `spec-not-launchable` of `profile apply` (section 6), `import-blocked` of `pane import` (section 3), and `pane-exists`,
 `grid-occupied`, `port-in-use`, `grid-unreachable`, `orchestrator-pane`, `server-unhealthy`, `session-of-other-pane`,
-`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). ADR-0021 section 9 lists each
-verb's.
+`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). A Claude Code pane (#831,
+section 2) adds `port-policy-unsupported`, `harness-change-refused`, `claude-login-env-refused`, `process-in-use`,
+`agent-unsupported`, `harness-dialog-open`, `session-holds-permission`, `interrupt-text-unsupported`,
+`answer-unsupported`, and the harness's own `session-mismatch` and `inbound-held` for a message it did not run.
+ADR-0021 sections 9 and 15 list each verb's.
 
 ## 10. Migration and cutover
 
@@ -690,7 +851,7 @@ One fact about the live fleet comes first; it is a fact, not a step:
   files and what it observes, and `harness-not-opencode` fires only for a pane whose `sessions.toml` names another
   harness, so the import would adopt such a pane as an OpenCode pane, with a record. No mechanism excludes a pane from
   the import yet: leaving such panes alone is issue [#835](https://github.com/Performant-Labs/holler/issues/835), not
-  built.
+  built, and adopting them as Claude Code panes (`--adopt-claude-code`) is the last step of #831, after #835.
 
 The steps, in order:
 
@@ -764,8 +925,9 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 ```
 
 - **After the sign-off** only the script's OpenCode path is retired, in a later story, not this one. Its Claude Code path
-  (issue #784) stays: a Claude Code pane is not in the registry, no verb restarts it, and `scripts/pane-restart` stays
-  its way. Claude Code panes are not part of the 7-day criterion.
+  (issue #784) stays: a Claude Code pane set up by hand is not in the registry, no verb restarts it, and
+  `scripts/pane-restart` stays its way. Claude Code panes are not part of the 7-day criterion. A Claude Code pane that
+  `holler pane launch PANE --harness claude` started has a record, and `holler pane relaunch PANE` restarts it.
 - **What the script does to a registry pane.** It takes that pane out of the new regime: it rewrites `pane.env` and
   starts a TUI on a new session that is no pane's session of record, and the record's model and session of record go
   stale. The next `doctor` reports what it observes about the pane, by the kinds of section 5, depending on where the
@@ -782,17 +944,21 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 - The same command is the way back from an `agent-unusable` refusal of `holler pane relaunch PANE --agent KEY`: that
   refusal comes after the old server was stopped, so the pane has no server and its record is unchanged until
   `holler pane relaunch PANE` runs again without `--agent` (section 2).
+- **Going back to a `holler` older than #831** while the registry holds a Claude Code pane: the older hub cannot read
+  that pane's record (its harness kind is unknown there, and it has a pid and no port), so it refuses the whole registry
+  as `store-corrupt` and every `pane` and `profile` verb stops. Close each Claude Code pane with `holler pane close PANE`
+  before installing the older binary.
 - Using the fallback is a rollback, and is recorded as one in `docs/handoffs/<#654>-cutover/decisions.md`.
 
 ## 12. Later
 
 Deferred, so not documented here as existing; none of them is available:
 
-- the roster extension: the pane columns on `holler roster` (#648);
 - applying a pane's model, effort and environment to its harness server (#829);
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
-- an import that leaves the panes Holler does not drive alone (#835);
+- an import that leaves the panes Holler does not drive alone (#835), and adopting the fleet's Claude Code panes with
+  `--adopt-claude-code` after it (#831's last step);
+- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
+- answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);
-- the real-adapter scenario for `profile apply` (#667);
-- recreating the Herdr workspace from the stored profiles (#666);
-- the PROPOSED profile verbs and the PROPOSED doctor finding `profile-drift` (#665).
+- recreating the Herdr workspace from the stored profiles (#666).

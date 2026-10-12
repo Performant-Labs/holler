@@ -15,11 +15,11 @@ use common::{pane, pane_name, profile, profile_name, spec, MemPaneStore};
 use holler_pane::error::{class_of, ErrorClass};
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
-    next_generation, run_probe, Actor, AgentKey, Argv, Cursor, HarnessPort, HerdrPane, HerdrPort,
-    HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneReply,
-    PaneStore, Ports, ProbeResult, Prober, Profile, ProfileEvent, ProfileLogEntry, ProfileName,
-    ProfileScope, ProfileSpec, ProfileStore, ResolvedScope, ServeSpec, SpecEdit, SystemProber,
-    Watch,
+    next_generation, run_probe, Actor, AgentKey, Argv, Cursor, HarnessEndpoint, HarnessPort,
+    HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId,
+    PaneName, PaneObservation, PaneReply, PaneStore, Ports, ProbeResult, Prober, Profile,
+    ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec, ProfileStore,
+    ResolvedScope, ServeSpec, SpecEdit, SystemProber, Watch,
 };
 use serde_json::json;
 
@@ -90,7 +90,7 @@ impl ProfileStore for MemProfileStore {
     fn log(&self, _name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError> {
         Ok(Vec::new())
     }
-    /// `rename` is PROPOSED (#665): the double answers `not-implemented`.
+    /// `rename` (#665): this double answers `not-implemented`; the conformance suite pins the real one.
     fn rename(
         &self,
         _from: &ProfileName,
@@ -195,6 +195,10 @@ impl HerdrPort for TestHerdr {
             })
         }
     }
+    // Required since #835: the trait no longer answers it by default.
+    fn observe_pane(&self, _pane: &PaneId) -> Result<PaneObservation, PaneError> {
+        Ok(PaneObservation::default())
+    }
 }
 
 struct TestHost;
@@ -212,6 +216,9 @@ impl HostPort for TestHost {
     fn ps(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
         Ok(vec![4242])
     }
+    fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
+        Ok(vec!["bash".to_string()])
+    }
 }
 
 struct TestHarness;
@@ -225,28 +232,37 @@ impl HarnessPort for TestHarness {
     ) -> Result<Argv, PaneError> {
         Ok(argv(&["opencode", "serve", "--port", &port.to_string()]))
     }
-    fn verify_serving(&self, _port: u16, _spec: &ServeSpec) -> Result<(), PaneError> {
+    fn verify_serving(&self, _at: &HarnessEndpoint, _spec: &ServeSpec) -> Result<(), PaneError> {
         Ok(())
     }
-    fn health(&self, _port: u16) -> Result<bool, PaneError> {
+    fn health(&self, _at: &HarnessEndpoint) -> Result<bool, PaneError> {
         Ok(true)
     }
-    fn create_session(&self, _port: u16) -> Result<String, PaneError> {
+    fn create_session(&self, _at: &HarnessEndpoint) -> Result<String, PaneError> {
         Ok("ses_new".to_string())
     }
-    fn list_sessions(&self, _port: u16) -> Result<Vec<String>, PaneError> {
+    fn list_sessions(&self, _at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
         Ok(vec!["ses_abc".to_string()])
     }
-    fn abort(&self, _port: u16, _session: &str) -> Result<(), PaneError> {
+    fn abort(&self, _at: &HarnessEndpoint, _session: &str) -> Result<(), PaneError> {
         Ok(())
     }
-    fn attach_tui(&self, _pane: &PaneId, _port: u16, _session: &str) -> Result<(), PaneError> {
+    fn attach_tui(
+        &self,
+        _pane: &PaneId,
+        _at: &HarnessEndpoint,
+        _session: &str,
+    ) -> Result<(), PaneError> {
         Ok(())
     }
     fn select_session(&self, _pane: &PaneId, _session: &str) -> Result<(), PaneError> {
         Ok(())
     }
-    fn shown_session(&self, _pane: &PaneId) -> Result<Option<String>, PaneError> {
+    fn shown_session(
+        &self,
+        _pane: &PaneId,
+        _at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
         Ok(Some("ses_abc".to_string()))
     }
 }
@@ -298,7 +314,7 @@ fn exercise_stores() {
     let mut watch = panes.watch(Cursor(0)).unwrap();
     assert!(watch.next().is_none());
 
-    // ProfileStore (rename is PROPOSED: the double says not-implemented)
+    // ProfileStore (rename, #665: this double says not-implemented; the conformance suite pins it)
     let profiles = MemProfileStore { profile: profile() };
     let actor = Actor::parse("test").unwrap();
     let name = profile_name("Some Profile");
@@ -349,15 +365,16 @@ fn exercise_host_and_harness() {
     let spec = ServeSpec::default();
     let command = harness.serve_command(&name, 8095, &spec).unwrap();
     assert_eq!(command, argv(&["opencode", "serve", "--port", "8095"]));
-    harness.verify_serving(8095, &spec).unwrap();
-    assert!(harness.health(8095).unwrap());
-    assert_eq!(harness.create_session(8095).unwrap(), "ses_new");
-    assert_eq!(harness.list_sessions(8095).unwrap(), vec!["ses_abc"]);
-    harness.abort(8095, "ses_abc").unwrap();
-    harness.attach_tui(&id, 8095, "ses_abc").unwrap();
+    let at = HarnessEndpoint::Port(8095);
+    harness.verify_serving(&at, &spec).unwrap();
+    assert!(harness.health(&at).unwrap());
+    assert_eq!(harness.create_session(&at).unwrap(), "ses_new");
+    assert_eq!(harness.list_sessions(&at).unwrap(), vec!["ses_abc"]);
+    harness.abort(&at, "ses_abc").unwrap();
+    harness.attach_tui(&id, &at, "ses_abc").unwrap();
     harness.select_session(&id, "ses_abc").unwrap();
     assert_eq!(
-        harness.shown_session(&id).unwrap().as_deref(),
+        harness.shown_session(&id, &at).unwrap().as_deref(),
         Some("ses_abc")
     );
 }

@@ -11,7 +11,13 @@
 //! - **Routing** ([`route_target`], [`resolve_pane_target`]): `--pane NAME` addresses
 //!   the pane's session of record, refused (exit 3) when the record says the pane is
 //!   parked, unhealthy or shows a session other than the one it drives. `--profile P`
-//!   scopes `--pane` and needs it. `prompt_target::route` stays as #670 froze it.
+//!   scopes `--pane` and needs it. `prompt_target::route` stays as #670 froze it. A Claude
+//!   Code pane (#831) has no body for the hub to reach until #850: its `interrupt` is a
+//!   relaunch on its session of record (`interrupt_cmd::interrupt_pane`), its `interrupt` with
+//!   text is [`INTERRUPT_TEXT_UNSUPPORTED`] and its `answer` [`ANSWER_UNSUPPORTED`], each after
+//!   the same pane gates ([`resolve_pane_record`]); its `say` is routed as any pane's, to a
+//!   hub that reaches no body for it, and is given no CLI-side path (ADR-0021 section 15
+//!   item 18).
 //! - **The routed `say --queue`** ([`QUEUE_ACCEPT_WAIT`], [`queue_outcome`]): returns
 //!   once the hub has accepted the prompt instead of waiting for the turn's reply.
 //! - **The pane arm of a held refusal** ([`pane_hold_refusal`]): the hub's pane-state
@@ -221,6 +227,14 @@ pub const PANE_UNHEALTHY: RefusalCode = RefusalCode::from_static("pane-unhealthy
 /// A pane whose record says it shows one session while the hub drives another.
 pub const PANE_SHOWN_DRIVEN_MISMATCH: RefusalCode =
     RefusalCode::from_static("pane-shown-driven-mismatch");
+/// `interrupt --pane` with replacement text on a pane whose interrupt is a relaunch (a Claude
+/// Code pane, #831): the relaunch drops the turn in flight, and no body exists to run the text
+/// after it until #850. Refusal, exit 3.
+pub const INTERRUPT_TEXT_UNSUPPORTED: RefusalCode =
+    RefusalCode::from_static("interrupt-text-unsupported");
+/// `answer --pane` on a single-process pane (a Claude Code pane, #831): nothing but a keypress
+/// answers its question, and its launch removes the question tool. Refusal, exit 3.
+pub const ANSWER_UNSUPPORTED: RefusalCode = RefusalCode::from_static("answer-unsupported");
 
 /// What `--profile` without `--pane` is told: the prompt verbs still need a pane name
 /// (ADR-0021 section 3, the scoping class).
@@ -237,6 +251,16 @@ pub fn route_target(
     resolved: Result<PromptArgs, Usage>,
     profile: &ProfileOpt,
 ) -> Result<Routed, Stop> {
+    route_target_by(resolved, profile, resolve_pane_target)
+}
+
+/// [`route_target`], resolving a `--pane` target with `resolve` (`answer` resolves it with
+/// `answer_cmd::answer_pane_target`, #831).
+pub(crate) fn route_target_by(
+    resolved: Result<PromptArgs, Usage>,
+    profile: &ProfileOpt,
+    resolve: fn(Ports<'_>, &str, Option<&str>) -> Result<String, PaneError>,
+) -> Result<Routed, Stop> {
     let args = resolved.map_err(|usage| Stop {
         message: usage.to_string(),
         exit_code: ErrorClass::Usage.exit_code(),
@@ -250,7 +274,7 @@ pub fn route_target(
             })
         }
         (PromptTarget::Pane(pane), profile) => Wiring::connect()
-            .and_then(|wiring| resolve_pane_target(wiring.ports(), &pane, profile))
+            .and_then(|wiring| resolve(wiring.ports(), &pane, profile))
             .map_err(|error| routing_stop(&error))?,
     };
     Ok(Routed {
@@ -261,7 +285,7 @@ pub fn route_target(
 
 /// A routing error as the prompt verbs print it (they have no envelope): its message,
 /// naming its stable code when it is a refusal, and the exit code of its class.
-fn routing_stop(error: &PaneError) -> Stop {
+pub(crate) fn routing_stop(error: &PaneError) -> Stop {
     let (code, text) = (error.code(), error.to_string());
     let class = class_of(code);
     let message = if class == ErrorClass::Refusal {
@@ -303,18 +327,35 @@ pub fn resolve_pane_target(
     pane: &str,
     profile: Option<&str>,
 ) -> Result<String, PaneError> {
+    let record = resolve_pane_record(ports, pane, profile)?;
+    session_of_record(&record)
+}
+
+/// [`resolve_pane_target`]'s checks, answering the record they passed (#831: `interrupt` and
+/// `answer` act on the pane's harness by its kind). The record has a session of record.
+pub fn resolve_pane_record(
+    ports: Ports<'_>,
+    pane: &str,
+    profile: Option<&str>,
+) -> Result<Pane, PaneError> {
     let name = PaneName::parse(pane)?;
     let profile = profile.map(ProfileName::parse).transpose()?;
     let record = routed_record(ports, &name, profile.as_ref())?;
-    let Some(session) = record.session_of_record.clone() else {
-        return Err(PaneError::SessionNotFound {
-            what: format!("{name} has no session of record"),
-        });
-    };
+    session_of_record(&record)?;
     match pane_state_refusal(&record) {
         Some(refusal) => Err(refusal),
-        None => Ok(session),
+        None => Ok(record),
     }
+}
+
+/// The session of record of `record`: `session-not-found`, naming the pane, when it has none.
+pub(crate) fn session_of_record(record: &Pane) -> Result<String, PaneError> {
+    record
+        .session_of_record
+        .clone()
+        .ok_or_else(|| PaneError::SessionNotFound {
+            what: format!("{} has no session of record", record.name),
+        })
 }
 
 /// The record of `name`: with a profile, the one the profile scope answers (it refuses

@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use holler_adapter_opencode::tui::attach_port;
 use holler_adapter_opencode::{OpenCodeHarness, AGENT_UNUSABLE};
 use holler_pane::ports::Activity;
-use holler_pane::{AgentKey, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{AgentKey, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::run_harness_conformance;
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
@@ -75,14 +75,29 @@ fn ac13_create_list_attach_switch_report_and_abort() {
     rig.serve(0);
     let (a, b) = (rig.create(0), rig.create(0));
     let p0 = rig.ports[0];
-    let listed = rig.harness.list_sessions(p0).unwrap();
+    let listed = rig
+        .harness
+        .list_sessions(&HarnessEndpoint::Port(p0))
+        .unwrap();
     assert!(listed.contains(&a) && listed.contains(&b), "{listed:?}");
     let pane0 = &rig.panes[0];
-    assert_eq!(rig.harness.attach_tui(pane0, p0, &a), Ok(()));
-    assert_eq!(rig.harness.shown_session(pane0), Ok(Some(a.clone())));
+    assert_eq!(
+        rig.harness
+            .attach_tui(pane0, &HarnessEndpoint::Port(p0), &a),
+        Ok(())
+    );
+    assert_eq!(
+        rig.harness
+            .shown_session(pane0, &HarnessEndpoint::Port(rig.ports[0])),
+        Ok(Some(a.clone()))
+    );
     assert_eq!(rig.harness.select_session(pane0, &b), Ok(()));
-    assert_eq!(rig.harness.shown_session(pane0), Ok(Some(b)));
-    assert_eq!(rig.harness.abort(p0, &a), Ok(()));
+    assert_eq!(
+        rig.harness
+            .shown_session(pane0, &HarnessEndpoint::Port(rig.ports[0])),
+        Ok(Some(b))
+    );
+    assert_eq!(rig.harness.abort(&HarnessEndpoint::Port(p0), &a), Ok(()));
 }
 
 // ---- AC 14: a deleted session under a TUI ----
@@ -98,8 +113,15 @@ fn ac14_a_deleted_session_under_a_tui_is_reported_not_hidden() {
     let p0 = rig.ports[0];
     let a = rig.create(0);
     let pane0 = rig.panes[0].clone();
-    assert_eq!(rig.harness.attach_tui(&pane0, p0, &a), Ok(()));
-    let before = rig.harness.list_sessions(p0).unwrap();
+    assert_eq!(
+        rig.harness
+            .attach_tui(&pane0, &HarnessEndpoint::Port(p0), &a),
+        Ok(())
+    );
+    let before = rig
+        .harness
+        .list_sessions(&HarnessEndpoint::Port(p0))
+        .unwrap();
     let deleted = raw(p0, "DELETE", &format!("/session/{a}"), None);
     assert_eq!(deleted.status, 200, "raw DELETE /session/:id");
     assert_eq!(
@@ -112,7 +134,10 @@ fn ac14_a_deleted_session_under_a_tui_is_reported_not_hidden() {
         "0",
         "the TUI still runs"
     );
-    let after = rig.harness.list_sessions(p0).unwrap();
+    let after = rig
+        .harness
+        .list_sessions(&HarnessEndpoint::Port(p0))
+        .unwrap();
     assert!(!after.contains(&a), "{after:?}");
     assert!(
         after.iter().all(|id| before.contains(id)),
@@ -134,13 +159,17 @@ fn ac15_a_frozen_server_only_affects_calls_to_that_server() {
     let [p0, p1] = rig.ports;
     let a = rig.create(0);
     let pane0 = rig.panes[0].clone();
-    assert_eq!(rig.harness.attach_tui(&pane0, p0, &a), Ok(()));
+    assert_eq!(
+        rig.harness
+            .attach_tui(&pane0, &HarnessEndpoint::Port(p0), &a),
+        Ok(())
+    );
     assert!(signal_group(pid0, "STOP"), "SIGSTOP the server's group");
     let timeouts = rig.config.timeouts;
-    let (health, took) = timed(|| rig.harness.health(p0));
+    let (health, took) = timed(|| rig.harness.health(&HarnessEndpoint::Port(p0)));
     assert_eq!(health, Ok(false), "health of a frozen server");
     assert!(took < timeouts.health + SLACK, "health took {took:?}");
-    let (created, took) = timed(|| rig.harness.create_session(p0));
+    let (created, took) = timed(|| rig.harness.create_session(&HarnessEndpoint::Port(p0)));
     assert_eq!(
         created,
         Err(PaneError::Timeout {
@@ -148,13 +177,20 @@ fn ac15_a_frozen_server_only_affects_calls_to_that_server() {
         })
     );
     assert!(took < timeouts.call + SLACK, "create_session took {took:?}");
-    assert_eq!(rig.harness.health(p1), Ok(true), "the other server");
+    assert_eq!(
+        rig.harness.health(&HarnessEndpoint::Port(p1)),
+        Ok(true),
+        "the other server"
+    );
     assert!(
-        rig.harness.create_session(p1).is_ok(),
+        rig.harness
+            .create_session(&HarnessEndpoint::Port(p1))
+            .is_ok(),
         "the other server creates"
     );
     assert_eq!(
-        rig.harness.shown_session(&pane0),
+        rig.harness
+            .shown_session(&pane0, &HarnessEndpoint::Port(rig.ports[0])),
         Ok(Some(a)),
         "the TUI keeps its screen"
     );
@@ -176,7 +212,7 @@ fn ac16_a_killed_server_only_affects_calls_to_that_server() {
     let (health, took) = timed(|| {
         let until = Instant::now() + Duration::from_secs(1);
         loop {
-            let health = rig.harness.health(p0);
+            let health = rig.harness.health(&HarnessEndpoint::Port(p0));
             if health == Ok(false) || Instant::now() >= until {
                 return health;
             }
@@ -188,13 +224,16 @@ fn ac16_a_killed_server_only_affects_calls_to_that_server() {
         took < Duration::from_secs(1) + SLACK,
         "health took {took:?}"
     );
-    let (created, took) = timed(|| rig.harness.create_session(p0));
+    let (created, took) = timed(|| rig.harness.create_session(&HarnessEndpoint::Port(p0)));
     unavailable(created, "create_session on a killed server");
     assert!(
         took < Duration::from_secs(1),
         "create_session took {took:?}"
     );
-    let listed = rig.harness.list_sessions(p1).unwrap();
+    let listed = rig
+        .harness
+        .list_sessions(&HarnessEndpoint::Port(p1))
+        .unwrap();
     assert!(listed.contains(&a), "one shared data directory: {listed:?}");
 }
 
@@ -232,7 +271,7 @@ fn ac17_abort_of_a_busy_session_stops_it() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    let (aborted, took) = timed(|| rig.harness.abort(p0, &a));
+    let (aborted, took) = timed(|| rig.harness.abort(&HarnessEndpoint::Port(p0), &a));
     assert_eq!(aborted, Ok(()));
     assert!(took < Duration::from_secs(1), "abort took {took:?}");
     assert!(
@@ -256,7 +295,8 @@ fn ac18_raw_opencode_pins_what_the_adapter_hides() {
     // (2) No TUI is attached to this fresh server.
     for (pane, session) in PANES.iter().zip(SESSIONS) {
         assert_eq!(
-            rig.harness.shown_session(&PaneId::new(*pane)),
+            rig.harness
+                .shown_session(&PaneId::new(*pane), &HarnessEndpoint::Port(rig.ports[0])),
             Ok(None),
             "{pane}"
         );
@@ -353,7 +393,11 @@ fn ac19a_a_prefix_of_a_session_name_never_reaches_its_pane() {
     let p0 = rig.ports[0];
     let (a, b) = (rig.create(0), rig.create(0));
     let pane0 = rig.panes[0].clone();
-    assert_eq!(rig.harness.attach_tui(&pane0, p0, &a), Ok(()));
+    assert_eq!(
+        rig.harness
+            .attach_tui(&pane0, &HarnessEndpoint::Port(p0), &a),
+        Ok(())
+    );
     let pid = rig.pane_format(SESSIONS[0], "#{pane_pid}");
     // `demo` is a prefix of `demo-c1r1`; no session `demo` exists.
     let mut config = rig.config.clone();
@@ -364,11 +408,18 @@ fn ac19a_a_prefix_of_a_session_name_never_reaches_its_pane() {
     ]);
     let prefixed = OpenCodeHarness::new(config);
     let p3 = PaneId::new("w9:p3");
-    assert_eq!(prefixed.shown_session(&p3), Ok(None));
-    unavailable(prefixed.select_session(&p3, &b), "select_session(w9:p3)");
-    unavailable(prefixed.attach_tui(&p3, p0, &b), "attach_tui(w9:p3)");
     assert_eq!(
-        rig.harness.shown_session(&pane0),
+        prefixed.shown_session(&p3, &HarnessEndpoint::Port(rig.ports[0])),
+        Ok(None)
+    );
+    unavailable(prefixed.select_session(&p3, &b), "select_session(w9:p3)");
+    unavailable(
+        prefixed.attach_tui(&p3, &HarnessEndpoint::Port(p0), &b),
+        "attach_tui(w9:p3)",
+    );
+    assert_eq!(
+        rig.harness
+            .shown_session(&pane0, &HarnessEndpoint::Port(rig.ports[0])),
         Ok(Some(a)),
         "pane 0 still shows A"
     );
@@ -457,9 +508,14 @@ fn agent_default_reaches_the_first_message() {
     rig.serve_with(0, &spec("plan"));
     rig.serve(1);
     let [p0, p1] = rig.ports;
-    assert_eq!(rig.harness.verify_serving(p0, &spec("plan")), Ok(()));
+    assert_eq!(
+        rig.harness
+            .verify_serving(&HarnessEndpoint::Port(p0), &spec("plan")),
+        Ok(())
+    );
     let (code, message) = refusal(
-        rig.harness.verify_serving(p1, &spec("plan")),
+        rig.harness
+            .verify_serving(&HarnessEndpoint::Port(p1), &spec("plan")),
         "a server with no agent",
     );
     assert_eq!(code, AGENT_UNUSABLE.as_str());
@@ -510,7 +566,11 @@ fn verify_serving_refuses_a_subagent_a_hidden_agent_and_an_unknown_key() {
     ] {
         let mut rig = Rig::start();
         rig.serve_with(0, &spec(key));
-        let (code, message) = refusal(rig.harness.verify_serving(rig.ports[0], &spec(key)), key);
+        let (code, message) = refusal(
+            rig.harness
+                .verify_serving(&HarnessEndpoint::Port(rig.ports[0]), &spec(key)),
+            key,
+        );
         assert_eq!(code, AGENT_UNUSABLE.as_str(), "{key}");
         assert!(message.contains(reason), "{key}: {message:?}");
     }
@@ -529,12 +589,19 @@ fn send_prompt_queues_a_turn_and_session_activity_follows_it() {
     rig.serve(0);
     let p0 = rig.ports[0];
     let s = rig.create(0);
-    assert_eq!(rig.harness.send_prompt(p0, &s, "hello"), Ok(()));
+    assert_eq!(
+        rig.harness
+            .send_prompt(&HarnessEndpoint::Port(p0), &s, "hello"),
+        Ok(())
+    );
     observed("the turn in /session/status", || {
         let status = json_of(&raw(p0, "GET", "/session/status", None));
         status.get(&s).is_some().then_some(())
     });
-    assert_eq!(rig.harness.session_activity(p0, &s), Ok(Activity::Busy));
+    assert_eq!(
+        rig.harness.session_activity(&HarnessEndpoint::Port(p0), &s),
+        Ok(Activity::Busy)
+    );
     raw_abort(p0, &s);
     observed("the turn's assistant message completed", || {
         messages(p0, &s)
@@ -543,10 +610,10 @@ fn send_prompt_queues_a_turn_and_session_activity_follows_it() {
             .then_some(())
     });
     let until = Instant::now() + rig.config.timeouts.settle;
-    let mut activity = rig.harness.session_activity(p0, &s);
+    let mut activity = rig.harness.session_activity(&HarnessEndpoint::Port(p0), &s);
     while activity != Ok(Activity::Idle) && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(100));
-        activity = rig.harness.session_activity(p0, &s);
+        activity = rig.harness.session_activity(&HarnessEndpoint::Port(p0), &s);
     }
     assert_eq!(activity, Ok(Activity::Idle), "once the turn has ended");
 }

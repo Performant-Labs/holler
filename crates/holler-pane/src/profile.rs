@@ -362,9 +362,19 @@ pub trait ProfileStore: Send + Sync {
     /// The change log of the profile `name`, oldest first.
     fn log(&self, name: &ProfileName) -> Result<Vec<ProfileLogEntry>, PaneError>;
 
-    /// PROPOSED (#665): rename `from` to `to` if `from` is still at
-    /// `expected_generation`. Until #665 is confirmed an implementation answers
-    /// `not-implemented`.
+    /// Rename `from` to `to` if `from` is still at `expected_generation` (#665): the
+    /// record moves to `to`'s slug at the next generation and keeps its `created` and
+    /// specs; the old name's log gets one `deleted` entry and the new name's one
+    /// `renamed` entry; the feed gets the deletion of the old name, then the put of the
+    /// new one (one put when the slug does not change). `from` not found is
+    /// `profile-not-found` and `to`'s slug held by another profile is `profile-exists`,
+    /// whatever the generation; `to` equal to the stored name is `usage`. Returns the
+    /// renamed record.
+    ///
+    /// Sent to the hub as `profile/rename` (the CLI's client), it also moves every member
+    /// pane to `to` in the same transaction (ADR-0021 section 8). A store that holds no
+    /// pane registry (the test kit's fake, the hub's registry called in process) renames
+    /// the record only.
     fn rename(
         &self,
         from: &ProfileName,

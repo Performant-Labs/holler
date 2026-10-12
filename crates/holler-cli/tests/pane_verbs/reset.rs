@@ -7,7 +7,7 @@ use std::sync::Arc;
 use holler_pane::findings::FindingKind as K;
 use holler_pane::ports::Activity;
 use holler_pane::reconcile::Report;
-use holler_pane::{HarnessPort, PaneError};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError};
 use holler_pane_testkit::harness::{HarnessOp as H, Quirk};
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
@@ -34,7 +34,9 @@ fn one_pane() -> (Rig, ()) {
 
 /// The sessions on the server at `port`.
 fn sessions(rig: &Rig, port: u16) -> Vec<String> {
-    rig.harness.list_sessions(port).expect("list the sessions")
+    rig.harness
+        .list_sessions(&HarnessEndpoint::Port(port))
+        .expect("list the sessions")
 }
 
 /// The one session on `P`'s server that `before` does not have: the one the run created.

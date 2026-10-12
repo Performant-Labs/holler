@@ -22,7 +22,7 @@ use holler_adapter_opencode::tui::{respawn_args, tui_argv};
 use holler_adapter_opencode::{
     OpenCodeConfig, OpenCodeHarness, ProcessEnv, Timeouts, TmuxConfig, TmuxSocket,
 };
-use holler_pane::{HarnessPort, PaneError, PaneId, PaneName};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName};
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
 use serde_json::{json, Value};
@@ -196,7 +196,8 @@ fn ac28a_shown_session_reads_a_live_attach_titled_with_an_id_in_one_query() {
     let rig = rig();
     rig.showing("OC | ses_0123456789abcdefABCDEFghij");
     assert_eq!(
-        rig.harness.shown_session(&pane(PANE)),
+        rig.harness
+            .shown_session(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port)),
         Ok(Some("ses_0123456789abcdefABCDEFghij".to_owned()))
     );
     assert_eq!(rig.fake.calls(), Some(vec![query()]));
@@ -231,7 +232,12 @@ fn ac28b_shown_session_is_none_whenever_it_cannot_tell() {
     for (why, arrange) in cases {
         let rig = rig();
         arrange(&rig);
-        assert_eq!(rig.harness.shown_session(&pane(PANE)), Ok(None), "{why}");
+        assert_eq!(
+            rig.harness
+                .shown_session(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port)),
+            Ok(None),
+            "{why}"
+        );
     }
 }
 
@@ -243,7 +249,11 @@ fn ac28c_another_tmux_failure_is_unavailable_with_its_first_line_only() {
         1,
         "protocol version mismatch (client 8, server 7)\nsecond line\n",
     );
-    let message = unavailable(rig.harness.shown_session(&pane(PANE)), "a tmux failure");
+    let message = unavailable(
+        rig.harness
+            .shown_session(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port)),
+        "a tmux failure",
+    );
     assert!(
         message.contains("protocol version mismatch (client 8, server 7)"),
         "{message:?}"
@@ -256,7 +266,11 @@ fn ac28c_another_tmux_failure_is_unavailable_with_its_first_line_only() {
 #[test]
 fn ac28d_a_tmux_that_cannot_run_is_unavailable_naming_it() {
     let rig = rig_with(quick(), PathBuf::from("/nonexistent/hlr642-tmux"));
-    let message = unavailable(rig.harness.shown_session(&pane(PANE)), "a missing tmux");
+    let message = unavailable(
+        rig.harness
+            .shown_session(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port)),
+        "a missing tmux",
+    );
     assert!(message.contains("/nonexistent/hlr642-tmux"), "{message:?}");
 }
 
@@ -264,7 +278,8 @@ fn ac28d_a_tmux_that_cannot_run_is_unavailable_naming_it() {
 fn ac28e_an_unknown_pane_is_the_resolvers_error_and_runs_no_tmux() {
     let rig = rig();
     assert_eq!(
-        rig.harness.shown_session(&pane(OTHER)),
+        rig.harness
+            .shown_session(&pane(OTHER), &HarnessEndpoint::Port(rig.stub.port)),
         Err(PaneError::PaneNotFound {
             what: OTHER.to_owned()
         })
@@ -387,7 +402,8 @@ fn ac30a_attach_keeps_the_pane_respawns_the_tui_escaped_and_confirms_by_the_titl
     let rig = attachable();
     rig.showing("OC | ses_A");
     assert_eq!(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         Ok(())
     );
     let calls = rig.fake.calls().expect("tmux was called");
@@ -434,7 +450,8 @@ fn ac30b_a_missing_tmux_session_is_unavailable_and_nothing_is_respawned() {
         .fail("set-option", 1, "no such pane: =demo-c1r1:\n");
     rig.showing("OC | ses_A");
     let message = unavailable(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         "a missing tmux session",
     );
     assert!(message.contains(PANE), "names the pane: {message:?}");
@@ -452,7 +469,8 @@ fn ac30c_a_tui_that_exits_is_unavailable_with_its_status() {
     let rig = attachable();
     rig.fake.reply("display-message", &dead(3));
     let message = unavailable(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         "a TUI that exits 3",
     );
     assert!(
@@ -471,7 +489,8 @@ fn ac30c_a_tui_that_exits_because_its_session_went_away_is_session_not_found() {
     rig.stub.json_once("GET", "/session/ses_A", 200, &known);
     rig.fake.reply("display-message", &dead(1));
     assert_eq!(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         Err(PaneError::SessionNotFound {
             what: "ses_A".to_owned()
         })
@@ -485,7 +504,8 @@ fn ac30d_a_session_reply_without_a_directory_is_unavailable_and_touches_nothing(
         .json("GET", "/session/ses_A", 200, r#"{"id":"ses_A"}"#);
     rig.showing("OC | ses_A");
     unavailable(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         "a session with no directory",
     );
     assert_eq!(rig.resolved(), 0, "the resolver is not called");
@@ -501,7 +521,8 @@ fn ac30_attach_of_an_unknown_session_is_session_not_found_and_touches_nothing() 
             .json("GET", "/session/ses_A", status, stub::NOT_FOUND);
         rig.showing("OC | ses_A");
         assert_eq!(
-            rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+            rig.harness
+                .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
             Err(PaneError::SessionNotFound {
                 what: "ses_A".to_owned()
             }),
@@ -518,7 +539,8 @@ fn ac30_an_attach_the_title_never_confirms_times_out_within_settle() {
     rig.showing("OpenCode");
     let start = Instant::now();
     assert_eq!(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         Err(PaneError::Timeout {
             op: HarnessOp::AttachTui.as_str().to_owned()
         })
@@ -538,7 +560,8 @@ fn ac30_a_tui_of_another_server_showing_the_session_does_not_confirm_the_attach(
         .reply("display-message", &live(&attach_line(other), "OC | ses_A"));
     let start = Instant::now();
     assert_eq!(
-        rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         Err(PaneError::Timeout {
             op: HarnessOp::AttachTui.as_str().to_owned()
         })
@@ -563,7 +586,8 @@ fn ac30e_each_method_past_its_deadline_times_out_with_its_own_op() {
         })
     };
     assert_eq!(
-        rig.harness.attach_tui(&p, rig.stub.port, "ses_A"),
+        rig.harness
+            .attach_tui(&p, &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
         timeout(HarnessOp::AttachTui)
     );
     assert_eq!(
@@ -571,7 +595,9 @@ fn ac30e_each_method_past_its_deadline_times_out_with_its_own_op() {
         timeout(HarnessOp::SelectSession)
     );
     assert_eq!(
-        rig.harness.shown_session(&p).map(drop),
+        rig.harness
+            .shown_session(&p, &HarnessEndpoint::Port(rig.stub.port))
+            .map(drop),
         timeout(HarnessOp::ShownSession)
     );
 }
@@ -597,10 +623,16 @@ fn ac30f_no_method_answers_not_implemented_for_any_input() {
             let answers = [
                 (
                     "attach_tui",
-                    rig.harness.attach_tui(&p, rig.stub.port, "ses_A"),
+                    rig.harness
+                        .attach_tui(&p, &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
                 ),
                 ("select_session", rig.harness.select_session(&p, "ses_A")),
-                ("shown_session", rig.harness.shown_session(&p).map(drop)),
+                (
+                    "shown_session",
+                    rig.harness
+                        .shown_session(&p, &HarnessEndpoint::Port(rig.stub.port))
+                        .map(drop),
+                ),
             ];
             for (method, answer) in answers {
                 assert!(
@@ -620,7 +652,8 @@ fn ac6_attach_to_an_unbound_port_is_unavailable_before_the_resolver() {
         |port| {
             let rig = rig();
             (
-                rig.harness.attach_tui(&pane(PANE), port, "ses_A"),
+                rig.harness
+                    .attach_tui(&pane(PANE), &HarnessEndpoint::Port(port), "ses_A"),
                 rig.resolved(),
             )
         },
@@ -650,7 +683,8 @@ fn ac11d_attach_to_a_session_reply_that_is_not_that_session_is_unavailable() {
         arrange(&rig);
         rig.showing("OC | ses_A");
         let message = unavailable(
-            rig.harness.attach_tui(&pane(PANE), rig.stub.port, "ses_A"),
+            rig.harness
+                .attach_tui(&pane(PANE), &HarnessEndpoint::Port(rig.stub.port), "ses_A"),
             why,
         );
         assert!(

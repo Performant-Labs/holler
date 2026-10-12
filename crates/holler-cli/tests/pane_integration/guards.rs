@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::scratch::scratch_herdr::{gate, Gate};
 use crate::scratch::{
-    binary_env, check_inside, check_pane_name, check_session, tmux_server_env, Settings,
-    PANE_PREFIX,
+    binary_env, check_herdr_session_args, check_inside, check_pane_name, check_session,
+    launch_args, tmux_server_env, Settings, PANE_PREFIX,
 };
 
 const BASE: &str = "/tmp/hlr649-abcdef";
@@ -142,6 +142,76 @@ fn the_binary_env_refuses_a_real_session_or_a_path_outside_the_directory() {
     refused(|s| s.herdr_socket = PathBuf::from("/home/u/.config/herdr/herdr.sock"));
     refused(|s| s.state_dir = PathBuf::from("/home/u/.local/state/holler"));
     refused(|s| s.oc_root = PathBuf::from("/home/u"));
+}
+
+// --- guard 4, for an argument vector (#667 A13, A's W-2) -----------------------------------
+
+const SCRATCH: &str = "holler649-0123abcd";
+
+#[test]
+fn a_herdr_session_argument_passes_only_when_it_names_the_scratch_session() {
+    let passes: [&[&str]; 4] = [
+        &["profile", "apply", "hlr649-apply-p", "--herdr-session", SCRATCH],
+        &["profile", "apply", "hlr649-apply-p", "--herdr-session=holler649-0123abcd"],
+        &["profile", "apply", "hlr649-apply-p", "--dry-run"],
+        &["pane", "launch", "hlr649-ap1", "--herdr-session", SCRATCH, "--grid", "r1c1"],
+    ];
+    for args in passes {
+        assert_eq!(check_herdr_session_args(args, SCRATCH), Ok(()), "{args:?}");
+    }
+    let refused: [&[&str]; 9] = [
+        &["profile", "apply", "p", "--herdr-session", "default"],
+        &["profile", "apply", "p", "--herdr-session", "holler649-ffffffff"],
+        &["profile", "apply", "p", "--herdr-session"],
+        &["profile", "apply", "p", "--herdr-session", "--dry-run"],
+        &["profile", "apply", "p", "--herdr-session=default"],
+        &["profile", "apply", "p", "--herdr-session="],
+        &["profile", "apply", "p", "--herdr-session=holler649-ffffffff"],
+        &["profile", "apply", "p", "--herdr-session", SCRATCH, "--herdr-session", "default"],
+        &["profile", "apply", "p", "--herdr-session=default", "--herdr-session", SCRATCH],
+    ];
+    for args in refused {
+        assert!(check_herdr_session_args(args, SCRATCH).is_err(), "{args:?} is refused");
+    }
+}
+
+// --- the launch argv (#667 A14, A's W-5) ---------------------------------------------------
+
+/// `launch_args` yields exactly the argument vector `Scratch::launch` built inline before
+/// #667 moved it (`bda1069`, `scratch/mod.rs` lines 370-396), extra flags last.
+#[test]
+fn launch_args_is_the_flag_list_launch_sent_before_the_move() {
+    let project = format!("{BASE}/oc/proj");
+    let built = launch_args(SCRATCH, &project, "hlr649-ap1", "hlr649", "r2c1", 48123, &["--agent", "plan"]);
+    let before: Vec<String> = [
+        "pane",
+        "launch",
+        "hlr649-ap1",
+        "--herdr-session",
+        SCRATCH,
+        "--project",
+        project.as_str(),
+        "--workspace",
+        "hlr649",
+        "--grid",
+        "r2c1",
+        "--model",
+        "deadend/none",
+        "--effort",
+        "medium",
+        "--ctx-soft",
+        "100000",
+        "--ctx-hard",
+        "150000",
+        "--port-policy",
+        "fixed:48123",
+        "--agent",
+        "plan",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    assert_eq!(built, before);
 }
 
 // --- guard 5: OpenCode's environment (W-1) ------------------------------------------------

@@ -13,7 +13,7 @@
 
 use std::sync::Mutex;
 
-use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::{
     harness_cases, run_harness_conformance, HarnessRig,
 };
@@ -206,19 +206,19 @@ impl HarnessPort for Mutant {
         Ok(argv)
     }
 
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
 
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
         if self.broken == Break::HealthAlwaysTrue {
             return Ok(true);
         }
-        self.inner.health(port)
+        self.inner.health(at)
     }
 
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        let id = self.inner.create_session(port)?;
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        let id = self.inner.create_session(at)?;
         if self.broken != Break::ReusesSessionId {
             return Ok(id);
         }
@@ -226,19 +226,24 @@ impl HarnessPort for Mutant {
         Ok(first.get_or_insert(id).clone())
     }
 
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
 
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
 
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        match self.inner.attach_tui(pane, port, session) {
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        match self.inner.attach_tui(pane, at, session) {
             Err(e) if self.broken == Break::AttachFallsBackToLatest && is_unknown_session(&e) => {
-                match self.inner.list_sessions(port)?.last() {
-                    Some(latest) => self.inner.attach_tui(pane, port, latest),
+                match self.inner.list_sessions(at)?.last() {
+                    Some(latest) => self.inner.attach_tui(pane, at, latest),
                     None => Err(e),
                 }
             }
@@ -264,8 +269,12 @@ impl HarnessPort for Mutant {
         result
     }
 
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
 }
 

@@ -8,7 +8,8 @@ use holler_cli::output::Format;
 use holler_pane::findings::FindingKind as K;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
-    Argv, EnvVarName, HarnessPort, PaneError, PaneId, PaneName, ProfileName, ServeSpec,
+    Argv, EnvVarName, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ProfileName,
+    ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fault::Fault;
@@ -104,7 +105,7 @@ fn another_profiles_session_of_record_is_not_a_stray() {
     let q_session = rig.live(Q_PANE).session.clone();
     let listed = rig
         .harness
-        .list_sessions(rig.live(P_PANE).port)
+        .list_sessions(&HarnessEndpoint::Port(rig.live(P_PANE).port))
         .expect("list");
     assert!(
         listed.contains(&q_session),
@@ -474,10 +475,10 @@ impl HarnessPort for HealthGate<'_> {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.0 += 1;
@@ -496,25 +497,34 @@ impl HarnessPort for HealthGate<'_> {
         }
         state.0 -= 1;
         drop(state);
-        self.inner.health(port)
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
 }
 

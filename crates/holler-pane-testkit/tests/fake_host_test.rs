@@ -61,6 +61,10 @@ fn a_wedged_host_times_out_every_method() {
     );
     assert_eq!(host.stop_owned(&a), Err(timeout("host.stop_owned")));
     assert_eq!(host.ps(&a), Err(timeout("host.ps")));
+    assert_eq!(
+        host.foreground_commands(&a),
+        Err(timeout("host.foreground_commands"))
+    );
 
     host.faults().set(None);
     assert_eq!(
@@ -80,6 +84,10 @@ fn host_op_names_are_port_dot_method() {
     assert_eq!(HostOp::Run.as_str(), "host.run");
     assert_eq!(HostOp::StopOwned.as_str(), "host.stop_owned");
     assert_eq!(HostOp::Ps.as_str(), "host.ps");
+    assert_eq!(
+        HostOp::ForegroundCommands.as_str(),
+        "host.foreground_commands"
+    );
 }
 
 // --- the call log ---
@@ -297,4 +305,68 @@ fn the_fake_host_is_send_and_sync() {
     fn send_sync<T: Send + Sync>() {}
     send_sync::<FakeHost>();
     send_sync::<HostOp>();
+}
+
+// --- foreground_commands (#835) ---
+
+/// The fake names each process `run` started by the basename of its argv's first element,
+/// as tmux reports a pane's command, in the order they started; a fresh session (the fake
+/// has no shell) names nothing, and another session's processes are not named.
+#[test]
+fn foreground_commands_names_each_process_by_its_programs_basename() {
+    let (host, a) = host_with("demo-c1r1");
+    assert_eq!(host.foreground_commands(&a), Ok(vec![]));
+    host.run(&a, "/srv/demo", &argv(&["/opt/demo/bin/claude", "--resume"]))
+        .unwrap();
+    host.run(&a, "/srv/demo", &argv(&["bash", "-c", "oc-holler"]))
+        .unwrap();
+    let b = name("demo-c2r1");
+    host.ensure_session(&b, "/srv/demo").unwrap();
+    host.run(&b, "/srv/demo", &argv(&["opencode", "serve"]))
+        .unwrap();
+    assert_eq!(
+        host.foreground_commands(&a),
+        Ok(vec!["claude".to_owned(), "bash".to_owned()])
+    );
+    assert_eq!(host.foreground_commands(&b), Ok(vec!["opencode".to_owned()]));
+}
+
+/// A process that exits, `stop_owned` and an ended session each take the names with the
+/// processes.
+#[test]
+fn foreground_commands_follow_the_processes_out() {
+    let (host, a) = host_with("demo-c1r1");
+    host.run(&a, "/srv/demo", &argv(&["claude"])).unwrap();
+    let first = host.ps(&a).unwrap()[0];
+    host.run(&a, "/srv/demo", &argv(&["sleep", "30"])).unwrap();
+    host.exit_process(&a, first).unwrap();
+    assert_eq!(host.foreground_commands(&a), Ok(vec!["sleep".to_owned()]));
+    host.stop_owned(&a).unwrap();
+    assert_eq!(host.foreground_commands(&a), Ok(vec![]));
+    host.end_session(&a).unwrap();
+    assert_eq!(host.foreground_commands(&a), Err(not_found(&a)));
+}
+
+/// A fault queued for `foreground_commands` fails that call only, and the call is logged.
+#[test]
+fn a_fault_on_foreground_commands_fails_that_call_only() {
+    let (host, a) = host_with("demo-c1r1");
+    host.run(&a, "/srv/demo", &argv(&["claude"])).unwrap();
+    let unavailable = PaneError::Unavailable {
+        what: "made-up".to_owned(),
+    };
+    host.faults()
+        .fail_next(HostOp::ForegroundCommands, unavailable.clone());
+    assert_eq!(host.ps(&a).map(|pids| pids.len()), Ok(1));
+    assert_eq!(host.foreground_commands(&a), Err(unavailable));
+    assert_eq!(host.foreground_commands(&a), Ok(vec!["claude".to_owned()]));
+    let calls = host.faults().calls();
+    assert_eq!(
+        calls[calls.len() - 3..],
+        [
+            HostOp::Ps,
+            HostOp::ForegroundCommands,
+            HostOp::ForegroundCommands
+        ]
+    );
 }

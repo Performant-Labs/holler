@@ -225,7 +225,7 @@ pub(crate) fn member(name: &str, profile: &str) -> Pane {
 /// is plain text, as a spec's pane is, so it need not be a valid pane name.
 pub(crate) fn matching_spec(name: &str) -> ProfileSpec {
     let mut spec = sample_spec(name);
-    spec.harness.port_policy = fixed_port_policy(pane("demo-c1r1").harness.port);
+    spec.harness.port_policy = fixed_port_policy(pane("demo-c1r1").harness.port.unwrap());
     spec
 }
 

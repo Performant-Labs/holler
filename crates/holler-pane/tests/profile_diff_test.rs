@@ -323,7 +323,7 @@ fn field_values_print_for_a_person() {
 #[test]
 fn diff_compares_port_policy_as_the_live_port() {
     let mut p = pane();
-    p.harness.port = 48101;
+    p.harness.port = Some(48101);
     let mut spec = spec_from_pane(&p);
     spec.harness.port_policy = "fixed:48100".to_owned();
     assert_eq!(

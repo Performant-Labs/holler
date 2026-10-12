@@ -120,9 +120,11 @@ pane launch | demo-c1r1 --herdr-session scratch --project /srv/demo --workspace 
 pane launch | demo-c1r1 --env ALPHA_TOKEN --env BETA_URL --ctx-soft 100000 --ctx-hard 150000 --port-policy fixed:48100
 pane launch | demo-c1r1 --command-arg opencode --command-arg serve --check-arg curl --check-arg http://127.0.0.1:1/health --expect ok --expect ready
 pane launch | demo-c1r1 --command-json [] --check-json [] --format=json
+pane launch | demo-c1r1 --harness claude --port-policy none
 pane relaunch | demo-c1r1
 pane relaunch | demo-c1r1 --profile demo --spec-only --grid c1r2
 pane relaunch | demo-c1r1 --command-json [] --check-json []
+pane relaunch | demo-c1r1 --harness opencode
 
 # #645
 pane switch | demo-c1r1 ses_0001
@@ -184,10 +186,12 @@ profile apply | Demo --dry-run --format=json
 profile apply | "Some Profile" --take-over --herdr-session scratch
 
 # #665
-# (proposed: the operator confirms #665 first)
-profile rename |
-profile export |
-profile import |
+profile rename | Demo Renamed
+profile rename | "Some Profile" "Other Name" --format=json
+profile export | Demo
+profile export | Demo --out /tmp/demo.json --json
+profile import | /tmp/demo.json
+profile import | /tmp/demo.json --name Copy --format=json
 
 # --- regression: the --pane redesign must not break the SESSION forms ----------
 say | io/alpha --parts-file f

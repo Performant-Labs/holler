@@ -21,8 +21,15 @@
 //! The sessions have neutral names (`demo-c1r1`, `demo-c2r1`), and they and every `run`
 //! work in the system's temporary directory, which exists on any machine. The command is
 //! `sleep 30`: harmless if a real adapter runs it, and the case's guard stops it.
+//!
+//! `foreground_commands` (#835) answers command names, read as tmux reads them, so its case
+//! keeps two rules of a real session (brief R2-8): it never asserts that the list is empty
+//! (the session's shell is listed too), and it polls for the name within a bound, because
+//! right after `run` the foreground process can still be the adapter's `env`.
 
 use std::env;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use holler_pane::{Argv, HostPort, PaneName};
 
@@ -38,9 +45,14 @@ const USAGE: &str = "usage";
 const C1: &str = "demo-c1r1";
 const C2: &str = "demo-c2r1";
 
+/// How long the `foreground_commands` case waits for the name of what `run` started, and
+/// how often it reads again meanwhile.
+const SETTLE: Duration = Duration::from_secs(2);
+const SETTLE_POLL: Duration = Duration::from_millis(20);
+
 /// The suite, in order: the one table that the runner iterates and [`host_cases`]
 /// lists.
-const CASES: [(&str, Case); 9] = [
+const CASES: [(&str, Case); 10] = [
     (
         "ps-of-missing-session-is-pane-not-found",
         ps_of_missing_session_is_pane_not_found,
@@ -65,6 +77,10 @@ const CASES: [(&str, Case); 9] = [
         stop_owned_leaves_other_sessions,
     ),
     ("ps-lists-only-its-session", ps_lists_only_its_session),
+    (
+        "foreground-commands-names-what-run-started",
+        foreground_commands_names_what_run_started,
+    ),
 ];
 
 /// The ids of the cases [`run_host_conformance`] runs, in the order it runs them.
@@ -201,6 +217,38 @@ fn ps_lists_only_its_session(host: &dyn HostPort) -> Result<(), String> {
     started(host, &a)?;
     let in_b = started(host, &b)?;
     lacks("ps(a)", &ps(host, &a)?, in_b)
+}
+
+/// Case 10 (#835): `foreground_commands` of a session never ensured is `pane-not-found`, as
+/// `ps` answers; after `run` of `sleep 30`, the session's list names `sleep` within
+/// [`SETTLE`]. Only the name is asserted, never the whole list: a real session also lists
+/// its shell.
+fn foreground_commands_names_what_run_started(host: &dyn HostPort) -> Result<(), String> {
+    let missing = succeeds("PaneName::parse", PaneName::parse(C2))?;
+    expect_code(
+        "foreground_commands of a session never ensured",
+        host.foreground_commands(&missing),
+        NOT_FOUND,
+    )?;
+    let a = ensured(host, C1)?;
+    started(host, &a)?;
+    let deadline = Instant::now() + SETTLE;
+    loop {
+        let names = succeeds(
+            &format!("foreground_commands({a})"),
+            host.foreground_commands(&a),
+        )?;
+        if names.iter().any(|name| name == "sleep") {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "foreground_commands({a}) never named `sleep` within {SETTLE:?} of \
+                 run(sleep 30): {names:?}"
+            ));
+        }
+        thread::sleep(SETTLE_POLL);
+    }
 }
 
 // --- helpers ---

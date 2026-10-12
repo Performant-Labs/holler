@@ -266,9 +266,17 @@ pub const FEATURES: &[&str] = &[
     "opencode-http",
 ];
 
-/// The **harness** id vocabulary (docs §9). Only `opencode` is a v2 adapter;
-/// the rest are reserved for future adapters (a new harness is a new config
-/// row + a new id, not a protocol bump).
+/// The **harness** id vocabulary (docs §9, where only `opencode` is a v2
+/// adapter). A new harness is a new config row + a new id, not a protocol bump.
+/// Two of these ids also name a pane's harness (`holler_pane::pane::HarnessKind`):
+/// `opencode` and `claude`.
+///
+/// The id `claude` has two uses that do not meet (ADR-0021 section 15, item 1):
+/// a **pane** harness `claude` is Claude Code's interactive CLI and is read only
+/// by the pane engine (`HarnessKind::Claude`, #831); a **body** harness `claude`
+/// is the ACP bridge (ADR 0012) and is read only by `holler-body`. `HarnessKind`
+/// is a second list beside this one, and a test (`holler-pane`'s
+/// `tests/rework_test.rs`) pins every `HarnessKind` serde name to this list.
 pub const HARNESS_IDS: &[&str] = &[
     "opencode", "claude", "codex", "grok", "hermes", "pi", "cursor", "copilot", "droid", "kimi",
     "qwen", "kilo", "goose",
