@@ -182,3 +182,62 @@ brief, the research note's "Decisions").
   - Assertion counts are equal between `d6ae539` and HEAD in eight migrated test files.
   - `FakeHarnesses` wraps `holler_pane::HarnessRouter` (`harnesses.rs:22`).
   - `evidence.md` gained one T entry (`error.rs:239-245`).
+
+## A, anti-duplication gate: 2026-10-11T21:17-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 9 `warn` findings (`docs/handoffs/831/handoff-A-dup.md`). Diff `d6ae539..d137a1d`.
+  - **None of the ten parallel paths that handoff-A's Reuse map listed exists:**
+    - one router (`HarnessRouter`, built by the wiring and wrapped by `FakeHarnesses`);
+    - one relaunch sequence (`relaunch_on` and `relaunch_recorded`, called by switch, reset, interrupt and doctor's
+      repair), and reconcile does not import `tx_launch`;
+    - one wait loop (`wait_until`);
+    - one rule each for the port policy (`port_for`), the harness check (`check_harness_unchanged`), the login variables
+      and the command name;
+    - the `Recording` forwarding pin, extended;
+    - no per-rig `FakeClaude` linker;
+    - each code declared where it is raised.
+  - **The warns:**
+    1. `parse_harness` repeats the import's `harness_kind`, and `HarnessKind::as_str` is not pinned to the serde names.
+    2. The single-process reconcile chain copies the server chain's mismatch and `--fix` skeleton, the orchestrator skip
+       predicate included.
+    3. `relaunch_recorded`'s `Launched.pane` is unwrapped three times, twice with the same message.
+    4. `interrupt_cmd::route` copies `route_target_by`'s `--pane` arm.
+    5. `holler-adapter-claude/src/exec.rs` is a third runner copy, by the documented #696 pattern.
+    6. The three old `LinkedHost`s keep their own linking, and two docs overstate "no rig writes a linker".
+    7. `wiring/env.rs` spells `"claude"` beside `CLAUDE_CODE_COMMAND`.
+    8. The #835 copy is not exactly "identical hunks" (two doc lines and the constant's position), and `origin/main`
+       moved to `0f5835e`, whose trial merge conflicts only in `CHANGELOG.md`.
+    9. `switch.rs` is at 893 lines and `launch/rig.rs` at 852.
+- **Assumed:**
+  - The three un-migrated OpenCode rigs follow the brief's no-edited-assertion, no-changed-rig-shape rule, so they are a
+    doc fix or a follow-up, not drift.
+  - `ClaudeOp`'s repeat of `HarnessOp` is by design: the map said "`HarnessOp`-style ops", and T's RED named it.
+- **Hedged:**
+  - W2 is close to the line between a sibling chain and a near-copy. I rated it `warn` because the plan's W3 asked for
+    a distinct single-process chain, and F's chain reuses the parent's helpers (`observe_screen`,
+    `check_session_of_record`, `record`, `summary`).
+- **Evidence:**
+  - Read in full:
+    - `ports.rs` (diff), `ports/{process,router}.rs` and `pane.rs` (diff);
+    - `tx_launch.rs` and `tx_launch/{process,rules,undo,budget}.rs`, `tx_launch/server.rs` (diff) and `tx_switch.rs`
+      (diff);
+    - `reconcile.rs` (diff), `reconcile/observe.rs` and `reconcile/observe/process.rs`;
+    - `tx_apply` (diff), `profile_snapshot.rs`, `findings.rs`, `unmanaged.rs` and `import/*` (diff);
+    - the adapter's `lib.rs`, `argv.rs`, `agents.rs`, `inbox.rs`, `seams.rs`, `exec.rs` and `Cargo.toml`;
+    - the CLI's `wiring.rs`, `wiring/{bind,env}.rs`, `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs` and
+      `pane/{args,doctor,get,launch}.rs` (diffs), and `pane/relaunch.rs`;
+    - the test kit's `harnesses.rs`, `harness.rs` (diff), `claude.rs` (head) and `conformance/claude.rs`;
+    - the rigs `pane_claude/rig.rs`, `launch/rig.rs`, `apply/rig.rs` and `pane_integration/bind.rs`.
+  - Greps:
+    - every `impl HarnessPort` and `impl HostPort`;
+    - the string literals `"claude"` and `"opencode"`;
+    - every `HarnessEndpoint` construction, and the raw `harness.port` and `pid` reads;
+    - `thread::sleep` in `holler-pane` and the adapters;
+    - `port_of_policy` and `port_for` callers, `relaunch_recorded` callers and "stored no record".
+  - Diffed against `issue-835-implementation`: the host adapter, `FakeHost`, the host suite and the forwards are
+    identical; the doc lines of `pane.rs` and `ports.rs` differ.
+  - Ran:
+    - `diff` of the OpenCode and Claude `exec.rs` files;
+    - `gh issue view 696`;
+    - `git merge-tree` of HEAD with `origin/main` `0f5835e`: a conflict in `CHANGELOG.md` only;
+    - `wc -l` of every touched `.rs` file.
