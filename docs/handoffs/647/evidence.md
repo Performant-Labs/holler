@@ -194,3 +194,38 @@ Source facts in **unchanged** code that F's change (Phase 5) relies on. Line num
   > //! - **Exit codes.** A pass that completes exits 0, with or without findings: findings are
   > //!   kinds in the report, not errors (ADR-0021 section 9), and an envelope cannot carry data
   > ```
+
+- **Fact (added by T, Phase 6):** a scratch set's OpenCode root is laid out with only the rig's dead-end configuration, which names no agent, so a scratch `--pure` server lists only OpenCode's own agents and `agent-cannot-dispatch` cannot fire there (rule 5); that is why `assert_end_state` (acceptance 18) admits only one `unattached` per scratch pane.
+  **Source:** `crates/holler-cli/tests/pane_integration/scratch/mod.rs:314`; `crates/holler-adapter-opencode/tests/real_opencode/rig.rs:69-86`, `:526-531`
+  **Verbatim excerpt:**
+  > ```rust
+  >         rig::lay_out(&oc_root);
+  > ```
+  > ```rust
+  > pub const CONFIG: &str = r#"{
+  >   "$schema": "https://opencode.ai/config.json",
+  >   "enabled_providers": ["deadend"],
+  >   "disabled_providers": ["opencode"],
+  >   "model": "deadend/none",
+  >   "small_model": "deadend/none",
+  >   "autoupdate": false,
+  >   "share": "disabled",
+  >   "provider": {
+  >     "deadend": {
+  >       "npm": "@ai-sdk/openai-compatible",
+  >       "name": "dead end (closed local port)",
+  >       "options": { "baseURL": "http://127.0.0.1:9/v1" },
+  >       "models": { "none": { "name": "none" } }
+  >     }
+  >   }
+  > }
+  > "#;
+  > ```
+  > ```rust
+  > pub fn lay_out(root: &Path) {
+  >     for sub in ["home", "data", "config/opencode", "state", "cache", "proj"] {
+  >         std::fs::create_dir_all(root.join(sub)).unwrap();
+  >     }
+  >     std::fs::write(root.join("config/opencode/opencode.json"), CONFIG).unwrap();
+  > }
+  > ```

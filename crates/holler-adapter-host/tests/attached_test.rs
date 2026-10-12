@@ -95,6 +95,20 @@ fn a_value_that_is_not_a_count_is_unavailable_and_quotes_nothing() {
     }
 }
 
+/// tmux prints the session's one count on every pane's line, so a listing with no line, or
+/// with lines that disagree, is not an answer: `unavailable`, never `0` or a guess.
+#[test]
+fn an_empty_listing_or_counts_that_disagree_are_unavailable() {
+    for (what, stdout) in [("no pane line", ""), ("two counts", "1\n2\n")] {
+        let fake = Fake::new(&answer(stdout, "", 0));
+        let got = host(&fake).attached_clients(&name(C1));
+        assert!(
+            matches!(got, Err(PaneError::Unavailable { .. })),
+            "{what}: {got:?}"
+        );
+    }
+}
+
 #[test]
 fn attached_clients_of_a_missing_session_is_pane_not_found() {
     for err in [

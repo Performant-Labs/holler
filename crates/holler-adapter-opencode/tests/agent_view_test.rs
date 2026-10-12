@@ -196,7 +196,9 @@ fn a_turn_the_server_says_nothing_about_is_none() {
 
 /// `can_dispatch` of an agent whose permission rules are `rules`: `Some(false)` only when the
 /// last rule whose permission is `task` or `*` and whose pattern is `*` is `deny` and no later
-/// `task` rule allows another pattern; `None` for rules of a shape the adapter does not know.
+/// rule whose permission is `task` or `*` allows another pattern or asks for it (ADR-0021
+/// section 12: `ask` lets a person allow it); `None` for rules of a shape the adapter does not
+/// know.
 #[test]
 fn the_permission_rules_decide_whether_an_agent_can_dispatch() {
     let table: Vec<(&str, Value, Option<bool>)> = vec![
@@ -246,6 +248,26 @@ fn the_permission_rules_decide_whether_an_agent_can_dispatch() {
             "deny task, then deny one subagent again",
             json!([rule("task", "*", "deny"), rule("task", "general", "deny")]),
             Some(false),
+        ),
+        (
+            "deny task, then a rule of every permission allows one subagent",
+            json!([rule("task", "*", "deny"), rule("*", "general", "allow")]),
+            Some(true),
+        ),
+        (
+            "deny task, then ask for one subagent",
+            json!([rule("task", "*", "deny"), rule("task", "general", "ask")]),
+            Some(true),
+        ),
+        (
+            "ask for every subagent",
+            json!([rule("task", "*", "ask")]),
+            Some(true),
+        ),
+        (
+            "an action the adapter does not know",
+            json!([rule("task", "*", "maybe")]),
+            None,
         ),
         (
             "an object where the list is expected (the older shape)",

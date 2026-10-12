@@ -89,3 +89,22 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
   - The W7 mutation check: every constant wrapper failed its pinning tests, and `bind.rs` was restored byte-identical (sha256).
   - The `limit` measurement on a scratch 1.19.0 server at 11:03 MDT.
   - The privacy grep of the added lines: clean.
+
+## T (Phase 6, verify / GREEN) — 2026-10-12T11:20-06:00
+- **Decided:**
+  - GREEN: every RED test passes on F's `8b6030e`, and F touched no test file.
+  - Added four rows to OpenCode's `can_dispatch` table: `allow *` of another pattern, `ask` of another pattern, `ask *`, and an unknown action. They pin F's sharpened ADR-0021 section 12 clause, which no test held (M1 survived without them).
+  - Added `attached_test::an_empty_listing_or_counts_that_disagree_are_unavailable`, because `parse_attached`'s two strictness branches survived mutation (P1, P2).
+  - Appended one evidence entry: the scratch rig's dead-end config names no agent, which acceptance 18's end state relies on.
+  - Verdict PASS: no production change is needed.
+- **Assumed:**
+  - The `remote_admin_test` failure is #847's known flake. The branch changes nothing in its path, and it passed 5 of 5 on its own.
+- **Hedged:**
+  - Acceptance 18's opt-in scratch scenarios were not run (they need real Herdr). They compile, and the opt-in `ac647_a_scratch_server_without_project_agents_has_no_dispatcher` backs their claim.
+- **Evidence:**
+  - Workspace: 2686 passed, 1 failed (#847), 39 ignored.
+  - Clippy is clean. Lint exits 0. changelog-check, docs_cli_test, wire_selftest and machete pass. rustfmt is clean on all 63 touched `.rs` files.
+  - Real tmux 3.7c: 9 of 9. Real OpenCode 1.19.0: 14 of 14.
+  - 12 production mutations, each restored with `git checkout`:
+    - M1 to M8 and both W7 wrapper mutations were killed;
+    - P1 and P2 were killed once T's new test was in place.
