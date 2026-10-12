@@ -1,10 +1,57 @@
 # Handoff-T-green: Phase 6 - #647 part 2: `unattached` and `agent-cannot-dispatch`
 
-**Date:** 2026-10-12 (11:20 MDT; re-verified at about 11:55 MDT, see "Re-entry" below)
-**Branch:** `issue-647-implementation`, at F's `8b6030e` plus T's two test edits below (committed as `4bd4e75`), and in the re-entry a whitespace-only fix to three test files (uncommitted; the driver commits it)
+**Date:** 2026-10-12 (11:20 MDT; re-verified at about 11:55 MDT, see "Re-entry" below; S REWORK round verified at 12:25 MDT, see "Re-entry 2")
+**Branch:** `issue-647-implementation`, at F's `8b6030e` plus T's two test edits below (committed as `4bd4e75`), and in the re-entry a whitespace-only fix to three test files (uncommitted; the driver commits it). Re-entry 2 is at F's rework `6f07eff` plus two test edits (uncommitted; the driver commits them)
 **Issue:** #647 (brief `docs/handoffs/647-part2-brief.md`)
-**Handoff-F reviewed:** `docs/handoffs/647/handoff-F.md`
+**Handoff-F reviewed:** `docs/handoffs/647/handoff-F.md` (including its "Rework round")
 **Handoff-T-red:** `docs/handoffs/647/handoff-T-red.md`
+**Handoff-S:** `docs/handoffs/647/handoff-S.md` (REWORK: item 1 for F, item 2 for T, advisory 1 offered to T)
+
+## Re-entry 2 (Phase 7 call after S's REWORK, at `6f07eff`)
+
+F did S's item 1 in `6f07eff`: the W-3 clause of `agent-cannot-dispatch`'s message now names the profile `quoted` in the prose and POSIX-single-quoted (the new `findings::single_quoted`) as the suggested `--profile` argument. F deviated from S's literal fix (`quoted` in both places) for the argument only. **T accepts the deviation and pins F's form**: S's own goal was #662 B1's rule, which is POSIX single quoting (`profile/delete.rs:203-205`), and every message in the repository that suggests a command with a profile name single-quotes it (evidence entries at `evidence.md` lines 237-308). Double quotes would let a shell run `$(...)` in a pasted name. F flagged no test as wrong.
+
+### Test changes (T's own tests; no production code touched)
+
+1. **S's item 2: `crates/holler-cli/tests/pane_verbs/doctor/agent.rs`.** `a_profile_members_message_names_its_profile` (profile `blue`, which reads the same raw or quoted) is **replaced** by `a_profile_members_message_names_its_profile_as_one_shell_word`, over a helper `profile_members_message(profile)` that also keeps the old test's remedy assertion (the table's `holler pane relaunch demo-c1r1 --agent=orchestrator`, no profile). The old test is merged in rather than kept next to the new one, because it would be redundant. It asserts:
+   - for `Some Profile`: the prose `the profile "Some Profile"` and `--profile 'Some Profile' too`, and neither `--profile Some Profile` (raw) nor `--profile "Some` (double-quoted);
+   - for `It's $(id) Demo` (the name `profile_scope.rs:555` uses for the same rule): the prose `the profile "It's $(id) Demo"` and `--profile 'It'\''s $(id) Demo' too`.
+2. **S's advisory 1: `crates/holler-cli/tests/pane_claude/doctor.rs`, new test `a_claude_pane_with_no_tmux_client_is_unattached`.** In the mixed grid, the Claude Code pane's client is detached (`FakeHost::detach_clients`). The pass raises exactly `["unattached"]`, for the Claude pane, with a null remedy. The OpenCode pane beside it, still attached, raises nothing. D9's "raised for a Claude Code pane too" now has a test.
+
+Both files were rustfmt-clean at HEAD and still are (`rustfmt --edition 2021 --check`). Lengths: `agent.rs` 408 lines, `pane_claude/doctor.rs` 235.
+
+### Spot-check: do the new tests fail if the behaviour is removed?
+
+A scratch script changed one production file at a time, ran the new test, and restored the files with `git checkout`, checked by sha256. `git status` afterwards shows only the two test files changed.
+
+| Mutation | Result |
+|---|---|
+| Q0: F's pre-rework clause (the profile through `Display`, unquoted) | killed: the assertion at `agent.rs:194` fails on `... the profile Some Profile, so relaunch it with --profile Some Profile too ...` |
+| Q1: S's literal form, `quoted` for the `--profile` argument too | killed: `agent.rs:198` fails on `--profile "Some Profile"` |
+| Q2: single quotes for the prose too | killed: `agent.rs:194` fails on `the profile 'Some Profile'` |
+| C1: `check_tmux` skips `check_attached` for a single-process pane | killed: `pane_claude/doctor.rs:211` fails, `left: []`, `right: ["unattached"]` |
+
+Q0 and Q1 first died on a compile error (`holler-pane` denies dead code, and the mutation left `single_quoted` unused). T re-ran both with a temporary `#[allow(dead_code)]` on the helper, so each was killed by the assertion, as shown. The allow was removed with the restore.
+
+### Tier 1, this round (at `6f07eff` plus the two test edits; load average about 9 on 24 cores)
+
+| Check | Result |
+|---|---|
+| `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (the `test.unit.command`) | **171 binaries: 2689 passed, 0 failed, 39 ignored; exit 0.** 2689 is the earlier 2688 plus the new Claude test; the profile test replaced one test with one. Neither of F's two load flakes (`body_run_test`, `profile_rename_faults_test`) recurred |
+| `cargo test -p holler-cli --test pane_verbs -- doctor::agent` | 18 passed |
+| `cargo test -p holler-cli --test pane_claude -- doctor` | 9 passed |
+| `cargo test -p holler-pane --doc`, `--test findings_test` | 11 and 7 passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| `bash scripts/lint.sh` | exit 0 |
+| `bash scripts/changelog-check.sh` | `changelog-check: ok` |
+| `docs_cli_test`, `wire_selftest` | 3 passed each |
+| `cargo machete` | no unused dependency |
+
+**Cross-check against F's rework report.** F reported `pane_verbs -- doctor` 71 of 71, clippy, lint and changelog clean, and a workspace run of 2686 passed with 2 load flakes. T's numbers match except the flakes, which did not recur at a lower load. The opt-in real tmux and OpenCode runs were not repeated: the rework touches only a message string and a `pub(crate)` helper in `holler-pane`, which neither adapter calls.
+
+**Evidence appendix.** The new tests rely on unchanged code for `check_tmux` running before the shape branch (`evidence.md` line 23), #662 B1's rule (line 237), `ProfileName`'s grammar (line 287) and `quoted`'s `{:?}` form (line 308). Each already has an entry with a verbatim excerpt, so T added none.
+
+**Acceptance status after this round.** Every row below still holds. S's REWORK item 2 is done, and D9's Claude Code clause (S's advisory 1) is now pinned. **Blocking issues: none.** Verdict: PASS.
 
 ## Re-entry (Phase 7 call, at `4bd4e75`)
 

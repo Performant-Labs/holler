@@ -167,26 +167,49 @@ fn several_dispatchers_give_no_remedy_and_a_message_that_lists_them() {
     assert_eq!(listed, 3, "up to three of four: {message:?}");
 }
 
-/// A pane in a profile: following the remedy without `--profile` would trade this finding for
-/// `profile-drift`, so the message says the relaunch needs the pane's profile (plan review W-3).
-/// The remedy itself is the table's.
-#[test]
-fn a_profile_members_message_names_its_profile() {
-    let rig = Rig::new(&[Seed::new(PANE, 1, 1).in_profile("blue")]);
+/// The message of the one finding raised for a member of the profile `profile`. The remedy is
+/// the table's whatever the profile: the profile goes in the message, never the remedy.
+fn profile_members_message(profile: &'static str) -> String {
+    let rig = Rig::new(&[Seed::new(PANE, 1, 1).in_profile(profile)]);
     seed(&rig, PANE, vec![turn(Some(false)); 3], &["orchestrator"]);
 
     let report = rig.run(&whole(false));
 
     let finding = one(&report, K::AgentCannotDispatch, PANE);
-    assert!(
-        finding.message.contains("--profile"),
-        "{:?}",
-        finding.message
-    );
-    assert!(finding.message.contains("blue"), "{:?}", finding.message);
     assert_eq!(
         finding.remedy.as_deref(),
         Some("holler pane relaunch demo-c1r1 --agent=orchestrator")
+    );
+    finding.message.clone()
+}
+
+/// A pane in a profile: following the remedy without `--profile` would trade this finding for
+/// `profile-drift`, so the message says the relaunch needs the pane's profile (plan review W-3).
+/// A profile's display name may hold a space, a quote or `$(...)` (`ProfileName`), so the
+/// message names it quoted, and the `--profile` argument it suggests is POSIX-single-quoted
+/// (#662 B1): one shell word that a shell expands nothing in.
+#[test]
+fn a_profile_members_message_names_its_profile_as_one_shell_word() {
+    let spaced = profile_members_message("Some Profile");
+    assert!(
+        spaced.contains("the profile \"Some Profile\""),
+        "{spaced:?}"
+    );
+    assert!(
+        spaced.contains("--profile 'Some Profile' too"),
+        "{spaced:?}"
+    );
+    assert!(!spaced.contains("--profile Some Profile"), "{spaced:?}");
+    assert!(!spaced.contains("--profile \"Some"), "{spaced:?}");
+
+    let tricky = profile_members_message("It's $(id) Demo");
+    assert!(
+        tricky.contains("the profile \"It's $(id) Demo\""),
+        "{tricky:?}"
+    );
+    assert!(
+        tricky.contains(r"--profile 'It'\''s $(id) Demo' too"),
+        "not single-quoted: {tricky:?}"
     );
 }
 

@@ -207,3 +207,18 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
   - Workspace (`test.unit.command`): 2686 passed, 2 failed, 39 ignored, at a load average of 25 to 31 from other sessions' suites. The two failures are outside this story's code, and each binary passes 3 of 3 alone:
     - `body_run_test::fresh_hello_and_presence_on_every_reconnect`: a restarted hub exited before it listened;
     - `profile_rename_faults_test::a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds`: an inode was reused, in the hub's own profile registry.
+
+## T (Phase 7 call, S REWORK round, T-green) — 2026-10-12T12:25-06:00
+- **Decided:**
+  - S's item 2 is done in `pane_verbs/doctor/agent.rs`. `a_profile_members_message_names_its_profile` (profile `blue`) is merged into `a_profile_members_message_names_its_profile_as_one_shell_word`, which pins F's form for `Some Profile` and `It's $(id) Demo`: the prose `quoted`, the `--profile` argument POSIX-single-quoted, never raw and never double-quoted. The remedy assertion of the old test is kept in the helper.
+  - T accepts F's deviation from S's literal fix (single quotes, not `quoted`, for the argument). S's stated goal was #662 B1's rule, which is single quoting, and the repository's other profile-command messages single-quote. So the test asserts F's form, and S's example string `--profile "Some Profile"` is asserted absent.
+  - S's advisory 1 is taken: `pane_claude/doctor.rs::a_claude_pane_with_no_tmux_client_is_unattached` pins D9's "raised for a Claude Code pane too".
+  - Verdict PASS: the suite is GREEN (2689 passed, 0 failed) and no production change is needed.
+- **Assumed:**
+  - S accepts the single-quoted argument as meeting item 1. If S insists on `quoted`, mutation Q1 shows the new test would fail, and the test (not F's code) would need to change.
+- **Hedged:**
+  - The opt-in real tmux and OpenCode runs were not repeated for this round. The rework touches only a message and a `pub(crate)` helper in `holler-pane`, which neither adapter calls.
+- **Evidence:**
+  - Read: `handoff-S.md`, `handoff-F.md` (Rework round), F's `6f07eff` diff, `observe.rs:111-200`, `pane_claude/rig.rs`, `pane_verbs/doctor/rig.rs` (`in_profile`, `profiles_of`), `error.rs:691-698`, `profile.rs:42-61`, `profile_scope.rs:545-565`.
+  - Mutations Q0, Q1, Q2 and C1 each killed by an assertion, with the files restored and checked by sha256 (table in `handoff-T-green.md`, Re-entry 2).
+  - Tier 1: the workspace `test.unit.command` exit 0 (171 binaries, 2689/0/39); clippy `-D warnings` exit 0; `lint.sh` exit 0; changelog-check ok; `docs_cli_test` and `wire_selftest` 3 each; `cargo machete` clean; rustfmt clean on both edited files.
