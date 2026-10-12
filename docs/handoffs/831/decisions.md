@@ -365,3 +365,57 @@ brief, the research note's "Decisions").
   - Mutant: an `if false` guard on the `dialog open` arm of `agents::activity` fails the new test; reverted.
   - `grep '"claude"' crates/*/src`: no second spelling outside `as_str`, the constant, `HARNESS_IDS`, a hub test and
     `holler-body`.
+
+## A, anti-duplication gate after the rework: 2026-10-11T22:19-06:00 (MDT)
+
+- **Decided:** PASS: 0 `block`, no new `warn`, and 6 `warn`s carried unchanged (`docs/handoffs/831/handoff-A-dup.md`,
+  "Rework 1"). The cycle is `adad6a2..7bd92cb`.
+  - **F's own edits.** I diffed F's merge commit against a trial merge of its parents (`git merge-tree --write-tree
+    ccec57c 037405f`). Beyond main's files, F changed one literal, now the existing constant (`wiring/env.rs`), three doc
+    comments (`wiring/bind.rs`, `harnesses.rs` and `vocab.rs`), and four docs. It built no new object and no parallel path.
+  - **Closed:**
+    - W7: `claude_bin` uses `CLAUDE_CODE_COMMAND`.
+    - W8: ADR-0021 section 15 item 2 states what holds. Checked again against #835 at `f1d1bd0`: its worktree is clean,
+      and the API and host code are identical.
+    - W6: the doc half is reworded to match the rigs. The `Resolving` half is closed: it is a test double over an
+      OpenCode fake, not a `wiring.rs` decorator.
+  - **The merge of #855 and #856 adds no parallel path.** The roster builds its pane cells from `pane list`'s `PaneRow`,
+    and that type reads no port. The auto-merged `pane_integration` files carry only #831's endpoint migration. All three
+    conflict resolutions keep both sides' intent.
+  - **T-green's two edits** reuse the hermetic rig and an existing test. The new test is the only test of
+    `harness-dialog-open` and of the unknown-status `unavailable`.
+  - **Carried, as follow-ups or PR-step items:**
+    - W1: the `as_str` pin is test-only and can be done now; the shared parse waits for item 17, because #835 rewrites
+      `import/files.rs`.
+    - W2, W3 and W4.
+    - W5: #696 has no comment naming the Claude adapter's `exec.rs` yet.
+    - W9: `switch.rs` is at 893 lines and `launch/rig.rs` at 852.
+- **Assumed:**
+  - #835's committed tip `f1d1bd0` is its current state. It is a local branch with no remote, and its worktree has no
+    uncommitted change, so a later #835 rework could still move the doc comments. Section 15 item 2 already records how
+    whichever lands second resolves them.
+  - T's recorded runs stand (2524 passed, 0 failed, 36 ignored). I re-ran no build or test, as the role says.
+- **Hedged:**
+  - **W1 stays a `warn`.** The shared parse would edit `import/files.rs`, which #835 rewrites, so deferring it to item 17
+    follows the coexistence rule. The `as_str` pin has no such overlap. It is cheap, but it is not a parallel path, so it
+    does not gate.
+- **Evidence:**
+  - Ran, all read-only:
+    - `git merge-tree --write-tree ccec57c 037405f`, and `git diff cc5793b 7260b5e`;
+    - `git diff 7260b5e 7bd92cb`, and `git diff origin/main...HEAD`, both for the auto-merged files;
+    - `git diff f1d1bd0 HEAD` over the host-side and #835-copied files: only `claude_code_rule_test.rs`'s module doc
+      differs;
+    - `git -C <835 worktree> status`: clean;
+    - `git grep` for conflict markers: none;
+    - `wc -l` of the touched files;
+    - `gh issue view` of 835 (OPEN) and 696 (OPEN; no comment names #831).
+  - Greps:
+    - the `"claude"` literals in `crates/*/src`;
+    - `CLAUDE_CODE_COMMAND` and `is_claude_code_command` callers;
+    - `harness-dialog-open` and unknown-status tests;
+    - test-side `impl HostPort` (the linkers) and `FakeClaude` rigs;
+    - the `Resolving` forwards;
+    - the `Bindings` and `Resolver` readers (`wiring.rs:204`, OpenCode only);
+    - `PaneRow`, `harness` and `port` in `roster_cmd.rs` and `pane/list.rs`.
+  - Read: `handoff-S.md`, `handoff-F.md` ("Rework 1"), `handoff-T-green.md` ("Rework 1"), the brief, the prior
+    `handoff-A-dup.md`, and `rework_test.rs:158-188`.
