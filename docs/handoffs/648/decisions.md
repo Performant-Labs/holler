@@ -72,3 +72,56 @@ Append-only; every phase adds its own entry.
   - **A scratch trial implementation** gave 25 of 25 and 9 of 9; with it the docs test fails only on R9's guide text.
   - **Restored.** Both scratch versions were reverted from scratchpad copies; `src/` is unchanged.
   - **Checks:** `lint.sh` exit 0, `changelog-check.sh` exit 0, `cargo clippy -p holler-cli --tests -D warnings` clean.
+
+## F (Phase 6, implement): 2026-10-11T20:30-06:00
+
+- **Decided:** the roster is implemented against T's API, and every authored test is GREEN. The detail is in
+  `handoff-F.md`.
+  - **The API, as T named it:** `roster_cmd::{PANE_COLUMNS, Registry, render, run}`. `RosterResult` is gone. Also
+    public: `HELP_LEGEND` (the `--help` legend, W-7) and `REMOTE_POLICY_REFUSED` (W-4's open code).
+  - **The open code is `remote-policy-refused`.** It is a refusal (exit 3), only in `--format=json`'s failure envelope;
+    the text forms keep today's line. It is added to ADR-0021 section 9's open codes (W-8).
+  - **Usage errors come before any dial.** `run` refuses `--profile` with `--server` first (R3), then a malformed
+    `--profile` name. So `roster --profile '!!!'` with no hub is exit 2, not the no-hub exit 1. `render` checks the name
+    again for a direct caller.
+  - **W-2: one named predicate in `roster_cmd.rs`** (`shown_driven_mismatch`), whose doc names both twins.
+    `say_cmd.rs` is untouched, so there is still no code overlap with #839.
+  - **W-5: each cell is looked up by its column's name in `pane::list::COLUMNS`** at run time. T's
+    `the_cells_are_pane_lists_cells_for_the_same_record` pins it.
+  - **The table is one formatter.** `table_line` pads every cell but the last to a `WIDTHS` entry, for the header and
+    every row; HOLD is padded as a cell.
+  - **`roster --json` keeps today's bytes but for the six keys:** written as it was, with no newline added after the
+    document. Text and the envelope go through `output::emit`.
+  - **W-12: a `--profile P` that joins no row prints `(no sessions of profile P on the hub)`**, not the false
+    `(no sessions on the hub)`. No test pins it.
+  - **`main.rs`'s deferred source holds the `Wiring` in a `std::cell::OnceCell`**, not T's `Option` plus `move`; the
+    order and ownership are W-1's.
+  - **Docs:** the guide gets R9's paragraph verbatim (wrapped) and loses section 12's bullet. ADR 0003 gets W-3's
+    two carve-outs and loses R10's sentence. ADR-0021 gets R9's two hunks and W-8's three sentences.
+  - **CHANGELOG:** the brief's entry, corrected. "No ADR 0003 change" is now "additive, so MINOR under ADR 0003", since
+    W-3 edits two ADR 0003 sentences. It also says `--profile` with `--server` is a usage error and a registry that
+    cannot answer prints one `note:` line. It sits after the #652 entry, not at the top, because `origin/main`'s #851
+    (`d6ae539`, merged after this branch's base) inserted at the top.
+- **Assumed:**
+  - A `PaneError::NotImplemented` from `Wiring::connect` (it never answers one today) is treated like a store's: no
+    note.
+  - A hub reply that is not an object, or has no `rows` array, prints as an empty roster (as `render_table` did).
+- **Hedged:**
+  - **Two code docs outside the blast radius stay slightly untrue** (A's W-8, not binding): `reconcile::shown_differs`
+    names the roster among its readers, and `PaneRow.driven` says "printed, never compared". They are left for O's
+    follow-up, as A directs.
+  - **Merge with `origin/main`.** `d6ae539` (#851) touches `cli.rs`, `main.rs`, ADR 0003, the guide and CHANGELOG, in
+    hunks this change does not touch; the branch was not merged, as F does not commit.
+- **Evidence:**
+  - `cargo test -p holler-cli --test roster_panes_test`: 25 passed. `--test roster_cli_test`: 9 passed.
+  - `--test docs_pane_control_test --test docs_cli_test --test cli_surface_test`: 16, 3 and 3 passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean. `bash scripts/lint.sh`: exit 0.
+    `bash scripts/changelog-check.sh`: ok. `roster_cmd.rs` is 578 lines.
+  - **The full workspace suite** (the pipeline's `test.unit.command`, with `--no-fail-fast`): exit 0, 2402 passed,
+    0 failed, 32 ignored.
+    - An earlier run without `--no-fail-fast` stopped at the known flake #847
+      (`remote_admin_traffic_never_moves_the_bodys_last_seen`).
+    - That test passed 3 of 3 runs alone and passed in the full run.
+    - This change makes no call on its `--server` path. The hub moves `last_seen` only from a token's WebSocket circuit
+      (`circuit.rs:834`), never from the control socket.
+  - `docs/handoffs/648/evidence.md`: the unchanged-source facts the diff relies on.

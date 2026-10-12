@@ -15,6 +15,18 @@ fills this file in at release time.
   section "Restarting a pane on another model" of `docs/orchestrating.md` now leads with `holler pane relaunch`, says
   that its `--model` is recorded and not yet applied to the server (#829), and keeps `scripts/pane-restart` as the
   fallback until the 7-day sign-off of the cutover (#654), and as the only restart path of a Claude Code pane. A docs test pins the guide to the code's own tables. No behaviour changes.
+- The roster shows the pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#648](https://github.com/Performant-Labs/holler/issues/648)): `holler roster` appends the columns PANE, POS, PROFILE,
+  HEALTH, SHOWN and DRIVEN after HOLD, read from the pane registry as `holler pane list` prints them (`-` for a session
+  with no pane), and prints `N pane(s) show a different session than the hub drives: <names>` as its first line when
+  a pane's SHOWN and DRIVEN are both known and differ. `roster --profile NAME` lists only that profile's panes (it was
+  refused with `not implemented (story #648)`; an unknown profile is refused `profile-not-found`, exit 3),
+  `roster --format=json` prints the JSON envelope with `data.rows` and `data.mismatches`, and `roster --json` keeps its
+  shape and gains the keys `pane`, `pos`, `profile`, `health`, `shown` and `driven` (additive, so MINOR under ADR 0003).
+  The roster makes no call to Herdr, tmux or OpenCode and shows no unmanaged pane. With `--server` the new columns are
+  `-`, since the registry is the local hub's, and `--profile` with `--server` is a usage error (exit 2). A registry that
+  cannot answer leaves the columns `-` and prints one `note:` line on stderr. DRIVEN is `-` until the hub's DRIVEN
+  session is recorded (#839).
 - Pane control is wired (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): every `holler pane` and
   `holler profile` verb, and `say`, `interrupt` and `answer` with `--pane`, now run against the hub's pane and profile
   registries and the real Herdr, tmux and OpenCode adapters, where they answered `not-implemented` before

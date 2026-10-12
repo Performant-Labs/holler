@@ -429,7 +429,20 @@ A `holler pane watch` line prints the same cells as `key=value`, the column name
 cursor=4 put demo-alpha pos=r1c1 profile=fleet project=/srv/demo health=healthy shown=ses_0a1b2c driven=- sync=ok hold=none
 ```
 
-The roster extension (the PANE, POS, PROFILE, HEALTH, SHOWN and DRIVEN columns on `holler roster`, #648) is later: read SHOWN against DRIVEN from `holler pane list` and `holler pane doctor`.
+**The roster.** `holler roster` appends six columns after HOLD: PANE (the pane's name), POS (`r2c1`, row first; a pane
+named `hj-c1r2` is a name, and it sits at `r2c1`), PROFILE, HEALTH, SHOWN and DRIVEN. They are the registry's values,
+the same cells `pane list` prints for the same record, and an empty cell is `-`; a session with no pane (the io body, an
+alpha or beta agent) shows `-` in all six. A roster row is joined to a pane when the part of its name before the first
+`/` is the pane's name. The roster calls no adapter and shows no unmanaged pane (`pane list` does), and it reads the
+registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and DRIVEN are
+both known and differ, the first line of the output says so:
+`2 pane(s) show a different session than the hub drives: demo-alpha, demo-beta`.
+`holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
+`profile-not-found` (exit 3). `holler roster --format=json` prints the envelope of section 9 with `data` =
+`{"rows": [...], "mismatches": ["demo-alpha", "demo-beta"]}`; `holler roster --json` keeps its shape and gains the keys
+`pane`, `pos`, `profile`, `health`, `shown` and `driven` (`null` for a row with no pane). DRIVEN is `-` for every pane
+until the hub's DRIVEN session is recorded ([#839](https://github.com/Performant-Labs/holler/issues/839)), so the
+summary line does not appear before then; read SYNC from `holler pane list` and `holler pane doctor`.
 
 The Herdr display plugin (`plugins/herdr-holler`, #651) shows each pane's project, SHOWN against DRIVEN and hold in
 Herdr's sidebar; it only reports metadata and reads, and its actions run the `holler pane` verbs.
@@ -784,7 +797,6 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 
 Deferred, so not documented here as existing; none of them is available:
 
-- the roster extension: the pane columns on `holler roster` (#648);
 - applying a pane's model, effort and environment to its harness server (#829);
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
 - an import that leaves the panes Holler does not drive alone (#835);

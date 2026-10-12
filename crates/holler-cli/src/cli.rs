@@ -60,7 +60,8 @@ pub struct Cli {
     )]
     pub log_format: Option<String>,
 
-    /// Print machine-readable output. The same as `--format=json`.
+    /// Print machine-readable output. The same as `--format=json`, except under
+    /// `holler roster`, which keeps its own `--json` shape.
     ///
     /// Global (issue #147/#155): reachable after any leaf, including
     /// `hub token mint --label x --json` — which the per-struct copies this
@@ -72,8 +73,9 @@ pub struct Cli {
     ///
     /// `--format=json` is the same as `--json`, and `--json` with
     /// `--format=text` is a usage error. Under `holler pane` and `holler
-    /// profile` JSON mode prints one envelope; the other verbs keep their own
-    /// `--json` shape (ADR 0003).
+    /// profile` JSON mode prints one envelope. Under `holler roster` only
+    /// `--format=json` prints the envelope, and `--json` keeps the roster's own
+    /// shape. The other verbs keep their own `--json` shape (ADR 0003).
     // Global (epic #633, story #670). Captured as an `Option` so that an
     // explicit `--format=json` can be told from a bare `--json` (`roster` keeps
     // its legacy `--json` shape and prints the envelope only for the former).
@@ -105,6 +107,7 @@ pub enum Command {
     /// Operate a body (join, run, detach, status, caps, support, query, attach).
     Body(Body),
     /// List the roster. (hub-only, top-level daily verb)
+    #[command(after_help = crate::roster_cmd::HELP_LEGEND)]
     Roster(Roster),
     /// Send a one-shot prompt to a session and print the reply. (hub-only)
     Say(Say),
@@ -477,8 +480,9 @@ pub struct Roster {
     /// [`Status::server`].
     #[arg(long)]
     pub server: Option<String>,
-    // `--profile NAME` (epic #633): parsed here and refused by `main.rs` until
-    // story #648 (the roster story) renders it.
+    // `--profile NAME` (epic #633, story #648): only the rows joined to a pane of
+    // the profile (`roster_cmd.rs`); a usage error with `--server`, whose hub is
+    // not the one whose registry the CLI reads.
     #[command(flatten)]
     pub profile: ProfileOpt,
 }
