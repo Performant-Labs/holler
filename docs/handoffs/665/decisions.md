@@ -114,3 +114,40 @@
   - **The workspace run:** 154 targets, 2,434 passed, 0 failed, 32 ignored, exit 0.
   - **The gates:** `lint.sh` exits 0, `changelog-check` prints `ok`, and clippy `-D warnings` and `cargo machete` are clean.
   - **The drift mutation:** `drifted` was changed to match no `Differs` row. Four `doctor::drift` tests failed: agreement, one-per-pass, scope and shape. The change was reverted, and `git status` is clean.
+
+## A (Phase 7, anti-duplication gate): 2026-10-11 22:02 MDT
+- **Decided:** PASS, with 0 block and 3 warn findings (`docs/handoffs/665/handoff-A-dup.md`).
+  - **No parallel production path.** All 11 of Phase 3's "Reuse expectations for Phase 7" hold:
+    - one `Store::rename` for the port and the transaction;
+    - the twins extended in place under the same names;
+    - the restore as a save of the committed table;
+    - the `run` handler pipeline;
+    - the CLI reuse of `insert_profile`, `taken`, `profile_from_panes`, `decode_params`, `GridPos::parse`, `write_atomic` and `show::text`;
+    - drift as `diff_profile` over `is_member`;
+    - the fake in one `feed.write`;
+    - D6.
+  - **Warn 1 (test-only).** `pane_support::request` is a near-copy of `profile_handlers_test.rs`'s private `line`, and `REPLY_WITHIN` is declared three times. Fold `line` into `request`.
+  - **Warn 2.** `profile import` and `profile export` print `N specs` without `super::list::count`, so a one-spec profile prints `1 specs`. Every sibling verb prints `1 spec`, and three test strings pin the difference. Use `count()`, or record the literal form as intended.
+  - **Warn 3 (low).** `panes::Locked`'s `save` and `apply` accept any `PaneEvent`s, a crate-visible bypass of `cas_put`'s compare-and-swap and `refuse_profile_move`. An opaque `Moves` type would close it. Optional.
+- **Assumed:**
+  - Test code is in A-dup's scope, since a Phase 7 block sends T to repair the tests.
+  - The hub tests' convention of one `Rig` per file is the established pattern, so the two new rename `Rig`s are not drift.
+  - The brief's `<N> specs` was a template, like `create`'s doc comment (`N specs`), not a requirement to skip pluralization.
+- **Hedged:**
+  - **Warn 1 is a warn, not a block.** Before #665, the hub tests kept one copy of the dispatch-with-timeout helper per file, so there was no dominant pattern. The new copy is in the shared module.
+  - **Warn 2 is a consistency call.** Either outcome is acceptable if it is recorded.
+  - **I did not run the tests.** T's GREEN rounds (2,434 passed, 0 failed, on `3b20fc0`) cover behavior. The diff since then is the handoffs only.
+- **Evidence:**
+  - **The diff:** `git diff bda1069..fa1677c`, with every changed production file read in full:
+    - hub: `profile/{store,mod,rename,handlers}.rs` and `panes/{store,mod}.rs`;
+    - CLI: `profile/{rename,export,import,create,show}.rs`;
+    - holler-pane: `reconcile.rs`, `reconcile/drift.rs`, `findings.rs` and `profile_diff.rs`;
+    - the testkit's `profile_store.rs`.
+  - **The tests read:** the new hub, conformance, CLI-verb, doctor and process tests and their support modules.
+  - **Greps:**
+    - `is_member`, `diff_profile` and `ProfileNotFound` construction sites;
+    - `count(` across the profile verbs;
+    - the request helpers and `REPLY_WITHIN` in the hub tests;
+    - bounded file readers;
+    - personal infrastructure names in the diff and the commit metadata.
+  - **D6:** `git diff --stat` is empty for the files D6 says are untouched.
