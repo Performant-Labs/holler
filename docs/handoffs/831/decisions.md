@@ -419,3 +419,75 @@ brief, the research note's "Decisions").
     - `PaneRow`, `harness` and `port` in `roster_cmd.rs` and `pane/list.rs`.
   - Read: `handoff-S.md`, `handoff-F.md` ("Rework 1"), `handoff-T-green.md` ("Rework 1"), the brief, the prior
     `handoff-A-dup.md`, and `rework_test.rs:158-188`.
+
+## S, spec audit after the rework: 2026-10-11T22:40-06:00 (MDT)
+
+- **Decided:** REWORK (`reworkKind: test-only`), one item (`docs/handoffs/831/handoff-S.md`, "Rework 1"). No production
+  change is needed.
+  - **The first REWORK is fixed as asked:**
+    - the doc comment of `HARNESS_IDS` (`vocab.rs:269-279`);
+    - `claude_bin` passes `CLAUDE_CODE_COMMAND`;
+    - section 15 item 2's "As built" states what holds. I checked it against #835's branch, still at `f1d1bd0`: the
+      host-side files are identical, and only doc comments differ.
+  - **Every line the first pass found met is still met.** The merge of `origin/main` (#855, #856) needed no change to
+    this story's code, and no conflict marker is left.
+  - **The one item: the roster line.** #648 merged at 21:25 MDT and the branch carries it, so `holler roster` now reads
+    the registry.
+    - The brief makes "the roster and the watchdog seeing the Claude pane where they read the registry" a test.
+    - Section 15 item 18 states, as built, that the roster prints a pane's cells on the hub row joined to it.
+    - No test puts a Claude Code record through the roster.
+    - T writes one test in `roster_panes/registry.rs`: `roster_cmd::render` over a registry that holds a Claude record
+      and a literal hub row named like that pane. It asserts no `note:` line, the pane's six cells equal `pane list`'s,
+      and the base rows are unaffected, with a mutant check.
+    - `pane get` of a Claude pane is optional in the same pass and does not gate.
+- **Assumed:**
+  - T's and F's recorded runs stand (2524 passed, 0 failed, 36 ignored). I re-ran no build or test, as the role says.
+  - #835's committed tip `f1d1bd0` is its current state.
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - **Why REWORK for one test and not PASS with an advisory.** The brief makes that acceptance line a test "where they
+    read the registry". The merge gave the roster a registry reader, and the PR adds an as-built claim about it, so the
+    line now has a proving test due and none exists.
+    - T-green left the test out because it "cannot exist until a body serves that session (#850)". That does not hold:
+      the roster's tests call the pure `render` with literal hub replies.
+    - What #850 adds is the row in production. That gap is recorded in section 15 item 18, `docs/pane-control.md`, the
+      CHANGELOG and the PR's list of what remains, and the gap itself is not REWORK.
+  - **Kept advisory, not REWORK:**
+    - Item 8's "the roster can say which wait it is": a rationale clause, stale since #648's roster calls no adapter;
+      `doctor` names the wait.
+    - Item 18's assumption that #850's body joins its roster row.
+    - `pane get`, `pane watch` and `interrupt --pane` output over a Claude record, which the first pass rated
+      lower-value. No new fact changes that rating.
+  - **The test passes on today's code.** It is a characterization of how #831's record meets #648's roster, so the
+    mutant check is what shows that it pins something.
+- **Evidence:**
+  - Live:
+    - `gh issue view 831`: OPEN, the body equals the brief's issue section, no comments;
+    - #633's amendment comment at 18:12 MDT;
+    - #648 closed (completed) at 21:25 MDT;
+    - #828 closed (not planned) at 15:56 MDT;
+    - #835, #839, #850, #803 and #696 are OPEN;
+    - `git fetch` at 22:22 MDT: `origin/main` is `037405f`, the merge base.
+  - Diff:
+    - `git diff origin/main...HEAD`: 121 files, +13096/-1310;
+    - `git merge-tree --write-tree ccec57c 037405f` (tree `cc5793b`) against `8aef610`: the cycle's own edits;
+    - `git diff issue-835-implementation HEAD` over the host-side files: empty;
+    - `git grep` for conflict markers: none;
+    - `git diff --check`: one trailing space, in the first pass of `handoff-S.md`, removed in this rewrite.
+  - Read:
+    - every handoff's "Rework 1", `decisions.md` and `evidence.md`;
+    - ADR-0021 section 15 in full;
+    - `roster_cmd.rs` and `pane/list.rs` (`PaneRow`);
+    - `roster_panes_test.rs` and `roster_panes/registry.rs`;
+    - the adapter crate in full, `ports/{process,router}.rs`, `tx_launch.rs` (diff), `tx_launch/{process,rules,undo}.rs`,
+      `tx_switch.rs` (diff), `reconcile.rs` (diff) and `reconcile/observe/process.rs`;
+    - the wiring and `env.rs` (diff), and `say_cmd.rs`, `interrupt_cmd.rs`, `answer_cmd.rs`, `pane/{args,doctor,get}.rs`
+      (diffs);
+    - the tests `pane_claude/{mixed,lifecycle}.rs`, `hermetic_test.rs` and `claude_kind_test.rs` (names);
+    - `CONTRIBUTING.md`, and the workflow's S routing and rework caps.
+  - Greps:
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added `src` lines;
+    - `claude` in the roster tests;
+    - `get` and `watch` over a Claude record in the tests;
+    - private names, IPs, emails, domains and secrets in all 13,096 added lines: none;
+    - `wc -l` of every touched file (the largest `.rs` is 893).

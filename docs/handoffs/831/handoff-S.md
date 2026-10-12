@@ -1,5 +1,279 @@
 # Handoff-S: #831 - A Claude Code harness for panes  (spec audit)
 
+Two passes, newest first: the audit after F's rework (the first REWORK), then the first pass.
+
+## Rework 1: the audit after F's rework (2026-10-11, 22:40 MDT)
+
+**Date:** 2026-10-11, 22:40 MDT
+**Branch:** `issue-831-implementation` at `8aef610` (worktree `.claude/worktrees/0831-claude-harness`). F's phase commit
+`7260b5e` merged `origin/main` at `037405f` (#855, #856), so the merge base is `origin/main` itself (`git fetch` at 22:22
+MDT: still `037405f`).
+**Issue:** [#831](https://github.com/Performant-Labs/holler/issues/831), OPEN, read live with `gh issue view 831`: the body
+equals the brief's issue section, and it has no comments. #633's amendment comment is posted (18:12 MDT).
+**Brief:** `docs/handoffs/831-brief.md`, with ADR-0021 section 15 as the normative text.
+**Handoffs reviewed:** `handoff-F.md` ("Rework 1"), `handoff-T-green.md` ("Rework 1"), `handoff-A-dup.md` ("Rework 1"),
+`decisions.md` and `evidence.md`; from the first pass, `handoff-A.md` and `handoff-T-red.md`.
+**Diff audited:** `git diff origin/main...HEAD`: 121 files, +13096/-1310 (112 files and +10522 outside `docs/handoffs/`).
+This cycle's own edits, against a trial merge of its two parents (`git merge-tree --write-tree ccec57c 037405f`, tree
+`cc5793b`): one literal and three doc comments in `src`, T-green's two test files, `CHANGELOG.md`, ADR-0003 (the conflict
+only), ADR-0021 and `docs/pane-control.md`. Beyond those and `main`'s own files (#856's `roster_cmd.rs`, `cli.rs` and
+`main.rs`), no `crates/*/src` file changed since the first pass, which read the whole production diff. Against section 15
+I re-read the engines (`tx_launch` and its five modules, `tx_switch`, `reconcile` and
+the single-process chain), the port, the router, the adapter crate, the wiring and the prompt verbs, and the roster code
+the merge brought in (`roster_cmd.rs`, #648).
+
+**Verdict: REWORK** (`reworkKind: test-only`), one item. The first REWORK's three items are fixed as asked, and every line
+the first pass found met is still met. What changed is the roster:
+
+- #648 merged at 21:25 MDT and the branch now carries it, so `holler roster` reads the pane registry.
+- The brief makes "the roster and the watchdog seeing the Claude pane where they read the registry" a test.
+- Section 15 item 18 now says, as built, that the roster "reads the registry and prints a pane's cells on the hub row
+  joined to it".
+- No test puts a Claude Code record through the roster. F listed the test for T, and T-green left it out on a premise
+  that does not hold for the roster's own harness (Verdict, item 1).
+
+It is one test, and no production code changes.
+
+### A precondition
+
+Met.
+
+- `handoff-A.md`: **PASS**, with 0 block and 15 warn.
+- `handoff-A-dup.md`, "Rework 1": **PASS**, with 0 block and no new warn. Six warns are carried as follow-ups: W1 to W5,
+  and W9.
+
+### T precondition
+
+Met.
+
+- **RED** at `b3f0295` (first pass): compile-level on the contract, and assertion-level on the two `--harness` lines of
+  `cli_surface_test`.
+- **GREEN** on `7260b5e`, plus T-green's two test edits:
+  - the CI test step: 2524 passed, 0 failed, 36 ignored (165 binaries);
+  - all pass: clippy with `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete`, `docs_cli_test` and
+    `docs_pane_control_test`, `wire_selftest`, `cargo test -p holler-proto` and `test-hooks.sh`;
+  - 0 blocking issues.
+- **T-green's additions are test-only, and they assert behaviour.**
+  - `hermetic_test::a_dialog_and_an_unknown_status_are_never_an_activity`: an `if false` mutant on the `dialog open` arm
+    fails it.
+  - `lifecycle::switch_refuses_a_busy_pane_and_one_waiting_on_a_permission` now asserts the code
+    `session-holds-permission`, not only exit 3.
+- **My checks were read-only:** `git diff`, `show`, `log`, `merge-tree` and `grep`; `wc -l` and `git diff --check`;
+  `changelog-check.sh` (ok); and `gh issue view` of 831, 633, 835, 839, 850, 648, 828, 803 and 696. I re-ran no build or
+  test.
+
+### The first REWORK, checked
+
+| # | Asked | On `8aef610` | |
+|---|---|---|---|
+| 1 | The doc comment of `HARNESS_IDS` says what section 15 item 1 says | `vocab.rs:269-279` names the two uses of `claude` that do not meet: the pane harness (`HarnessKind::Claude`, read only by the pane engine) and the body harness (ADR 0012, read only by `holler-body`). It names `HarnessKind` as the second list and the test that pins every serde name to this one (`rework_test.rs`). "Reserved" is gone. A doc comment only: no wire or golden change | Fixed |
+| 2 | `env.rs` passes `CLAUDE_CODE_COMMAND` | `claude_bin` is `program_bin(env, CLAUDE_BIN, CLAUDE_CODE_COMMAND)`, and its doc names the `HOLLER_CLAUDE_BIN` basename limit. In `crates/*/src`, `"claude"` is now written only in `HarnessKind::as_str`, the constant, `HARNESS_IDS`, a hub test and `holler-body` | Fixed |
+| 3 | Section 15 item 2's "As built" states what holds | `ADR-0021.md:1068-1078`, checked again. #835's branch is still at `f1d1bd0`. The host-side files are identical: `holler-adapter-host/src`, the test kit's `host.rs` and `conformance/host.rs`, `foreground_test.rs` and `fake_tmux_test.rs`. `claude_code_rule_test.rs` differs only in its module doc, as the paragraph says | Fixed |
+
+F also merged `origin/main` (#855 and #856):
+
+- the three conflicts (`CHANGELOG.md`, ADR-0003, and ADR-0021's "Deferred") keep both sides' intent;
+- no conflict marker is left (`git grep`);
+- none of this story's code changed for the merge.
+
+### Acceptance criteria
+
+The issue's Acceptance, read as the brief's item 18 says it can be met, then the Goal and the Work list. Against the first
+pass's table (below), rows 8, 11 and 19 change.
+
+| # | Criterion | Proving test or evidence | Status |
+|---|---|---|---|
+| 1 | One OpenCode and one Claude Code pane from one profile | `pane_claude/mixed.rs::one_profile_launches_an_opencode_pane_and_a_claude_pane`; `a_second_apply_of_the_mixed_grid_changes_nothing` | Met |
+| 2 | Both in `pane list` with SHOWN and DRIVEN | `mixed.rs::the_acceptance_scenario_on_the_fakes`: each row's `shown` and `driven` are its record's, and `sync` is `ok` | Met, as the brief reads it |
+| 3 | A message to each through `holler say` | Blocked by #839 and #850, by the brief's design: `mixed.rs::say_delivers_a_message_to_each_pane_of_the_scenario` is `#[ignore]` and names both. Delivery is proven at the port: the scenario's `send_prompt`, conformance case 9, `hermetic_test::a_prompt_reaches_the_socket_the_launch_hook_reported_as_one_framed_line` and `lifecycle::reset_first_reaches_the_new_process` | Deferred (the PR is "Part of #831") |
+| 4 | Interrupt one | `lifecycle::interrupt_relaunches_a_busy_pane_on_its_session_of_record` and the scenario; the refusals `interrupt_with_text_on_a_claude_pane_is_refused_and_touches_nothing`, `interrupt_of_a_parked_claude_pane_is_refused_by_the_pane_gate` and `abort_of_a_claude_process_is_abort_unsupported`; `interrupt_of_an_opencode_pane_still_goes_to_the_hub` | Met |
+| 5 | Park one | The scenario; `lifecycle::park_holds_a_claude_pane_and_leaves_its_process_alone` | Met |
+| 6 | `doctor` clean | The scenario, after the interrupt and the park; `doctor::doctor_is_clean_for_a_healthy_idle_claude_pane_beside_an_opencode_pane` | Met |
+| 7 | The login is never read or printed | `hermetic_test::login_status_reads_the_auth_method_alone`, `an_unreadable_login_answer_quotes_none_of_it` and `every_login_variable_is_unset_before_the_program_and_none_is_set`; `launch::a_login_variable_in_the_specs_env_is_refused_by_its_name` (all 7 names); `doctor::a_missing_login_is_one_problem_per_pass` | Met |
+| 8 | The roster, the watchdog and `doctor` see the Claude pane | **`doctor`:** the 8 tests of `doctor.rs` (rows 6 and 7). **The watchdog:** none in this repository; pfleet#396 will read `holler pane get/list --format=json`, and `pane list --format=json` shows the Claude pane (row 2). **The roster:** since the merge it reads the registry (`roster_cmd.rs:285-308`), joins a hub row to the pane its label names (`:317-333`) and prints `pane list`'s cells for that pane (`PaneRow::from`). A Claude Code pane has no hub row until a body serves its session (#850), and section 15 item 18 records that. But the part this story can meet has no test: the roster reading a registry that holds a Claude record, and printing that record's cells on a row joined to it | `doctor` and the watchdog: met. **The roster: REWORK 1** |
+| 9 | Goal: `--harness` on `launch` and `relaunch` | `spec_flags.rs` (2 tests), `launch::an_unknown_harness_is_usage`, `cli_surface_test`, `lifecycle::relaunch_naming_another_harness_is_harness_change_refused` | Met |
+| 10 | Goal: the same verbs | `list`, `switch`, `reset`, `park`, `interrupt`, `close` and `doctor` in `lifecycle.rs`, `doctor.rs` and `mixed.rs`; `say` is row 3. No test runs `get` or `watch` over a Claude record (Advisory 6) | Met, with a test gap |
+| 11 | Work 1: the variant, `HARNESS_IDS` and the test that pins both lists, `Pane` and `ProfileSpec`, ADR-0021, the epic's block | `rework_test.rs` (`every_kind`), `claude_kind_test` (15 tests), section 15, the #633 comment, and now the doc comment of `HARNESS_IDS` | Met |
+| 12 | Work 2: the adapter crate behind the same seam; the host starts and stops the process | `holler-adapter-claude`, a dependency of `holler-cli` only; `hermetic_test` (16); the conformance suite over the fake and the router. The host stops the process by tmux session (`stop_owned`), as section 15 decides | Met, as amended (PR body: Advisory 2) |
+| 13 | Work 3: a fake and its conformance suite; the real test opt-in and `#[ignore]` | `fake_claude_test` (13), `claude_conformance_test` (4 tests, 12 mutants), `fake_harnesses_test` (5), `real_claude_test` (`#[ignore]`, runs only with `HOLLER_TEST_CLAUDE=1`) | Met. The real test was not run (Advisory 1) |
+| 14 | Work 4: `profile show` and `apply` compare the harness; doctor codes | `mixed.rs::profile_show_compares_the_harness_kind` and `apply_never_changes_a_live_panes_harness`; `doctor::a_claude_process_that_is_gone_is_server_down`, the login tests and the `pane-waiting` test | Met |
+| 15 | Work 5: the wizard (#803) | Section 15 item 16: not in this story (#803 is OPEN) | Out of scope, by decision |
+| 16 | The operator's abort decision, recorded in ADR-0021 and the note's "Decisions" | Section 15's opening and decision 22; the note's "Decisions"; `claude_kind_test::a_kind_knows_its_shape_and_its_abort_style`; no keystroke in any lifecycle test | Met |
+| 17 | Adopt the existing Claude Code panes: decide, build, record | Decided and recorded (item 17, decision 23). Not built: #835 is OPEN and not on `main` (checked at 22:22 MDT) | Deferred, by the brief's rule |
+| 18 | The relayed question: does the `say` step need #839? | Item 18 (it does, and #850 too), decision 24 and the #633 comment | Met |
+| 19 | One constant and one signal with #835 | `CLAUDE_CODE_COMMAND`, `is_claude_code_command` and the required `HostPort::foreground_commands`; no second spelling of the name; the record of the copy is accurate | Met |
+
+### Spec compliance
+
+Section 15 is built as recorded, items 1 to 18, as the first pass found. This cycle changed no behaviour. What I checked
+again in the code:
+
+- **Items 1 to 4.** `HarnessKind::Claude` with `shape()`, `abort_style()` and `login_variables()` (`pane.rs`).
+  `HarnessInfo` loads only a record that fits its kind (`try_from = "RawHarnessInfo"`, `misfit`), and
+  `HarnessInfo::endpoint` is the one place a record becomes an endpoint (`store-corrupt` otherwise). One
+  `HarnessRouter` holds the routing table (`ports/router.rs`).
+- **Items 5 and 6.**
+  - `SessionChoice` carries the verb's intent: `Resume` is `session-not-found` in the plan, before anything stops.
+  - The plan runs `port_for`, then `refuse_login_env`, then `process_command` first among its reads. `process-in-use` is
+    checked for a launch only.
+  - `stop_old` checks the old endpoint after `stop_owned` and adopts nothing.
+  - The wait is `wait_until`, until the process is located and idle.
+  - `relaunch_on` and `relaunch_recorded` are the one sequence: `tx_switch`, `interrupt_pane` and doctor's relaunch all
+    call it.
+  - `tx_switch`'s single-process branch applies the idle gate (`session-holds-permission`) and `check_unclaimed`, and
+    sends `--first` to the endpoint of the record the relaunch stored.
+  - The single-process chain repairs only while idle, through the caller's relaunch, writes no record after a relaunch,
+    and asks the login once per pass, only with a single process in scope.
+- **Items 7 to 10, the adapter.**
+  - The hook is fixed text.
+  - The reader fails closed: the directory and the file must be the user's alone, neither may be a link, and the file
+    must hold one absolute path. It is trusted only for a listed pid.
+  - The frame is one line, and the held window is 600 ms.
+  - `dialog open` is `harness-dialog-open`, and an unknown status is `unavailable`.
+  - `abort` is `abort-unsupported`.
+  - `login_status` reads `authMethod` alone, and both `claude` runs remove the 7 variables and drop stderr.
+- **Items 12 to 14.** `--harness` in `SpecFlags`; `port_for` as the one policy rule; `harness-change-refused` in E0 and in
+  `profile apply` before health; each open code declared where it is raised.
+
+**The relayed user request:**
+
+- the amendment came first (`008a995`);
+- the abort decision is recorded in both places;
+- the run is `in-session`, in its own worktree;
+- the answer about `say` and #839 is in the amendment;
+- the #835 coordination is now accurate in the code and in the record.
+
+Two sentences of section 15 lean on the roster and are advisory (Advisory 3).
+
+### Quality audit
+
+- **Correctness and failure handling.** No defect in behaviour, as in the first pass. The merge added none: #648's
+  roster reads the records through `PaneRow::from`, which reads no harness port or kind, and the wiring builds the Claude
+  harness lazily (`WiredHarness`), so a roster or a pane verb on a machine with no `claude` binary fails nothing until a
+  Claude call is made.
+- **Build guards.**
+  - The added `src` lines have no `unwrap`, `expect` or `panic!`, except the test kit's `constant_name`
+    (`conformance/claude.rs`), which carries `#[allow(clippy::expect_used)] // #831`.
+  - Every `#[allow]` carries a link.
+  - The largest touched `.rs` file is `pane_verbs/switch.rs`, at 893 lines; `lint.sh`'s 900-line gate covers
+    `crates/**/*.rs` only.
+  - Clippy with `-D warnings` and `cargo machete` are clean (T-green).
+- **Protocol.** `docs/protocol/v2.md` and the golden files are untouched. The record's `harness.port` is optional, and it
+  is absent only on a `claude` record.
+- **Tests.** The default run uses fakes only, and every wait is a bounded poll with a deadline. RED-first evidence and the
+  mutants are under the T precondition. The gap is REWORK 1.
+- **Documentation.**
+  - The CHANGELOG has an `## [Unreleased]` entry that links #831, and `changelog-check` passes.
+  - Updated: ADR-0021, ADR-0003, `docs/pane-control.md`, `docs/orchestrating.md`, `cli-surface.txt` and the research
+    note.
+  - The rework's doc sentences are accurate against the code: the roster paragraph, the `HOLLER_CLAUDE_BIN` basename
+    limit, the `Bindings` paragraph, and the rollback to a `holler` older than #831.
+- **Public-repository privacy.** I grepped all 13,096 added lines, the handoffs included. None holds a personal host, a
+  tailnet name, an IP other than `127.0.0.1`, a machine or account name, a private domain, a home path or a secret. The
+  one email is `someone@example.invalid`.
+- **Commit and PR hygiene.** The subjects are Conventional, and every commit carries `Co-Authored-By`. None carries a
+  session link (Advisory 4). The PR is not open yet.
+
+### Scope check
+
+As in the first pass: the brief's scope, less item 17 (#835 is not on `main`) and item 16 (#803's). This cycle added:
+
+- the merge of `origin/main`, which was needed, since the branch conflicted with `main` in three files;
+- one sentence or two for each of the first pass's Advisories 5 to 9, each a statement of this PR's own.
+
+There is no unrelated change and no roster code change. Listing a registry pane that has no hub row would change #648's
+decided output, so leaving that to #850 is right.
+
+### Verdict
+
+**REWORK** (`reworkKind: test-only`). TEST-ONLY: no `src/` change is required. T writes one test, and nothing else gates.
+
+1. **Required: the roster reads a registry that holds a Claude Code pane and prints that pane's cells on the hub row
+   joined to it.**
+   - **Why.**
+     - The brief's "The acceptance, as it can be met" says: "Every other acceptance line is a test: ... the roster and the
+       watchdog seeing the Claude pane where they read the registry."
+     - Since the merge of #648 the roster reads the registry, and section 15 item 18 says so, as built
+       (`ADR-0021.md:1318-1320`).
+     - Every roster test uses OpenCode records (`roster_panes_test.rs` and `roster_panes/*.rs`: `grep -i claude` finds only
+       a hub row's own `harness` cell), and `mixed.rs` pins `pane list`, not the roster.
+     - So nothing pins that a Claude record neither fails the registry read (that would be one `note:` line, with every
+       row's six cells `-`, the OpenCode panes' included) nor prints wrong cells on its row.
+   - **Where.** `crates/holler-cli/tests/roster_panes/registry.rs` (238 lines), beside
+     `the_cells_are_pane_lists_cells_for_the_same_record`, whose `pane_list_cells` it can reuse. The harness calls the
+     pure `roster_cmd::render` with a literal hub reply and the test kit's fakes: `render` at `roster_panes_test.rs:103-111`,
+     `Rig` at `:115-162`, `hub_row` and `reply` at `:168-214`, and `pane` at `:217-233`.
+   - **Fixture.**
+     - The base records, plus one Claude Code record: `pane("demo-c1r2", ...)` with `harness` set to
+       `HarnessInfo { kind: HarnessKind::Claude, port: None, pid: Some(4242), health: Health::Healthy }`, a session of
+       record, `last_observed.shown` equal to it, and `driven` `None`.
+     - The reply: `BASE_ROWS` plus one row named `demo-c1r2/<session>`, as a body for that pane would advertise it (#850).
+   - **Assert**, in text and under `--format=json`:
+     - exit 0, and an empty stderr (no `note:` line);
+     - the Claude row's six cells equal `pane_list_cells` of its record: PANE `demo-c1r2`, its POS and PROFILE, HEALTH
+       `healthy`, SHOWN its session of record, DRIVEN `-`. In JSON, its keys `pane`, `pos`, `profile`, `health`, `shown`
+       and `driven` carry the same values;
+     - every base row's cells are what they are without the Claude record.
+   - **Mutant.** For example, drop `claude` records in `Registered::of` (`roster_cmd.rs:262-267`): the test must fail.
+     Then revert the mutant. The test passes on today's code. It pins how #831's record meets #648's roster.
+   - **T-green's premise does not hold here.** `handoff-T-green.md:103-104` says that "a roster test for a hub row joined
+     to a Claude Code pane cannot exist until a body serves that session (#850)". In the roster's harness, every hub row
+     is a literal reply, so this row exists in the test as every other fixture row does. What #850 adds is the row in
+     production. F listed this test for T (`handoff-F.md:140-141`).
+
+   **Optional, in the same pass (does not gate):** `pane get` of a Claude pane.
+   - The text line is `harness: claude port=- pid=<pid>` (`get.rs:284-290`). It is the one output line this story
+     changed for the kind.
+   - The JSON's `harness` has `kind` `claude`, the pid and no `port` key. This is the watchdog's read path (pfleet#396).
+
+### Advisory notes
+
+None blocks the merge.
+
+1. **The opt-in real test was not run** (the first pass's Advisory 1). It is not a merge condition: the issue makes it
+   opt-in and `#[ignore]`. Run it before #831 closes, and before a Claude Code pane is launched on the fleet. Still
+   unverified against the real binary, and each fails closed:
+   - the hook's `$PPID` key;
+   - the inbox frame;
+   - the launch through tmux;
+   - `agents --json` after a SIGKILL.
+2. **For the PR body** (the first pass's Advisory 2, as F updated it):
+   - "Part of #831", and what remains: item 17 after #835; the `say` step after #839 and #850; a Claude pane's roster row
+     with #850; the real test's first run;
+   - the edits to the amendment, as built: items 2, 4 to 10, 12 to 15, 17 and 18, the "Not built here" paragraph, and
+     decisions 26 to 28;
+   - the `stop_owned` difference from the issue's "by the recorded pid";
+   - the AI disclosure that `CONTRIBUTING.md` requires, added with `gh pr edit` (the repo's `CLAUDE.md`);
+   - A-dup's W5: a comment on #696 adding `holler-adapter-claude/src/exec.rs` to its scope. W1 to W4 and W9 go in as
+     follow-ups.
+3. **Two sentences of section 15 lean on the roster.**
+   - Item 8 (`ADR-0021.md:1190`) says "and the roster can say which wait it is". The roster #648 built calls no adapter
+     and shows no activity, while `doctor` names the wait (`pane-waiting`). Change one word ("doctor") when the ADR is
+     next touched.
+   - Item 18 and "Not built here" say that #850 "also gives a Claude pane its roster row". That holds only if #850's body
+     advertises a name that the roster joins to the pane: today the row's label (`roster_cmd.rs:323-333`), or whatever
+     #839 moves the join to. #850's issue says neither. A comment on #850 at the PR step would carry it.
+4. **The commit trailers carry no session link.**
+   - `CONTRIBUTING.md:19-21` asks for a `Co-Authored-By` trailer and a session link.
+   - Every commit on the branch has the trailer, and none has the link. The driver's commits already on `main` are the
+     same (`037405f`).
+   - The squash message and the PR body are written at the PR step.
+5. **`git diff --check`** flags one trailing space, in this file's first pass, and this rewrite removes it.
+   `docs/handoffs/667-brief.md`'s flags are `main`'s.
+6. **Lower-value test gaps, carried:**
+   - `pane get` (unless the optional item above is done) and `pane watch` over a Claude record;
+   - the output of `holler interrupt --pane` for a Claude pane;
+   - `server-unsupported`.
+7. **The older #828 sentences** (ADR-0021 sections 5 and 8, "Deferred", and #649's CHANGELOG entry) are other stories'
+   words, and #839's issue says it edits them.
+8. **Sizes and format.**
+   - `pane_verbs/switch.rs` is 893 lines and `launch/rig.rs` 852. The next story that touches either splits it first.
+   - `cargo fmt --check` fails across the workspace, on drift that predates this story. Neither CI nor `lint.sh` runs it.
+
+---
+
+# First pass: the spec audit (2026-10-11, 21:40 MDT)
+
 **Date:** 2026-10-11, 21:40 MDT
 **Branch:** `issue-831-implementation` at `adad6a2` (worktree `.claude/worktrees/0831-claude-harness`). Its merge base with
 `origin/main` is `d6ae539`, which F's phase commit `881ebe1` merged (two parents). `origin/main` is now `0f5835e` (#855;
@@ -210,7 +484,7 @@ ten parallel paths. Of W15:
 - **Two OpenCode message wordings changed** so that they also fit the single process:
   - `session-busy`: "reset it once it ends" became "try again once it ends";
   - `profile apply`'s unhealthy step: "its harness server on port N" became "its harness at port N".
-  
+
   No test asserted either, and the codes are unchanged. Acceptable.
 
 ## Verdict
