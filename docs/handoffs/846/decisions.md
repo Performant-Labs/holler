@@ -22,3 +22,9 @@
 - **Assumed:** No `CHANGELOG.md` line for a test-only refactor, per #800 and #735; no D2 follow-up issue exists yet, so the module doc names it without a number.
 - **Hedged:** Only the new `traps.rs` was rustfmt-ed; the edited `pane_integration` files were not rustfmt-clean at the base and were left as they were outside the changed hunks.
 - **Evidence:** `docs/handoffs/846/handoff-F.md`; the five AC 2 targets reproduce T's baseline (43/71/347/5/118 passed; 1/4/0/3/0 ignored); the workspace test exits 0; AC 1 greps print one line each; `lint.sh` exit 0.
+
+## Phase 7 - T, verify GREEN (2026-10-12)
+- **Decided:** PASS. The five targets reproduce the baseline exactly (43 / 71 / 347 / 5 / 118 passed; 1 / 4 / 0 / 3 / 0 ignored); AC 1, 3, 5, 6 hold by grep, diff and `wc -l`; no test was repaired (F flagged none).
+- **Assumed:** The workspace clippy failure at `token_load_test.rs:60` is pre-existing and unrelated (an untouched file, F reported the same); `cargo machete` is CI's, as it is not installed here and no dependency changed.
+- **Hedged:** Mutating `OnStart::Propagate` to swallow left every target green, so that mode is unpinned (as at the base). Per the brief no behaviour test was added; it is an advisory note for O. The two kill-side mutations do fail tests.
+- **Evidence:** `docs/handoffs/846/handoff-T-green.md`; mutation runs on `linked_host.rs`, reverted (`git status` clean).
