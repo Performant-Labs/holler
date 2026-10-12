@@ -158,3 +158,52 @@ Run handoff directory `docs/handoffs/851` · branch `issue-851-implementation` �
   - `find` returned one `build.rs`.
   - `cargo tree -p holler-cli -e normal` lists 8 workspace crates, without `holler-load-test` or `holler-pane-testkit`.
   - `bash scripts/lint.sh` exited 0, and no golden file is in the diff.
+
+## S, spec audit (Phase 10): 2026-10-11T19:50-06:00
+
+- **Decided:** PASS (see handoff-S.md).
+  - **Every AC and Work item is met.** Each AC has a test that fails without the change, and the pipeline note is in
+    `docs/pane-control.md` §10.
+  - **AC 2 is audited against T's RED reading,** `holler 0.4.0 (bda1069-dirty)`, which A's finding 6 delegated to T.
+    It is recorded, not a silent deviation.
+  - **The issue's Homebrew sentence rests on a false premise, but its goal holds.** A release binary is built in a
+    checkout of the tag and names that commit. That makes it not an ADVISORY-HOLD.
+  - **Six advisories, none blocking:**
+    - (1) AC 2's literal wording;
+    - (2) the Homebrew sentence in the record;
+    - (3) A-dup's wording warn;
+    - (4) `checkout_head` is looser than `git_state` for an archive inside another repository;
+    - (5) the rerun triggers are checked only by hand;
+    - (6) the PR body's AI disclosure and a Conventional Commit squash subject, owed once the PR opens.
+- **Assumed:**
+  - T-green's recorded command output stands: the Tier 1 table, the mutation table and the `git archive` builds. I did
+    not re-run Tier 1 or Tier 2.
+  - Only handoff files changed after T-green's checks at `bf26366`, which I confirmed with `git diff --name-only`, so
+    those results hold for HEAD `f652001`.
+- **Hedged:**
+  - Advisory 1: the issue's AC 2 wording also fits `(bda1069)-dirty`. I judged git's `--dirty` form the better
+    reading, and kept it for the operator to confirm in review.
+  - Advisory 4 is reachable only when tests run from an archive inside an unrelated repository, never in CI or a clone.
+- **Evidence:**
+  - **Read in full:**
+    - the issue, through `gh issue view 851`, which matches the brief verbatim;
+    - every handoff in `docs/handoffs/851/`;
+    - `git diff origin/main...HEAD`: code, tests and docs.
+  - **Searched:**
+    - `CARGO_PKG_VERSION` in `crates/` and `plugins/` (3 production uses: the seam default, `holler_cli::VERSION`, the
+      ACP `clientInfo`);
+    - every `version` field and every print of one;
+    - consumers of `--version` or `hub status` in `scripts/`, `install.sh`, `plugins/`, `agent-skills/` and
+      `.github/`;
+    - `include_str!`, `include_bytes!` and `#[path]` in production code (only `build.rs` includes
+      `build_version.rs`);
+    - which docs scans read `docs/handoffs/`;
+    - a privacy grep of every added line (no hits).
+  - **Measured:** `wc -l` on every touched `.rs` file (`docs.rs` is 899, the largest).
+  - **Also read:**
+    - `ci.yml`: the OS matrix (Windows is off), the clippy step and the PR-size warning;
+    - `scripts/release-build.sh` and `release-arm64.yml`;
+    - the CHANGELOG 0.3.0 entry on Homebrew;
+    - `CONTRIBUTING.md`;
+    - `log.rs`'s banner;
+    - the `Hello` struct.
