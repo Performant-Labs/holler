@@ -182,3 +182,56 @@
   - **Merge state:**
     - `git merge-tree --write-tree HEAD origin/main`: conflict in `CHANGELOG.md` only;
     - per-branch `git diff --name-only <merge-base> <branch>` over the shared scratch files: only #649's merged branch.
+
+## S (spec audit): 2026-10-11T20:45-06:00 (MDT)
+- **Decided:** PASS on `bda1069...4bf1524`. The detail is in `handoff-S.md`.
+  - **Preconditions met:**
+    - A: PASS, and A-dup: PASS.
+    - T-red: RED shown on each pin's own assertion, never a compile error.
+    - T-green: GREEN, with no blocking issue.
+  - **A1 to A17:** each is met by a named test or by recorded evidence. The table in `handoff-S.md` names the file, function and line.
+  - **Decisions 1 to 14:** each is implemented as stated, including A's binding W-1 to W-5.
+  - **Deviations:** T's five are recorded with reasons, so none is silent:
+    - test B passes `--herdr-session` in (ii) and (iii);
+    - `--check-json`;
+    - `Still.registry` as `data.panes`;
+    - `delete_strays` was not moved;
+    - `scenario.rs` is 551 lines.
+
+    Each is necessary or equivalent.
+  - **Scope:** exactly the brief's. `scratch/verbs.rs` is A's W-6 decomposition.
+  - **Advisory only:**
+    - M1 and M7 die earlier than A16 names, so step 3's own placement check has no mutant of its own.
+    - Test B (ii) measures probe order from the end state only.
+    - PR-phase work: the `CHANGELOG.md` conflict with #851, the AI disclosure in the PR body, and a session link in the squash message.
+    - W-9's comment on #667.
+    - A-dup's W-1 to W-3.
+    - `docs/testing.md`.
+- **Assumed:**
+  - T-red's and T-green's recorded command output is accurate. I ran no Tier 1 or Tier 2 check, and no opted-in run.
+  - The squash merge will carry a session link and the PR body will carry the AI disclosure. Both are the run's agent's, after the script opens the PR (CLAUDE.md).
+- **Hedged:**
+  - **A16's "each must fail the named step".** I read it by decision 12's purpose: a mutant the scenario does not fail is a gap. Each mutant is killed. M5 fails in its named step, while M1 and M7 fail in earlier steps.
+  - **The handoff's file name.** I wrote `handoff-S.md` inside the run directory, as #649's and #652's S handoffs are named there. The role doc's `<issue>-S.md` names a file loose under `docs/handoffs/`.
+- **Evidence:**
+  - **Read in full:**
+    - the brief's sections before the Evidence, plus E48 and E61;
+    - every handoff of this run, `decisions.md` and `evidence.md`;
+    - the issue (`gh issue view 667`: open, no comments);
+    - the whole code diff, and all of `scratch/mod.rs` and `scratch/verbs.rs`;
+    - every file of `profile_apply_scenario/`.
+  - **Facts checked:**
+    - **Equal to the code they replace:** the moved bodies, against the deleted hunks; and `launch_args`'s literal list, against `bda1069`'s inline list.
+    - **Matching production:** `ACTIONS` and `OUTCOMES`, against `tx_apply.rs`'s variants (6 and 8).
+    - **The guard's coverage:** clap's `--herdr-session` is `#[arg(long, value_name = "NAME")]` only, with no short form, alias or env.
+    - **Test B's tmux check:** `owned_pids` targets `={pane}`, so a pane's tmux session bears its name.
+    - **The model guard:** `no_model_can_be_reached` needs `raw` to get a reply.
+    - **T-green's `/tmp` attribution:** `wired.rs`'s `trap_dir()` makes `/tmp/hlr649-*` directories.
+  - **Commands:**
+    - `wc -l` on the touched files (largest 551);
+    - the `lint.sh` rules, and the allows the diff adds (five, each `// #667`);
+    - `rustfmt --edition 2021 --check` on the six new non-`main.rs` files (clean);
+    - a privacy grep over every added line (no hit);
+    - the commit messages against `.githooks/commit-msg`;
+    - `git merge-tree --write-tree HEAD origin/main` (conflict in `CHANGELOG.md` only);
+    - a use count for every new function.
