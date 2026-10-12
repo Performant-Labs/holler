@@ -75,6 +75,7 @@ fn canonical_frame(method: &str) -> String {
         "session/answer" => format!(
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/answer","params":{{"session":"io/alpha","choice":"0"}}}}"#
         ),
+        "session/rebind" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/rebind","params":{{"session":"alpha","harness_session_id":"ses_1"}}}}"#),
         "admin/status" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/status","params":{{}}}}"#),
         "admin/roster" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/roster","params":{{"all":false,"prefix":null}}}}"#),
         "admin/say" => format!(r#"{{"jsonrpc":"2.0","id":"{id}","method":"admin/say","params":{{"session":"io/alpha","text":"hi","queue":false,"grant":null,"timeout_ms":600000}}}}"#),

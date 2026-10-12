@@ -703,3 +703,6 @@ async fn dispatch_next_queued(inner: &mut Inner) {
 fn notify_presence(inner: &Inner) {
     let _ = inner.presence_tx.send(inner.name.clone());
 }
+
+#[cfg(test)]
+mod rebind_tests;

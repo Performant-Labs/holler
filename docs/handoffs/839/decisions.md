@@ -74,3 +74,35 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
   - **Workflow:** `coding-pipeline.workflow.mjs` (the arch gate), `pipeline-conventions.md` section 1, the generated
     `feature-implementor.md` and `tester.md`.
   - Commands: `grep -n`, `sed -n`, `wc -l`, `git log`, `git ls-files`, `git ls-remote`, `git merge-base`.
+
+## T, author tests (RED): 2026-10-12, 07:58 MDT
+
+- **Decided:**
+  - **RED is valid.** It is compile-level for the contract and assertion-level wherever the code compiles today (`docs/handoffs/839/handoff-T-red.md`). The suite has about 140 tests, new or changed, in 19 files and 6 crates. It covers Acceptance 1 to 22, at the cheapest tier each criterion allows: pure functions in `holler-pane`, the fake in the test kit, the hub in process over its real control socket with fake bodies, the body over a real `SessionManager` and the fake OpenCode server, the verbs over the fakes, and one end-to-end file (`driven_e2e_test`, a new `[[test]]`).
+  - **The contract's names and shapes** are the ones the brief gives. T fixed the ones it leaves open, listed in the handoff:
+    - `FakeHub`'s API, with `fail_send` for the race;
+    - `HubCall` and `SentPrompt`, with `of_record`;
+    - `HubFixture`, and the 7 conformance case ids;
+    - `handle_rebind`'s signature, and `REBIND_DEADLINE` and `REBIND_REPLY_WAIT`;
+    - `SessionCommand::Rebind`'s fields;
+    - `{admitted: true}`;
+    - `send_call` and `HubClient::new`.
+  - **T migrated every test `Ports` literal**, with `&Unwired` where nothing reaches the hub and a `FakeHub` in the doctor and Claude rigs. It also rewrote the pins this story changes: E83, E84, E91, `switch_moves_the_tui_and_the_record_together`, `assert_recorded` and D9's scenario step.
+  - **`pane_gate`'s tests are `panes/gate/tests.rs`**, the hub's `holds/tests.rs` precedent. The brief's `panes/gate_tests.rs` is not a child module of `gate.rs` without a `#[path]`.
+- **Assumed:**
+  - **A's warn 4.** A reset with no advertised body reads no `list_sessions` or `pane_store.list` (the existing op pins are kept).
+  - **A's warn 3.** `interrupt` with text pre-checks the pane gate (one new test, `check_only_test.rs`); O may drop it.
+  - **Acceptance 20(d) row (1)** is `session-of-other-pane`, by D3 step 1's order ("the existing refusals; then" the driver). The acceptance text says `session-driven-elsewhere`, so this is flagged for O.
+- **Hedged:**
+  - **Compile-level RED** shows the contract is missing. It cannot show that each behavioural assertion fails for the right reason, which is why T-green spot-checks by removing behaviour.
+  - **To keep F from meeting T's own type errors**, T type-checked the whole suite against a throwaway stub of the contract and ran `cargo clippy --workspace --all-targets -- -D warnings` (clean). It then removed the stubs and restored `src/`. `git status` matches the T-only change set.
+  - **The contract amendment** (ADR and docs, scope 1) is not on the branch, so the docs test is RED on today's text until it lands.
+- **Evidence:**
+  - **Read:** the brief's decision text, Acceptance and Blast radius, and the Evidence the tests touch (E1 to E24, E30 to E38, E42, E46, E47, E77, E81 to E86, E91, E95 to E97, E101 to E105, E116, E122 to E127, E137 to E142, E147 to E150, E158 to E170); `handoff-A.md`.
+  - **The code:** `tx_switch.rs`, `findings.rs`, `reconcile.rs`, `ports.rs`, `circuit/dispatch.rs`, `live.rs`, `talk.rs`, `interrupt.rs`, `control_server.rs`, `control.rs`, `holds.rs`, `roster.rs`, `session_manager.rs`, `session_manager/task.rs`, `prompt_dispatch.rs`, `connection/session_dispatch.rs`, `http_attach_driver.rs`, `query.rs`, `say_cmd.rs`, `prompt_target.rs`, `wiring.rs`, the test kit's `fault.rs`, `fixture.rs` and `pane_store.rs`, and the rigs and harnesses named in the handoff.
+  - **Commands:**
+    - `cargo test -p <crate> --test <target> --no-run`, for every target touched;
+    - `cargo test` on `check_only_test`, `offline_reason_test`, `hold_single_path_test`, `docs_pane_control_test`, the proto lib, `codec_test` and `http_attach_driver_test`;
+    - `cargo clippy --workspace --all-targets -- -D warnings`, against the stubs;
+    - `bash scripts/lint.sh` (exit 0);
+    - `rustfmt --edition 2021` on the new files only, with the `#[path]` includes kept out.

@@ -151,7 +151,10 @@ mod tests {
     /// connection still gets `method_not_found` for them and no golden file moves.
     #[test]
     fn pane_methods_not_in_wire_catalog() {
-        assert_eq!(CATALOG.len(), 22, "the v2 wire catalog is closed");
+        assert_eq!(CATALOG.len(), 23, "the v2 wire catalog is closed");
+        // #839: `session/rebind`, the one additive row: a request, hub to body.
+        let rebind = find("session/rebind").map(|m| (m.kind, m.dir));
+        assert_eq!(rebind, Some((MethodKind::Request, Direction::HubToBody)), "session/rebind");
         assert!(find("pane/list").is_none());
         assert!(find("profile/list").is_none());
 
