@@ -58,3 +58,33 @@ tmux kill-session -t herdr-session-jupiter
 
 The tmux sessions `hj-*` are not touched by it (a detached client leaves them running). The
 workstation's server and layout are as they were.
+
+## Correction (2026-10-11, evening): the grid was built column-major, and was rebuilt row-first
+
+The first build (steps 2 and 3 above) split right three times and each column down once. The Holler adapter reads rows as the
+root's chain of `down` splits (`crates/holler-adapter-herdr/src/layout.rs`, `grid_of`; ADR-0021 section 10), so that tree gave
+no pane a cell: the adapter listed none of the eight, and `holler pane import` found no pane with a label (`pane-unlabelled`).
+The earlier check (the pane list over ssh) proved only that the panes existed, not that the adapter could place them.
+
+The workspace was rebuilt in the new session only, beside the old one, following `scripts/spikes/herdr-grid.sh` and the
+adapter's own recipe (`plan_splits`): a `down` split for the second row (ratio 0.5), then each row's `right` splits (ratios
+0.25, 0.3333, 0.5). `herdr-relayout` does not exist, and `plan_splits` cannot be called on its own (it runs inside
+`holler pane launch`), so the calls were made by hand.
+
+Order and checks:
+
+1. The old workspace was renamed `jupiter-colmajor`; the new one was created as `jupiter`.
+2. The tree was read back: 2 rows of 4, each pane at the cell it should have.
+3. Each new pane ran `tmux attach-session -f ignore-size -t <name>` (3 clients on each tmux session meanwhile).
+4. The old labels were cleared, then the new panes were labelled (`hj-c<col>r<row>`, the name that sits at `r<row>c<col>`).
+5. `holler pane import --dry-run` against a scratch hub, with `HOLLER_HERDR_SESSION=jupiter` and
+   `HOLLER_HERDR_WORKSPACES=jupiter=2x4`, joined all eight panes by label at `r1c1` .. `r2c4`, with no `pane-unlabelled`,
+   `pane-label-ambiguous` or `name-cell-differs`. It wrote nothing; the state root's files were unchanged by hash.
+6. Only then was the old workspace closed. That ended its eight `tmux attach` clients and nothing else: the eight tmux
+   sessions and their agents were untouched, and every session kept two clients (the workstation's and the new one).
+
+The workstation's server and layout were not touched at any point. The import's other findings (`source-missing`,
+`source-unreadable`, `sources-disagree` on one pane) are state-root work, not layout.
+
+Lesson for the guide and for any rebuild: build rows first (outer splits `down`), then split each row `right`, and check the
+layout with the adapter (`pane import --dry-run`) before trusting it.
