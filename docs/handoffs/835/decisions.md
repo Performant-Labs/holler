@@ -1065,3 +1065,57 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
   - Mutation: `is_claude_code_command` set to `false` fails 3 of the 7 `import::harness` tests; restored, 347 passed.
   - `git grep -n "cannot drive" -- crates/holler-pane/src/import`: empty. `origin/main` `b76f4d2`, merge-tree exit 0.
   - `evidence.md`, section "T-green, cycle 5": `ports.rs:387-392`, copied from source.
+
+## A, anti-duplication gate (fourth pass, after F cycle 6, the `harness-claude-code` message): 2026-10-12T06:05-06:00 (MDT)
+
+- **Decided:** PASS, 0 `block` and 1 `warn` (`docs/handoffs/835/handoff-A-dup.md`, which replaces the third pass's at
+  `ecb04db`).
+  - **The scope.** This cycle's diff is `git diff ecb04db 05936e0 -- . ':!docs/handoffs'`: two files, 7 lines added and
+    5 removed. S's `bb233f0` changed only handoffs.
+  - **No parallel path.** F changed one `&str` literal in place: the message of `Outcome::claude_code`
+    (`assess.rs:104-106`). It still goes through the one `left_alone`, which has three callers. There is no new
+    constructor, `Action`, `Level` or finding kind.
+  - **T-green's edit is test-only.** It changes `harness.rs`'s module doc (S's Advisory 3) and no assertion, helper or
+    rig.
+  - **The third pass's W1 is closed.** "cannot drive" is gone from the import. The one left in `crates/` is `main`'s
+    `unmanaged.rs:70-71`, which is accurate.
+  - **W2 is carried, unchanged and test-only:** the `run_with_host` and `text_row` twins.
+- **Assumed:**
+  - T-green's GREEN on `05936e0` stands. I ran no build or test, as the role says.
+  - `origin/main` stays `b76f4d2` until the next phase.
+- **Hedged:**
+  - **A CLI flag in `holler-pane`'s runtime text is not drift.** The crate names flags in eight other runtime strings
+    (`--dry-run`, `--herdr-session`, `--take-over`, `--spec-only`, `--profile`, `--grid`, `--as-operator`, `--fix`).
+    `holler-pane` still has no field or branch for the switch.
+  - **The first issue number in `holler-pane`'s runtime text is not a finding.**
+    - S's condition 3 required it.
+    - The dependency direction keeps the library from using the CLI's `CLAUDE_CODE_STORY` or
+      `not_implemented_message`.
+    - Moving the number into `holler-pane`'s public API would be over-abstraction for a sentence #831's step rewrites.
+  - **The grep phrase is repeated on purpose.** "until #831's adoption step lands" is now in the message and the test's
+    doc as well. Each is a different sentence, repeated so that one grep finds every place to update. It is not a
+    duplicated object.
+  - **Noted for #831's adoption step, outside this PR:** `main`'s `reconcile.rs:449` ("no holler verb adopts a pane").
+    It becomes false for these panes once that step lands. I put it under "For S and the operator", not as a finding.
+- **Evidence:**
+  - **Git:**
+    - `git fetch` at 06:00 MDT: `origin/main` is `b76f4d2`, an ancestor of `HEAD`;
+    - `git merge-tree --write-tree HEAD origin/main` exits 0 (`81c78d9`);
+    - `git diff --name-only ecb04db HEAD -- 'crates/*/src/*'`: `assess.rs` only;
+    - the PR's diff outside the handoffs: still 21 files, 952 lines added and 124 removed.
+  - **Read:**
+    - `assess.rs` in full; `findings.rs:64-80`;
+    - the CLI `pane/import.rs:1-200`; `output.rs:253-262`;
+    - `ports.rs:380-397`; `reconcile.rs:440-456`;
+    - `harness.rs:1-20`;
+    - the brief (round 5); `handoff-A.md` pass 4; `handoff-S.md` cycle 4; `handoff-F.md` cycle 6;
+      `handoff-T-green.md` cycle 5; this journal from the third A-dup on.
+  - **grep:**
+    - `left_alone(` and `HarnessClaudeCode`: one constructor and one build site;
+    - "adoption step lands" and "cannot drive" across `crates/`, the ADRs, the guide and the CHANGELOG;
+    - runtime strings in `holler-pane/src` that name a flag or an issue;
+    - "adopt" in `holler-pane/src`;
+    - personal names and home paths in this cycle's added lines and in `HEAD`'s tree: none.
+  - **Counts:**
+    - repeated long lines in the two changed files: the same as the third pass;
+    - `wc -l`: `assess.rs` 435, `harness.rs` 341, `rig.rs` 535.
