@@ -988,3 +988,56 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - private names, IPs, home paths, e-mail addresses and keys in the 3,154 added lines;
     - Conventional subjects and trailers on all 26 branch commits;
     - `wc -l` of every touched file.
+
+## F, implement S's cycle-4 REWORK (cycle 6, text only): the `harness-claude-code` message: 2026-10-12T05:50-06:00 (MDT)
+
+- **Decided:** S's one item (`handoff-S.md` cycle 4, "Verdict", item 1), in place (`docs/handoffs/835/handoff-F.md`,
+  which replaces cycle 5's at `59d8d59`). `archChanged: false`.
+  - **The message of `Outcome::claude_code`** (`holler-pane/src/import/assess.rs:104-106`) is now "its tmux session runs
+    Claude Code, and the import does not adopt such a pane until #831's adoption step lands (--adopt-claude-code), so it
+    leaves the pane alone". It was "..., which Holler cannot drive yet, so the import leaves the pane alone".
+  - **S's four conditions hold.** It does not say that Holler cannot drive Claude Code. It gives the import's reason,
+    which is true on the merged tree. It has the help's words "until #831's adoption step lands", on one source line, so
+    the grep finds it. It is still a constant, with no observed text.
+  - **No merge.** `origin/main` is still `b76f4d2`, an ancestor of `HEAD`, and `merge-tree` is clean, so S's "do not
+    merge" applies.
+  - **No other file.** No test pins the message, and no document quotes it.
+- **Assumed:**
+  - The script's phase commit stages `assess.rs` with the handoff and the two appends.
+  - `origin/main` stays `b76f4d2` until then (fetched at 05:38 and 05:48 MDT).
+- **Hedged:**
+  - **The wording is not S's example, word for word.** In S's "Claude Code, which the import does not adopt", "which"
+    refers to the harness, but the import adopts panes. "such a pane" fixes that. The parenthetical names the switch, as
+    S's condition 2 does. S offered its wording "for example".
+  - **The flag is written bare in the message**, as the import's other runtime text writes a flag (`import.rs:164`, "run
+    with --dry-run for the report") and as the CLI's refusal of this flag does.
+  - **It is the first runtime string in `holler-pane` that names an issue.** S's condition 3 asks for it, so that #831's
+    step finds every place to update. The CLI's refusal of the same flag already names #831 at run time
+    (`not implemented (story #831)`).
+- **Evidence:**
+  - Commands, on `bb233f0` plus this edit:
+    - `git grep -n "cannot drive" -- crates/holler-pane/src/import`: prints nothing;
+    - `cargo test -p holler-cli --test pane_verbs -- import::harness`: 7 passed;
+    - `cargo build --workspace --all-targets`: exit 0; clippy `-D warnings`: exit 0; `lint.sh`: exit 0;
+      `changelog-check`: ok;
+    - CI's workspace step: exit 0, 167 groups, 2600 passed, 0 failed, 36 ignored (as in cycle 5);
+    - rustdoc `-D warnings -p holler-pane`: exit 0; `cargo machete`: clean; `rustfmt --check` of `assess.rs`: exit 0;
+    - `git diff --check`: clean;
+    - `strings` on the built `pane_verbs` test binary: the new message, whole.
+  - Live: `git fetch` at 05:38 and 05:48 MDT (`origin/main` `b76f4d2`); `git merge-tree --write-tree HEAD origin/main`:
+    exit 0.
+  - Greps:
+    - `until #831's adoption step lands` outside the handoffs: the CLI's module doc and help, ADR-0021 `:814` and
+      `:1546`, the guide `:379`, and now `assess.rs:105`;
+    - `harness-claude-code` and the old message's words in `crates/` and `docs/`: no test or document quotes the
+      message; `harness.rs:163` checks the line's prefix only;
+    - runtime strings in `holler-pane/src` that name an issue: none before this one.
+  - Read:
+    - `handoff-S.md` (cycle 4), `handoff-A-dup.md` (W1), the brief (round 5), handoff-F (cycle 5), this journal and
+      `evidence.md`;
+    - `import/assess.rs`, `import/findings.rs:64-76`, `holler-pane/src/import.rs:15-35` and `:160-166`;
+    - the CLI `pane/import.rs:1-200`;
+    - `pane_verbs/import/harness.rs` and `rig.rs`'s `one_finding` and `message`;
+    - ADR-0021 `:1006-1024` and `:1359-1362`, `CHANGELOG.md:8-16`, `unmanaged.rs:68-73`, the guide `:352`.
+  - `evidence.md`, section "F, cycle 6": one entry (`CHANGELOG.md:11-15`), and the shift of cycle 1's `assess.rs`
+    lines.

@@ -257,3 +257,25 @@ quoted line is `main`'s text, which this PR does not change; the prose of this c
   > /// `holler pane relaunch` puts under Holler once a record names it). The import tells such a
   > /// pane by its foreground command (#835, `pane::is_claude_code_command`), not by this rule.
   > ```
+
+## F, cycle 6 (S's cycle-4 REWORK: the `harness-claude-code` message), 2026-10-12
+
+Line numbers are at `bb233f0` plus this cycle's one edit (`crates/holler-pane/src/import/assess.rs:104-106`), which
+is uncommitted. That edit adds one line, so an `assess.rs` line after 105 that an earlier section cites is one lower
+now: the first entry's `assess.rs:163-174` (cycle 1) is `:164-175` here. No file that cycle 5's section cites has
+changed since, so its line numbers still hold. The new message relies on two facts: cycle 5's entry for ADR-0021
+section 15, item 17 (`docs/adr/ADR-0021.md:1359-1368`: the adoption is #831's step, a re-run of the import with
+`--adopt-claude-code`), and the one below.
+
+- **Fact:** On the merged tree Holler launches and drives a Claude Code pane (#831, through #857); what waits is the
+  adoption of the fleet's existing Claude Code panes, #831's last step. So the old message, "which Holler cannot drive
+  yet", is false, and the new one names the adoption step instead.
+  **Source:** `CHANGELOG.md:11-15`
+  **Verbatim excerpt:**
+  > ```markdown
+  > - Pane control, a Claude Code harness (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  >   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
+  >   Code process, recorded by its pid and with no port, and the pane verbs drive it
+  >   ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
+  >   last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
+  > ```

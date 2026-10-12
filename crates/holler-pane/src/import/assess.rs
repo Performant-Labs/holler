@@ -101,8 +101,9 @@ impl Outcome {
 
     /// A pane whose tmux session runs Claude Code (#835): no record, never blocking.
     pub(super) fn claude_code(name: &PaneName) -> Self {
-        let message = "its tmux session runs Claude Code, which Holler cannot drive yet, so \
-                       the import leaves the pane alone";
+        let message = "its tmux session runs Claude Code, and the import does not adopt such a \
+                       pane until #831's adoption step lands (--adopt-claude-code), so it leaves \
+                       the pane alone";
         Self::left_alone(
             name,
             Action::Skipped,
