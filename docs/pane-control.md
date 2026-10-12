@@ -27,9 +27,11 @@ OpenCode server and its TUI) or, since issue [#831](https://github.com/Performan
 `holler pane launch PANE --harness claude` started, section 2). A pane that no record names (in the fleet, a Claude Code
 pane set up by hand) is outside the rule: no `holler pane` verb restarts it, and for such a Claude Code pane
 `scripts/pane-restart` is still the way to restart it, now and after the cutover's sign-off. Adopting those panes into
-the registry is a re-run of the import with `--adopt-claude-code`, the last step of #831, which waits for #835 and is not
-built (section 12). The import (`pane import`) creates no record for a pane whose files name another harness (the finding
-`harness-not-opencode`, section 10). A Herdr pane that no record names is **unmanaged**, a state that is observed and never stored:
+the registry will be a re-run of the import with `--adopt-claude-code`, the last step of #831 (section 12). The import
+(`pane import`) creates no record for a pane whose files name another harness (the finding `harness-not-opencode`), and
+by default none for a pane whose tmux session has a foreground process named `claude`, a Claude Code pane (the finding
+`harness-claude-code`, sections 3 and 10). A Herdr pane that no record names is **unmanaged**, a state that is observed
+and never stored:
 `holler pane list` over the whole registry shows it in a table of its own (section 4), and `holler pane get PANE` shows it
 when PANE is its label or its Herdr pane id. A verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
 `close`) refuses it with `pane-unmanaged` (exit 3), and a name that is neither a record nor an unmanaged pane is
@@ -327,11 +329,14 @@ holler pane doctor --unmanaged-stalled-after 1800
 ### `holler pane import --from STATE_ROOT --herdr-session NAME`
 
 Adopt the panes the old launcher runs into the registry, as the profile `fleet` (section 10). Its full synopsis is
-`holler pane import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE] [--dry-run]`:
+`holler pane import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE] [--dry-run] [--adopt-claude-code]`:
 `--launcher FILE` names the launcher table (default `STATE_ROOT/launcher.toml`), `--orchestrator PANE` (repeatable)
 names the orchestrator's pane, since a role is never read from a name, and `--dry-run` reports and writes nothing.
-`--herdr-session` is declared optional and is required at run time (`usage` without it). The import adopts what is
-running: it never starts, stops, types into or moves anything, and deletes nothing from the source files.
+`--herdr-session` is declared optional and is required at run time (`usage` without it). `--adopt-claude-code` would
+also adopt the Claude Code panes the import leaves alone (`harness-claude-code`); until the adoption step of
+[#831](https://github.com/Performant-Labs/holler/issues/831) lands (ADR-0021 section 15, item 17) it is refused with
+`usage`, in a dry run too. The import adopts what is running: it never starts, stops, types into or moves anything, and
+deletes nothing from the source files.
 
 ```bash
 holler pane import --from /srv/fleet-state --herdr-session demo --orchestrator demo-mo --dry-run
@@ -344,13 +349,15 @@ run is refused), `warning` (the pane is recorded without what the finding names)
 |---|---|---|
 | `already-imported` | info | The pane has a record; it is skipped before any other check. |
 | `harness-not-opencode` | skipped | Its `sessions.toml` names a harness that is not OpenCode: no record, never blocking. |
+| `harness-claude-code` | info | Its tmux session has a foreground process named `claude` (Claude Code): the pane is left alone, with no record, no other finding and the action `skipped`, and blocks nothing. A whole-fleet `pane doctor` then reports it as `unregistered-herdr-pane`. |
+| `harness-unreadable` | problem | What its tmux session runs could not be read: a tmux read failed (a missing session is `tmux-session-missing`), or the pane's check did not finish. The pane gets no record; it is never recorded as OpenCode on a guess. |
 | `source-unreadable` | problem | A file could not be read or parsed; the message names the file and a position only. |
 | `source-missing` | problem | A file, a required variable or a launcher-table entry (or its `port` or `cwd`) is missing. |
 | `pane-unlabelled` | problem | No Herdr pane in the named Herdr session carries the pane's name as its label. |
 | `pane-label-ambiguous` | problem | Two or more Herdr panes there carry that label. |
 | `name-cell-differs` | info | The name spells a cell other than where Herdr shows the pane; the record takes Herdr's. |
 | `tmux-session-missing` | problem | The pane's tmux session does not exist. |
-| `observe-failed` | warning | A port call failed, so nothing was concluded from it. |
+| `observe-failed` | warning | A call to the pane's harness server (its health check or its session list) failed, so nothing was concluded from it. A failed tmux read is `harness-unreadable` instead. |
 | `server-wedged` | warning | The pane's server accepts a connection and never answers. |
 | `server-down` | warning | The pane's server fails its health check. |
 | `sources-disagree` | problem | The files name different sessions for the pane. |
@@ -367,7 +374,9 @@ is not a finding of the import: it is the error that ends the run, with no repor
 Its exit codes follow its own row of ADR-0021 section 9. A dry run exits 0 with the whole report, whatever it found. A
 real run exits 0 when it wrote the plan or had nothing to write; 3 with `import-blocked` (an open code: a pane has a
 problem, and nothing is written) or `profile-exists` (section 10); 2 with `usage`; otherwise by the class of the error
-that stopped it.
+that stopped it. `usage` comes before any file is read or any port is called, so a dry run gets it too: a missing
+`--herdr-session`, a `--from` that is not a directory, an `--orchestrator` that names no pane directory, or
+`--adopt-claude-code` until #831's adoption step lands.
 
 ### `holler profile create NAME`
 
@@ -846,12 +855,18 @@ of `main` the cutover runs, without `-dirty`; a version number alone does not te
 
 One fact about the live fleet comes first; it is a fact, not a step:
 
-- **Some Claude Code panes look like OpenCode panes to the import.** Their old files say `harness = "opencode"` and
-  `mode = "attach"` in `sessions.toml`, and their `pane.env` holds an `anthropic/...` model. The import reads only those
-  files and what it observes, and `harness-not-opencode` fires only for a pane whose `sessions.toml` names another
-  harness, so the import would adopt such a pane as an OpenCode pane, with a record. No mechanism excludes a pane from
-  the import yet: leaving such panes alone is issue [#835](https://github.com/Performant-Labs/holler/issues/835), not
-  built, and adopting them as Claude Code panes (`--adopt-claude-code`) is the last step of #831, after #835.
+- **Some Claude Code panes look like OpenCode panes in their files.** Their old files say `harness = "opencode"` and
+  `mode = "attach"` in `sessions.toml`, and their `pane.env` holds an `anthropic/...` model, so `harness-not-opencode`,
+  which fires only for a pane whose `sessions.toml` names another harness, does not catch them. The import therefore
+  also reads the command name of the foreground process of each tmux pane in the pane's tmux session (a name only, never
+  a command line). A pane whose tmux session has a foreground process named exactly `claude` is left alone: the finding
+  `harness-claude-code` (info), no record, and it blocks nothing. Any other name, such as `bash` (the old launcher's
+  OpenCode panes show it), or no process, is imported as OpenCode, so a pane whose OpenCode server is merely down is
+  still recorded and flagged `server-down`. A pane whose tmux session cannot be read is the problem
+  `harness-unreadable`, never a guess. **The rule has limits:** tmux names only the foreground process, so a Claude Code
+  pane is taken for OpenCode when its `claude` has exited (it shows its shell), is not in the foreground (a wrapper
+  script runs it, or it is suspended) or was started under another name. It is a default, not a proof; step 1 checks it,
+  and [ADR-0021 section 13](adr/ADR-0021.md#13-migration-from-the-launchers-files) ("Decided (#835)") is the contract.
 
 The steps, in order:
 
@@ -880,6 +895,13 @@ The steps, in order:
    same name as `--herdr-session`: the flag stays required (section 2). **If the two differ, the import finds no Herdr
    pane and every pane is `pane-unlabelled`**: a dry run in which every pane is `pane-unlabelled` is a session mismatch
    until shown otherwise, and a real run would be refused with `import-blocked`.
+
+   **Run the dry run while the fleet's Claude Code sessions run, and check each Claude Code pane:** it should show
+   `harness-claude-code`. One that does not (its action is `record`, or `blocked` for another problem) was not
+   recognised (the rule's limits, above), and the import would record it as an OpenCode pane. In that case run the
+   import on a state root that holds only the OpenCode panes' directories (a copy or a link farm the operator makes, with
+   the old files untouched: option (a) of #654). The real run of step 3 reads the panes again, so it too runs while those
+   sessions run.
 2. **Fix drift with the old tools.** Files that disagree about a pane's session give the problem `sources-disagree` and
    no record for that pane, and a real run is refused (`import-blocked`) until they agree. Each other problem of the
    table in section 3 is fixed the same way, then the dry run is run again.
@@ -911,10 +933,10 @@ state** and are no longer read after the cutover. The table of what replaces eac
 the launcher's writers is pfleet's follow-up (#653, in another repository). The files are kept, read-only, for one
 release, with one exception: `scripts/pane-restart` still writes `pane.env` when it is used as a rollback (section 11).
 
-A pane whose files name another harness gets no record from the import (`harness-not-opencode`; a Claude Code pane whose
-files name `opencode` is the case of the fact above). After the import, `holler pane list` shows each Herdr pane with no
-record as `unmanaged` (section 4), and a whole-fleet `doctor` reports it as `unregistered-herdr-pane` in every pass,
-which is expected and is not counted against the seven days (section 5).
+A pane whose files name another harness gets no record from the import (`harness-not-opencode`), and neither does a pane
+it leaves alone because its tmux session runs Claude Code (`harness-claude-code`, the fact above). After the import,
+`holler pane list` shows each Herdr pane with no record as `unmanaged` (section 4), and a whole-fleet `doctor` reports
+it as `unregistered-herdr-pane` in every pass, which is expected and is not counted against the seven days (section 5).
 
 ## 11. Rollback
 
@@ -956,8 +978,8 @@ Deferred, so not documented here as existing; none of them is available:
 
 - applying a pane's model, effort and environment to its harness server (#829);
 - DRIVEN following each pane's session of record, and `reset --first` through the hub's gate (#839);
-- an import that leaves the panes Holler does not drive alone (#835), and adopting the fleet's Claude Code panes with
-  `--adopt-claude-code` after it (#831's last step);
+- adopting the Claude Code panes the import leaves alone (#831's last step, ADR-0021 section 15, item 17; until it lands,
+  `--adopt-claude-code` is refused);
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850, after #839);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - the shared subprocess runner of the adapters and the probe (#696);

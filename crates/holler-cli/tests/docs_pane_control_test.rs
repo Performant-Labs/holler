@@ -529,6 +529,32 @@ fn audit_content_and_section_3_headings_are_present() {
     assert_none("the audit's content", missing);
 }
 
+/// #835 (handoff-A W4): section 3's `pane import` subsection names every long flag of the verb,
+/// read from the clap tree, so a flag added to the import without a docs line (as
+/// `--adopt-claude-code`) fails here. The subsection runs from its `### `holler pane import`
+/// heading to the next heading; global flags (`--format`, ...) are documented once, not per verb.
+/// Only this verb is pinned: the other verbs' subsections give a synopsis, not every flag.
+#[test]
+fn section_3_names_every_flag_of_pane_import() {
+    let s3 = section(&guide(), 3);
+    let sub = from_heading(&s3, "### `holler pane import");
+    let end = sub[1..].find("\n#").map_or(sub.len(), |e| e + 1);
+    let body = &sub[..end];
+    assert!(!body.is_empty(), "section 3 has no `### `holler pane import` subsection");
+    let cli = Cli::command();
+    let verb = cli.find_subcommand("pane").and_then(|c| c.find_subcommand("import")).unwrap();
+    let flags = verb.get_arguments().filter(|a| !a.is_positional() && !a.is_global_set() && !a.is_hide_set());
+    let missing = flags
+        .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+        .filter(|flag| {
+            !body.match_indices(flag.as_str()).any(|(i, _)| {
+                body[i + flag.len()..].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-'))
+            })
+        })
+        .collect();
+    assert_none("section 3's `pane import` subsection does not name these flags", missing);
+}
+
 /// The lines of `doc` that break #665's rule: each of `BUILT_BY_665` is named on at least one line,
 /// and no line naming one of them says PROPOSED.
 fn built_lines_marked_proposed(doc: &str) -> Vec<String> {
