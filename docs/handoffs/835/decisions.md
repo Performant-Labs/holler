@@ -844,3 +844,22 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - `docs_pane_control_test.rs`;
     - `.github/workflows/ci.yml`.
   - `evidence.md`, section "F, cycle 5": four quotes of `main`'s text, each checked line by line against its source.
+
+## T-green, cycle 4 (after F cycle 5, the merge of `origin/main` after #857): 2026-10-12T05:12-06:00 (MDT)
+
+- **Decided:** PASS. The suite is GREEN on the merged tree `59d8d59`, and nothing blocks.
+- **Assumed:** none of the test files resolved in the merge needs repair. Three of them equal `main`'s, and
+  `docs_pane_control_test.rs` keeps both sides' functions.
+- **Hedged:** I repeated the behaviour-removal check on the predicate, because the import now calls `main`'s copy of
+  `is_claude_code_command`. I did not repeat the cycle-1 and cycle-2 mutations of the other paths, because their code
+  did not change.
+- **Evidence:**
+  - the workspace run (CI's step): exit 0, 167 groups, 2600 passed, 0 failed, 36 ignored;
+  - clippy `-D warnings`, `lint.sh`, `changelog-check`, `docs_cli_test` (3), `wire_selftest` (3), `cargo machete`,
+    rustdoc `-D warnings -p holler-pane`: all clean;
+  - `git diff --check origin/main...HEAD` outside the handoffs: clean; `git merge-tree --write-tree HEAD origin/main`:
+    exit 0;
+  - `is_claude_code_command` set to `false`: 3 of 7 `import::harness` tests fail (the three Claude Code tests), the file
+    restored after;
+  - `git diff --quiet origin/main HEAD` holds for `wired.rs`, `ports_test.rs`, `claude_code_rule_test.rs` and
+    `unmanaged.rs`.
