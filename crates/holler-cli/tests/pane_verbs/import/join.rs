@@ -398,7 +398,10 @@ fn a_missing_tmux_session_is_reconciles_problem_and_blocks() {
 fn a_pane_that_is_not_opencode_is_skipped_and_the_others_import() {
     let rig = ImportRig::new(&[Seed::new(A, 1, 1), Seed::new(B, 2, 1)]);
     let live = rig.world.live(A);
-    let row = sessions_toml(A, live.port, &live.session).replace("\"opencode\"", "\"claude\"");
+    // Any other harness id: since #850 a `claude` attach row with an `endpoint` is refused when the
+    // file is parsed (ADR 0014 point 7), so it would block the import as an invalid file instead
+    // of being skipped as not OpenCode.
+    let row = sessions_toml(A, live.port, &live.session).replace("\"opencode\"", "\"codex\"");
     rig.write(&format!("{A}/sessions.toml"), &row);
     let data = data_of(&rig.run(&[], Format::Json));
     one_finding(&data, "harness-not-opencode", A, "skipped");

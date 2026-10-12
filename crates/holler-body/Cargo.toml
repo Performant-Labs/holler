@@ -66,6 +66,11 @@ reqwest = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 rstest = { workspace = true }
+# #850 (T, RED): the Claude Code attach driver's tests drive a `HarnessPort` (`holler-pane`) over the
+# test kit's `FakeClaude`. F makes `holler-pane` a regular dependency (ADR-0021 section 5, the crate
+# rule) and may then drop it from here; `holler-pane-testkit` stays a dev-dependency.
+holler-pane = { path = "../holler-pane" }
+holler-pane-testkit = { path = "../holler-pane-testkit" }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root
 # Cargo.toml — deny dead_code, clippy unwrap/expect/panic/unreachable, and the
