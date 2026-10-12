@@ -131,3 +131,122 @@ Everything else passes: all 17 acceptances are met by tests that fail when their
 4. **#649's A review (W-N b) calls "every verb that reaches Herdr" too broad.** The guide's line 76 keeps that phrase but immediately lists the three verbs, so it reads correctly. Re-check it at the re-cut.
 5. **The brief's "Pipeline" line says `rigor: second-opinion`.** No handoff records an outside-model gate (`deepseek-v4-pro`) at the brief or diff gate. O should confirm that gate ran, or record the rigor this run actually used.
 6. **The branch is one commit behind `origin/main`** (`4366fb8`, no overlap). Merge before the PR.
+
+---
+
+# Handoff-S (re-audit): #652 - after the ADVISORY-HOLD, with #649 and #832 merged
+
+**Date:** 2026-10-11
+**Branch:** `issue-652-implementation` (head `0b32125`). `origin/main` (local ref `7fc00f1`) is one commit ahead with `docs/handoffs/655-herdr-move/decisions.md` only, which does not touch this diff.
+**Issue:** #652 (OPEN)   **Brief:** `docs/handoffs/652-brief.md` at `e9eb05c` (re-cut R1 to R3 after #649 merged as `2d217dd`)
+**Handoffs reviewed:** `handoff-A.md` (round 2), `handoff-T-red.md`, `handoff-F.md` (rework section), `handoff-T-green.md` (rework section), `handoff-A-dup.md` (cycle 2), `evidence.md`, `decisions.md`
+**Diff audited:** `git diff origin/main...HEAD`
+- `docs/pane-control.md`: new, 794 lines.
+- `crates/holler-cli/tests/docs_pane_control_test.rs`: new, 523 lines.
+- `crates/holler-cli/Cargo.toml`: one `[[test]]`.
+- `docs/orchestrating.md`, `docs/README.md` and `CHANGELOG.md`.
+- `scripts/pane-restart`: comment lines 3-4.
+- The handoffs.
+
+## A precondition
+
+Met. `handoff-A.md` (round 2) is **PASS** (0 block, 5 warn). `handoff-A-dup.md` cycle 2 is **PASS** (0 block, 4 warn, none required).
+
+## T precondition
+
+Met.
+- `handoff-T-red.md`: a valid RED, 16 of 16 failing on missing content.
+- `handoff-T-green.md` (rework): GREEN, with `docs_pane_control_test` 16 passed and `docs_cli_test` 3 passed. Three new mutations each fail only acceptance 17. Lint, clippy, machete, `pane-restart-test.sh`, `test-hooks.sh` and gitleaks are all clean.
+- The one workspace failure is `remote_admin_test`, the known flake #847. It is OPEN, and it reproduced 1 time in 5 when run alone. It is in Rust code that this docs-only diff does not touch.
+- There are no blocking issues.
+
+## The previous verdict's items
+
+| Item of the ADVISORY-HOLD | Resolution | Status |
+|---|---|---|
+| 1. The #649 dependency was unmet, so R1 to R3 could not be re-cut | #649 merged (`2d217dd`) and was merged into the branch (`edbb863`). The brief re-cut R1 to R3 (`e9eb05c`). F rewrote section 2 from the merged `wiring.rs` module doc. I checked it against `crates/holler-cli/src/pane/wiring.rs:22-38`: no hub gives `unavailable` naming the hub, and no adapter is touched; the read verbs need only the hub; a bad variable fails at its port's first use; `HOLLER_HERDR_SESSION` is read and `HERDR_SESSION` is not; unset gives `usage`. All agree. The guide points to the module doc and does not copy the table. | RESOLVED |
+| 2. The import mismatch sentence was wrong | Section 2 (lines 97-102) and section 10, step 1 (lines 715-717) now say: `launch` answers `unavailable` naming both sessions (`holler-adapter-herdr/src/adapter.rs:180-188`, `extent_of`); `pane import` reports every pane `pane-unlabelled`, because the snapshot carries only the adapter's session (`adapter.rs:262-264`) and the join filters by the flag's session (`import/assess.rs:163-171`); a dry run exits 0 and a real run is `import-blocked`. Acceptance 17 now pins `pane-unlabelled` in sections 2 and 10. | RESOLVED |
+| Section 10's stale second fact | Dropped. The first fact names #835 (OPEN, the import exclusion). | RESOLVED |
+
+## Acceptance criteria
+
+| # | Criterion | Proving test / evidence | Status |
+|---|---|---|---|
+| 1 | Every verb named with its required args, the PROPOSED line rule, no `holler roster --profile` | `every_verb_is_named_and_proposed_lines_say_so` (walks `Cli::command()`) | MET |
+| 2 | Section 5 names every `FindingKind::ALL` code | `section_5_names_every_finding_kind`. It went RED on `unmanaged-stalled` after the #832 merge and is GREEN after F's row, which shows it reads the live table. | MET |
+| 3 | Section 9 has a classed row per `ALL_CODES` code, the exit rows, and the finding/code intersection | `section_9_has_a_classed_row_per_error_code` (class cell built from `class_of`/`exit_code`) | MET |
+| 4 | Section 4 names every `COLUMNS` name | `section_4_names_every_column` | MET |
+| 5 | Section 7's grid examples are true of `GridPos::parse` | `section_7_grid_examples_parse_as_stated` | MET |
+| 6 | Every `holler ...` command parses | `docs_cli_test` (3 passed) | MET |
+| 7 | Roster extension marked later | `section_4_marks_the_roster_extension_later` (guide line 432) | MET |
+| 8 | Rollback and boundary in the guide, `orchestrating.md` and the script head | `rollback_and_boundary_are_stated` | MET |
+| 9 | Section 10 names the replaced files, the launcher table, `source-missing`, `ADR-0021.md` | `section_10_names_the_replaced_files_and_the_launcher_table` | MET |
+| 10 | README links the guide under Guidance | `readme_indexes_the_guide_under_guidance` | MET |
+| 11 | Twelve numbered `##` headings in order | `guide_has_the_twelve_numbered_headings_in_order` | MET |
+| 12 | No `~~~` and no `holler` line in an unscanned fence | `nothing_escapes_the_docs_test` | MET |
+| 13 | Section 9 envelopes are true envelopes | `section_9_envelope_examples_are_true_envelopes` (`check_envelope`) | MET |
+| 14 | Every `ImportFinding::ALL` code and `import-blocked` named in section 3 or 10 | `import_findings_are_named_in_section_3_or_10` | MET |
+| 15 | The `profile apply` words | `profile_apply_reference_names_its_words` | MET |
+| 16 | CHANGELOG `[Unreleased]` line links `/issues/652` and names `pane-control.md` | `changelog_unreleased_names_the_guide` | MET |
+| 17 | Audit content in sections 2, 5 and 10; section 3 headings computed from the clap tree; plus, this round, `pane-unlabelled` in sections 2 and 10 and `pane-unmanaged` (from `PANE_UNMANAGED`) in section 9 | `audit_content_and_section_3_headings_are_present` (T-green mutation table: each removal fails it alone) | MET |
+
+## Spec compliance
+
+- **The brief's decisions 1 to 8 and "Where this brief is the decision" 1 to 6 are implemented as stated.** This is unchanged from the first audit:
+  - the registry boundary;
+  - `, agent KEY`;
+  - SYNC against the session of record;
+  - the overnight watch;
+  - the section rewritten, not deleted;
+  - a comment-only script change.
+- **The re-cut R1 to R3 are implemented as the patched brief states them.** See the table above.
+  - R3 (DRIVEN prints `-`) is in section 4 at lines 422-424.
+  - That text names #839 as the story that makes DRIVEN follow the session of record. `gh issue view 839` shows it OPEN, with that title.
+- **Deviations from the brief's text, all disclosed by F and journalled in `decisions.md`.**
+  - **#832, merged mid-run.** Section 1 of the brief says an acting verb answers `pane-not-found` for a pane outside the registry. On `main`, `pane/mod.rs:60-90` (`acting_pane` plus `refuse_if_unmanaged`) refuses an unmanaged pane with `pane-unmanaged`, for exactly `relaunch`, `switch`, `reset`, `park`, `unpark` and `close`. The guide's lines 31-33 match the code. The brief's own rule that the guide states what is on `main` governs here. The merge had also turned acceptance 2 RED.
+  - **#829.** The model, effort, environment and ceilings are recorded but not applied. ADR-0021 says so, and `gh issue view 829` is OPEN with that title.
+  - **#839.** The `reset --first` caveat; the issue absorbs the closed #828.
+  - Each of these is a correction toward the code on `main`, not a new feature, and none silently changes a brief decision.
+
+## Quality audit
+
+- **Correctness:** this story is docs only. I spot-checked the claims that are new this round against the code: `wiring.rs` module doc, `adapter.rs` `extent_of` and `pane`, `assess.rs` `labelled`, `unmanaged.rs` (`PANE_UNMANAGED`, observed and never stored, and Herdr 0.8.2 reporting no last-screen-change time), `pane/mod.rs` `acting_pane`, and `park.rs` (an unpark of a pane that is not parked leaves it as it is). All agree with the guide.
+- **Build guards:**
+  - The test file's `#![allow]` carries `// #149`.
+  - There is no production `unwrap`, `expect` or `panic`.
+  - The lint size gate covers `crates/**/*.rs` only. The test file is 523 lines, under 900.
+  - The guide is 794 lines. It is not gated, but A-dup warn 3 notes it is near the overlay's 800-line mark.
+- **Protocol:** no wire change and no golden touched.
+- **Tests:** unit tier, which fits a docs-conformance test. There are no sleeps. The lists are read from the code's own tables (`Cli::command()`, `FindingKind::ALL`, `ALL_CODES`/`class_of`, `COLUMNS`, `ImportFinding::ALL`, `GridPos::parse`, `check_envelope`, `PANE_UNMANAGED`). RED-first evidence is in T-red, and mutation evidence is in both T-green rounds.
+- **Documentation:**
+  - The CHANGELOG `[Unreleased]` / `### Enhancements` entry links #652 and states the #829 caveat and that no behaviour changes.
+  - The README indexes the guide.
+  - `orchestrating.md` leads with `holler pane relaunch`, keeps the fallback and the Claude Code subsection, and no longer has the "removed when" sentence.
+- **Public-repository privacy:**
+  - I grepped the added lines of the guide, test, CHANGELOG, README, `orchestrating.md`, script and Cargo.toml for tailnet or `ts.net`, host and account names, home paths, e-mail, private IPv4 ranges and key shapes. There were no hits.
+  - The examples use `demo-*`, `/srv/...` and loopback `127.0.0.1:8095`.
+  - T-green's gitleaks run is clean.
+- **Commit hygiene:**
+  - Every subject is a Conventional Commit, and every commit carries a `Co-Authored-By` trailer.
+  - The script's phase commits carry no session link. That is the pipeline's standard form, so it is not flagged.
+  - No PR exists yet. CLAUDE.md has the run add the AI disclosure after the script opens the PR.
+
+## Scope check
+
+The files are exactly the Blast radius: the guide, the test and its `[[test]]`, one section of `orchestrating.md`, one README line, the script comment and the CHANGELOG. No source file outside tests changed.
+
+The content beyond the brief's text (#832's unmanaged panes, the #829 and #839 caveats) is the minimum needed to keep the guide true of `main` and the docs test green after mid-run merges, and F explained it. This is not over-delivery. Nothing the brief asks for is missing.
+
+## Verdict
+
+**PASS**
+
+Both items of the earlier ADVISORY-HOLD are resolved against merged code. All 17 acceptances are proven by tests that read the code's own tables and fail when their content is removed. The scope is the Blast radius, and quality and privacy are clean.
+
+## Advisory notes (non-blocking)
+
+1. **A-dup warn 1, still open.** Section 3's `profile apply` subsection (lines 359-376) restates section 6's reference. Cutting it to a pointer would also buy line headroom (A-dup warn 3: the guide is 794 lines).
+2. **A-dup warn 2, still open.** `SCANNED_TAGS` hand-mirrors `docs_cli_test`'s fence tags. The follow-up is to share them via `tests/fixture/mod.rs`.
+3. **A-dup warn 4.** Acceptance 17 types `` `pane-unlabelled` `` where `ImportFinding::PaneUnlabelled.code()` exists. Separately, the unmanaged table's columns are unpinned because `UNMANAGED_COLUMNS` (`pane/list.rs:175`) is private. Both belong in a later story.
+4. **Rigor.** The brief's "Pipeline" line says `rigor: second-opinion`. No handoff records the outside-model (`deepseek-v4-pro`) gate. O should confirm it ran, or record the rigor the run used (carried from the first audit).
+5. **Before the PR.** Merge `origin/main` (`7fc00f1`, no overlap). After the PR opens, add the AI disclosure per `CONTRIBUTING.md`. CI's workspace run may hit flake #847, which does not come from this story.
