@@ -25,39 +25,29 @@ fn section(text: &str, heading_start: &str) -> String {
     rest[..rest.find("\n## ").unwrap_or(rest.len())].to_owned()
 }
 
-fn stage8() -> String {
-    flat(&section(&read("agent-skills/herdr-setup/SKILL.md"), "## Stage 8 "))
+/// #803: the panes are built in Stage 7.
+fn stage7() -> String {
+    flat(&section(
+        &read("agent-skills/herdr-setup/SKILL.md"),
+        "## Stage 7 ",
+    ))
 }
 
 fn stage3() -> String {
-    flat(&section(&read("agent-skills/herdr-setup/SKILL.md"), "## Stage 3 "))
+    flat(&section(
+        &read("agent-skills/herdr-setup/SKILL.md"),
+        "## Stage 3 ",
+    ))
 }
 
 #[test]
-fn stage8_restored_panes_are_a_reuse_branch_on_request() {
-    let s = stage8();
+fn stage7_build_in_it_is_a_new_workspace_holler_creates() {
+    let s = stage7();
+    assert!(s.contains("a new workspace in that server"), "{s}");
     assert!(
-        s.contains("if the user asked to reuse them and the count equals M+N"),
-        "the reuse branch"
+        !s.contains("workspace create"),
+        "the adapter creates it (#803 F4)"
     );
-    assert!(
-        !s.contains("if the pane count already equals M+N, reuse the restored structure"),
-        "the unconditional reuse sentence is gone"
-    );
-    assert!(
-        !s.contains("reusing that structure is fine"),
-        "the second unconditional reuse sentence is gone"
-    );
-}
-
-#[test]
-fn stage8_build_in_it_is_a_new_workspace_with_a_way_to_find_its_pane() {
-    let s = stage8();
-    assert!(s.contains("`herdr.sh run workspace create`"));
-    assert!(s.contains("a new workspace in that server"));
-    assert!(s.contains("filtered by the new workspace id"), "first pane id");
-    assert!(s.contains("`<base-pane>`"));
-    assert!(s.contains("never split a pane the wizard did not create"));
 }
 
 #[test]
@@ -65,22 +55,19 @@ fn stage3_build_in_it_means_a_new_workspace() {
     let s = stage3();
     assert!(s.contains("build in it"));
     assert!(s.contains("a new workspace in that server"));
-    assert!(s.contains("`herdr.sh run workspace create`"));
+    assert!(
+        !s.contains("workspace create"),
+        "#803: no direct Herdr control"
+    );
     assert!(!s.contains("then Stage 8 reuses it"));
 }
 
 #[test]
-fn stage8_says_to_check_column_widths_after_the_build() {
-    let s = stage8();
-    assert!(s.contains("1/2, 1/4, 1/8, 1/8"));
-    assert!(s.contains("tell the user if the widths look uneven"));
-    assert!(s.contains("#734") && s.contains("#778"), "who verifies it");
-}
-
-#[test]
-fn docs_reuse_restored_panes_only_on_request() {
+fn docs_never_reuse_restored_panes() {
     let d = flat(&read("docs/setup-wizard.md"));
-    assert!(d.contains("if the user asked to reuse them and the count equals orchestrators + sessions"));
-    assert!(!d.contains("if the pane count already equals orchestrators + sessions, reuse the structure"));
+    assert!(
+        !d.contains("if the user asked to reuse them"),
+        "the reuse branch is retired (#803)"
+    );
     assert!(d.contains("a new workspace in that server"));
 }

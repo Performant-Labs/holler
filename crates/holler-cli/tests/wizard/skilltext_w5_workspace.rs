@@ -87,30 +87,11 @@ fn stage3_plan_names_the_workspace() {
 }
 
 #[test]
-fn stage8_shows_the_create_label_call_and_the_base_pane_rename() {
-    let s8 = between(&skill(), "## Stage 8 ", "## Holler self-status");
-    has_all(
-        "Stage 8",
-        &s8,
-        &[
-            "bash $WIZARD_LIB/herdr.sh run workspace create --cwd <dir> --label <workspace>",
-            "bash $WIZARD_LIB/herdr.sh run workspace rename <workspace_id> <workspace>",
-            "exactly one pane (the base pane case)",
-            "With no `workspace` key nothing changes",
-        ],
-    );
-}
-
-#[test]
 fn the_docs_list_workspace_among_the_keys_the_body_config_drops() {
     let d = flat("docs/setup-wizard.md");
     has_all(
         "docs",
         &d,
-        &[
-            "session's `backend_port` and the top-level `workspace` key",
-            "`workspace = \"<name>\"`",
-            "--label <workspace>",
-        ],
+        &["the top-level `workspace` key", "`workspace = \"<name>\"`"],
     );
 }

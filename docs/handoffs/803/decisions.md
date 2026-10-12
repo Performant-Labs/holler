@@ -58,3 +58,45 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
     - the list of tests in `docs_pane_control_test.rs`.
   - **The docs and config:** ADR-0021 sections 5 and 11, and "Decisions taken"; `scripts/lint.sh`;
     `.aftersight/pipeline.config.json`.
+
+## T, author / RED: 2026-10-12T09:10-06:00
+
+- **Decided:**
+  - **The RED is valid.** `wizard_scripts` has 72 failing tests and 231 passing. Every failure is an assertion about the
+    missing `panes.sh`, the missing `herdr.sh holler` and `run` allow-list, or the missing skill and docs text. None is a
+    compile, target or harness error (handoff-T-red.md).
+  - **The printed contract of `panes.sh`:**
+    - `grid` prints TSV lines;
+    - `env` prints shell assignments that `eval`;
+    - `plan` and `teardown` print `<tag> <shell-quoted holler args>`;
+    - `plan --rerun` drops `profile-create` (W3);
+    - the dry-run line carries `--format=json`.
+  - **The profile name P is the workspace label**, `holler` by default (A's W2 recommendation).
+  - **W1 is pinned as A proposed:**
+    - `holler` runs with no `HERDR_*` and with none of the caller's own `HOLLER_*`;
+    - exit 2 for an unset or empty `WIZARD_STATE_DIR`;
+    - exit 2 for a non-default instance whose `WIZARD_TMUX_SOCKET` is not absolute;
+    - exit 2 for the default instance with no `WIZARD_HERDR_SOCKET`.
+  - **`run` refuses with exit 2 and names `holler pane`.** `label` is now the ordinary usage error.
+  - **A fifth module, `panes_803_plan.rs`**, keeps `panes_803.rs` under the 600-line warning.
+  - **The old pins.** I retired the ones whose subject is gone, including the whole of `skilltext_w4_stage2.rs`, and
+    moved the rest to their new stage. I also moved four pins the brief's table missed: `herdr.sh run pane read` in
+    `skilltext_w3_stage3`; "orchestrator `dir`/`cmd`" and "model endpoint" in `skilltext_w6_preflight`; and the
+    `# Herdr: M local` H1 lookups in `w6_preflight` and `w5_stage0`.
+- **Assumed:**
+  - **Where the port index counts from.** A pane with its own `backend_port` still takes an index in the `base + i`
+    count, as `instance.sh` counts sessions.
+  - **What the refusal messages name.** The taller-column refusal names "column 2", and the no-orchestrator refusal
+    names "orchestrator".
+  - **How the skill types a Holler call.** Every `herdr.sh holler` line in a code block carries the `<herdr_env>`
+    placeholder.
+- **Hedged:**
+  - **Proof that the RED can be satisfied.** A throwaway reference `panes.sh` and `holler` verb in T's scratch directory
+    passed all 33 behavioural tests three times. They were then removed and `herdr.sh` restored with `git checkout`;
+    nothing of them is in the tree or the handoff.
+  - **What text alone can show.** The text pins check wording and order, not that an agent following the skill does
+    the right thing. The operator's repeat of #778 remains the only end-to-end proof (brief U1 to U8).
+  - **Stage 9's DRIVEN sentence** is pinned only as "DRIVEN" and "#839" (REFRESH AFTER MERGE of #839).
+- **Evidence:** `cargo test -p holler-cli --test wizard_scripts` (231 passed, 72 failed); `cargo clippy -p holler-cli
+  --test wizard_scripts -- -D warnings` (clean); `bash scripts/lint.sh` (exit 0, no new warning);
+  `skilltext_w5_rename` (7 passed with the new files staged); the files are staged by explicit path.
