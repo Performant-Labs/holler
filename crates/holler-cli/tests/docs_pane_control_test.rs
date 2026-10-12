@@ -25,14 +25,15 @@ use holler_pane::unmanaged::PANE_UNMANAGED;
 use holler_pane::GridPos;
 use holler_pane_testkit::envelope::check_envelope;
 
-/// The `holler profile` verbs that are PROPOSED and not built (#665): the one hand-kept verb list.
-/// #665 removes a verb from it when it builds the verb, and then edits the guide's PROPOSED
-/// clauses and this test.
-const PROPOSED_PROFILE_VERBS: [&str; 3] = ["rename", "export", "import"];
+/// What #665 built that the guide used to mark PROPOSED: three verbs and a doctor finding. No line
+/// naming one of them may say PROPOSED any more.
+const BUILT_BY_665: [&str; 4] = ["profile rename", "profile export", "profile import", "profile-drift"];
 
-/// The PROPOSED doctor finding and error code (#665): a code of `ALL_CODES`, not yet a kind of
-/// `FindingKind::ALL`.
-const PROPOSED_FINDING: &str = "profile-drift";
+/// The section 3 headings of the verbs #665 built, as the clap tree computes them (`heading_forms`),
+/// and `pane import`'s heading prefix: the two `import` verbs are two headings.
+const PROFILE_IO_HEADINGS: [&str; 3] =
+    ["### `holler profile rename OLD NEW`", "### `holler profile export NAME`", "### `holler profile import FILE`"];
+const PANE_IMPORT_HEADING: &str = "### `holler pane import ";
 
 /// The action and outcome words of a `profile apply` step, as ADR-0021 section 9's apply row
 /// lists them. Hand-kept because `tx_apply`'s `Action` and `Outcome` have only `as_str` and no
@@ -127,9 +128,6 @@ fn heading_forms() -> Vec<(String, String, String)> {
         let cmd = cli.find_subcommand(ns).unwrap_or_else(|| panic!("no `{ns}` subcommand"));
         for verb in cmd.get_subcommands().filter(|c| c.get_name() != "help") {
             let name = verb.get_name();
-            if ns == "profile" && PROPOSED_PROFILE_VERBS.contains(&name) {
-                continue;
-            }
             let placeholder = |a: &clap::Arg| {
                 a.get_value_names()
                     .and_then(|v| v.first().map(|s| s.to_string()))
@@ -153,9 +151,9 @@ fn heading_forms() -> Vec<(String, String, String)> {
     out
 }
 
-/// Acceptance 1: every verb is named in a span or heading, and the PROPOSED line rule.
+/// Acceptance 1: every verb is named in a span or heading.
 #[test]
-fn every_verb_is_named_and_proposed_lines_say_so() {
+fn every_verb_is_named_in_a_span_or_heading() {
     let doc = guide();
     let mut missing = Vec::new();
     let cli = Cli::command();
@@ -166,16 +164,6 @@ fn every_verb_is_named_and_proposed_lines_say_so() {
             if ![" ", "`"].iter().any(|end| doc.contains(&format!("{span}{end}"))) {
                 missing.push(format!("no span or heading starts {span}"));
             }
-        }
-    }
-    let proposed_words = PROPOSED_PROFILE_VERBS.iter().map(|v| format!("profile {v}"));
-    for word in proposed_words.chain([PROPOSED_FINDING.to_string()]) {
-        let lines: Vec<&str> = doc.lines().filter(|l| l.contains(&word)).collect();
-        if lines.is_empty() {
-            missing.push(format!("no line names `{word}` (it must, on a PROPOSED line)"));
-        }
-        for l in lines.iter().filter(|l| !l.contains("PROPOSED")) {
-            missing.push(format!("a line names `{word}` without PROPOSED: {l}"));
         }
     }
     assert_none("docs/pane-control.md, the verbs", missing);
@@ -539,4 +527,58 @@ fn audit_content_and_section_3_headings_are_present() {
         }
     }
     assert_none("the audit's content", missing);
+}
+
+/// The lines of `doc` that break #665's rule: each of `BUILT_BY_665` is named on at least one line,
+/// and no line naming one of them says PROPOSED.
+fn built_lines_marked_proposed(doc: &str) -> Vec<String> {
+    let mut missing = Vec::new();
+    for word in BUILT_BY_665 {
+        let lines: Vec<&str> = doc.lines().filter(|l| l.contains(word)).collect();
+        if lines.is_empty() {
+            missing.push(format!("no line names `{word}`"));
+        }
+        for l in lines.iter().filter(|l| l.contains("PROPOSED")) {
+            missing.push(format!("a line names `{word}` and still says PROPOSED: {l}"));
+        }
+    }
+    missing
+}
+
+/// #665 (D11): the three profile verbs and `profile-drift` are built, not proposed. Section 3 has their
+/// headings and keeps `pane import` and `profile import` as two headings, section 5's `profile-drift`
+/// row names no remedy, and section 12 no longer lists #665 as later work.
+#[test]
+fn profile_io_and_drift_are_built_not_proposed() {
+    let doc = guide();
+    let (s3, s5, s12) = (section(&doc, 3), section(&doc, 5), section(&doc, 12));
+    let mut missing = built_lines_marked_proposed(&doc);
+    for heading in PROFILE_IO_HEADINGS {
+        if !s3.lines().any(|l| l.starts_with(heading)) {
+            missing.push(format!("section 3: no heading {heading}"));
+        }
+    }
+    if !s3.lines().any(|l| l.starts_with(PANE_IMPORT_HEADING)) {
+        missing.push("section 3: `pane import` lost its own heading".into());
+    }
+    let row = s5.lines().find(|l| l.starts_with("| `profile-drift` |"));
+    if !row.is_some_and(|l| l.trim_end().ends_with("none |")) {
+        missing.push(format!("section 5: the `profile-drift` row must end `none |`: {row:?}"));
+    }
+    if s12.contains("#665") {
+        missing.push("section 12 still lists #665".into());
+    }
+    assert_none("docs/pane-control.md, #665's verbs and finding", missing);
+}
+
+/// The negative control of the line rule above: a guide that still says PROPOSED on a line naming a built
+/// verb, or that never names one, fails it.
+#[test]
+fn the_built_not_proposed_rule_fails_a_proposed_line() {
+    let good = "`holler profile rename` x\n`holler profile export` x\n`holler profile import` x\n`profile-drift` x\n";
+    assert_eq!(built_lines_marked_proposed(good), Vec::<String>::new());
+    let proposed = good.replace("`holler profile export` x", "`holler profile export` (PROPOSED)");
+    assert_eq!(built_lines_marked_proposed(&proposed).len(), 1, "a PROPOSED line fails");
+    let unnamed = good.replace("`profile-drift` x", "");
+    assert_eq!(built_lines_marked_proposed(&unnamed).len(), 1, "an unnamed item fails");
 }

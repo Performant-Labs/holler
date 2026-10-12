@@ -1,9 +1,8 @@
 //! The findings of a reconcile pass and `holler pane doctor` (#647): what a pass found, the
 //! one table of what each kind tells the operator to run, and the one sanitizer for the
-//! untrusted text a finding quotes. #665 adds only the `ProfileDrift` kind after #647 has
-//! merged.
+//! untrusted text a finding quotes. #665 added the `ProfileDrift` kind, last.
 //!
-//! - [`FindingKind`]: twelve kinds, each with a stable kebab-case code that is also its JSON
+//! - [`FindingKind`]: the kinds, each with a stable kebab-case code that is also its JSON
 //!   form ([`FindingKind::code`] is the one source of both). A finding is a report, not an
 //!   error: its code is never a `RefusalCode`, and two codes (`herdr-version-unsupported`,
 //!   and #665's `profile-drift`) equal closed error codes.
@@ -73,6 +72,10 @@ pub enum FindingKind {
     /// A Herdr pane no record names has shown the same screen for longer than the
     /// operator's threshold (#832). Only a whole-fleet pass with a threshold looks.
     UnmanagedStalled,
+    /// The pane's record differs from its profile's spec on at least one field of
+    /// `profile_diff`'s table, the comparison `profile show` makes (#665). The message names
+    /// the fields and no value. Which side is right is the operator's choice, so no remedy.
+    ProfileDrift,
 }
 
 impl FindingKind {
@@ -91,6 +94,7 @@ impl FindingKind {
         FindingKind::ShownDrivenMismatch,
         FindingKind::StraySession,
         FindingKind::UnmanagedStalled,
+        FindingKind::ProfileDrift,
     ];
 
     /// The kind's stable kebab-case code, which is also its JSON form. A code is stable
@@ -110,6 +114,7 @@ impl FindingKind {
             FindingKind::ShownDrivenMismatch => "shown-driven-mismatch",
             FindingKind::StraySession => "stray-session",
             FindingKind::UnmanagedStalled => "unmanaged-stalled",
+            FindingKind::ProfileDrift => "profile-drift",
         }
     }
 
@@ -128,7 +133,8 @@ impl FindingKind {
             FindingKind::HerdrVersionUnsupported
             | FindingKind::UnregisteredHerdrPane
             | FindingKind::UnmanagedStalled
-            | FindingKind::StraySession => None,
+            | FindingKind::StraySession
+            | FindingKind::ProfileDrift => None,
             FindingKind::ObserveFailed => Some(doctor_command(pane, false)),
             FindingKind::HerdrPaneMissing
             | FindingKind::TmuxSessionMissing

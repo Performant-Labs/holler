@@ -218,8 +218,9 @@ pub(crate) fn insert_profile(
         })
 }
 
-/// `profile-exists` for `name`: `"<name>" (slug <slug>)`.
-fn taken(name: &ProfileName) -> PaneError {
+/// `profile-exists` for `name`: `"<name>" (slug <slug>)`. `import` (#665) refuses a taken
+/// name with it too.
+pub(crate) fn taken(name: &ProfileName) -> PaneError {
     PaneError::ProfileExists {
         what: format!("{:?} (slug {})", name.as_str(), name.slug()),
     }

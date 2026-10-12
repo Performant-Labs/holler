@@ -4,15 +4,15 @@
 //! It is the twin of `panes::store` and keeps its rules. One `std::sync::Mutex` guards the
 //! whole table, and one `Condvar` wakes the watchers, which wait without holding the lock
 //! ([`Store::poll`]). Every method is synchronous. The handlers reach the store through
-//! `spawn_blocking`, and no `.await` ever happens while the lock is held. The store never
-//! takes the pane registry's lock (ADR-0021 §7).
+//! `spawn_blocking`, and no `.await` ever happens while the lock is held. Only a rename
+//! takes the pane registry's lock, after its own (ADR-0021 §7; see "Renames" below).
 //!
 //! What differs is the entry (`entry.rs`: the record or its tombstone, and the change log,
-//! filed by slug) and the write itself. The lock, `read`, `commit`, `save`, `watch`, `poll`,
-//! the `Feed` iterator and `load_table` mirror their pane twins item for item, under the same
-//! names, and each says so. #639's store is concrete over the pane table, and this story may
-//! change it by one comparison only, so making the two stores one generic store is left to a
-//! follow-up (D10).
+//! filed by slug) and the write itself. The lock, `read`, `commit`, `apply`, `save`, `watch`,
+//! `poll`, the `Feed` iterator and `load_table` mirror their pane twins item for item, under
+//! the same names, and each says so. #639's store is concrete over the pane table, and this
+//! story may change it by one comparison only, so making the two stores one generic store is
+//! left to a follow-up (D10).
 //!
 //! # Writes
 //!
@@ -28,6 +28,19 @@
 //! A refused write therefore logs nothing and takes no cursor, and a failed save changes
 //! nothing (memory, file and cursor): the write answers `unavailable`, and the same write
 //! with the same generation succeeds once the file can be written again.
+//!
+//! # Renames (#665)
+//!
+//! [`Store::rename`] is one write of two entries: OLD's slug becomes a tombstone whose log
+//! gets one `deleted` entry, and NEW's slug the record and one `renamed {from}` entry, both
+//! at the new generation and stamped once (one entry and one event when the slug does not
+//! change). Given the pane registry (`profile/rename`, ADR-0021 section 8, "Rename as
+//! built"), it is also the one transaction that spans the two registries: under this lock it
+//! takes the pane lock (`PaneState::locked`), checks that both registries loaded, runs the
+//! rename's own checks (in the order [`Store::rename`] gives), saves the pane document with
+//! the member panes' moves, then this one, and only then commits both to memory. When this
+//! save fails after the pane save, the pane document is saved back (`Locked::restore`) and
+//! nothing changed. The port, given no pane registry, renames the record only.
 //!
 //! # A failed load
 //!
@@ -51,7 +64,7 @@ use holler_proto::clock::now_millis;
 use super::entry::{self, ProfileEntry};
 use crate::panes::feed::{self, Ring};
 use crate::panes::persist::{self, Doc};
-use crate::panes::{log_fault, PaneStoreOptions};
+use crate::panes::{log_fault, PaneState, PaneStoreOptions};
 
 /// How the registry names itself in the `what` of an error.
 const LABEL: &str = "profile registry";
@@ -97,27 +110,34 @@ impl Table {
 
     /// The cursor the next change takes. Twin of `panes::store::Table::next_cursor`.
     fn next_cursor(&self) -> Result<Cursor, PaneError> {
-        self.head
-            .0
-            .checked_add(1)
-            .map(Cursor)
-            .ok_or_else(|| PaneError::StoreCorrupt {
-                what: format!("{LABEL}: the change cursor overflowed"),
-            })
+        after(self.head)
     }
 
-    /// The entries of the next document: every entry, with `change` filed under its slug,
-    /// in slug order. Twin of `panes::store::Table::entries_with`.
-    fn entries_with<'a>(&'a self, change: &'a ProfileEntry) -> Vec<&'a ProfileEntry> {
-        let mut entries: Vec<&ProfileEntry> = self
+    /// The entries of the next document: every entry, with each of `changes` filed under its
+    /// slug, in slug order. Twin of `panes::store::Table::entries_with`.
+    fn entries_with<'a>(&'a self, changes: &'a [ProfileEntry]) -> Vec<&'a ProfileEntry> {
+        let mut entries: BTreeMap<&str, &ProfileEntry> = self
             .entries
-            .values()
-            .filter(|entry| entry.slug != change.slug)
+            .iter()
+            .map(|(slug, entry)| (slug.as_str(), entry))
             .collect();
-        let at = entries.partition_point(|entry| entry.slug < change.slug);
-        entries.insert(at, change);
-        entries
+        for change in changes {
+            entries.insert(&change.slug, change);
+        }
+        entries.into_values().collect()
     }
+}
+
+/// The cursor after `cursor`: the next change's, or the one a write's later change takes.
+/// Twin of `panes::store::after`.
+fn after(cursor: Cursor) -> Result<Cursor, PaneError> {
+    cursor
+        .0
+        .checked_add(1)
+        .map(Cursor)
+        .ok_or_else(|| PaneError::StoreCorrupt {
+            what: format!("{LABEL}: the change cursor overflowed"),
+        })
 }
 
 /// The profile registry's store. `ProfileState` holds it behind an `Arc`, which the
@@ -222,7 +242,7 @@ impl Store {
         };
         let logged = log_entry(at, generation, actor, change);
         let next = ProfileEntry::next(previous, slug, event, logged);
-        self.commit(table, next)?;
+        self.commit(table, vec![next])?;
         Ok(record)
     }
 
@@ -254,28 +274,83 @@ impl Store {
         };
         let logged = log_entry(at, generation, actor, ProfileChange::Deleted);
         let next = ProfileEntry::next(previous, slug, event, logged);
-        self.commit(table, next)
+        self.commit(table, vec![next])
     }
 
-    /// Save the table with `change` applied, then apply it to memory and wake the watchers.
-    /// Twin of `panes::store::Store::commit`.
-    fn commit(&self, table: &mut Table, change: ProfileEntry) -> Result<(), PaneError> {
-        self.save(table, &change)?;
-        table.head = change.event.cursor;
-        table.ring.push(change.event.clone());
-        table.entries.insert(change.slug.clone(), change);
-        self.changed.notify_all();
+    /// Rename the profile filed under the slug of `from` to `to` as `actor` if it is still at
+    /// `expected`, and return the renamed record (see "Renames" in the module docs). With
+    /// `panes` this is `profile/rename`'s whole transaction, every member pane moved to `to`;
+    /// without, the record half the port promises.
+    ///
+    /// Nothing is written before every check passed, in this order: either registry failed to
+    /// load (`store-corrupt`), `from` is not found by slug (`profile-not-found`, whatever
+    /// `expected`), `to` is the stored name already (`usage`), `to`'s slug is another live
+    /// profile's (`profile-exists`, whatever `expected`), and the compare-and-swap
+    /// (`generation-conflict`).
+    pub(crate) fn rename(
+        &self,
+        from: &ProfileName,
+        to: &ProfileName,
+        expected: u64,
+        actor: &Actor,
+        panes: Option<&PaneState>,
+    ) -> Result<Profile, PaneError> {
+        let mut guard = self.lock();
+        // The profile lock is held: the pane lock comes second (ADR-0021 section 7).
+        let mut members = panes.map(PaneState::locked).transpose()?;
+        let table = guard.as_mut().map_err(|err| err.clone())?;
+        let (record, changes) = renamed(table, from, to, expected, actor)?;
+        let moves = match &members {
+            Some(members) => members.moves(from, to)?,
+            None => Vec::new(),
+        };
+        // The panes first: a crash between the two saves leaves the members naming `to`
+        // while `from` stands, and the same rename run again completes it.
+        if let Some(members) = &members {
+            members.save(&moves)?;
+        }
+        if let Err(err) = self.save(table, &changes) {
+            if let Some(members) = &members {
+                members.restore(&moves);
+            }
+            return Err(err);
+        }
+        self.apply(table, changes);
+        if let Some(members) = members.as_mut() {
+            members.apply(moves);
+        }
+        Ok(record)
+    }
+
+    /// Save the table with `changes` applied, then apply them to memory and wake the
+    /// watchers. Twin of `panes::store::Store::commit`.
+    fn commit(&self, table: &mut Table, changes: Vec<ProfileEntry>) -> Result<(), PaneError> {
+        self.save(table, &changes)?;
+        self.apply(table, changes);
         Ok(())
     }
 
-    /// Write the document that `table` with `change` applied describes. A failure is
+    /// Apply `changes`, which are saved, to memory in order, and wake the watchers. Twin of
+    /// `panes::store::Store::apply`.
+    fn apply(&self, table: &mut Table, changes: Vec<ProfileEntry>) {
+        for change in changes {
+            table.head = change.event.cursor;
+            table.ring.push(change.event.clone());
+            table.entries.insert(change.slug.clone(), change);
+        }
+        self.changed.notify_all();
+    }
+
+    /// Write the document that `table` with `changes` applied describes. A failure is
     /// logged and answered `unavailable`; the file is as it was. Twin of
     /// `panes::store::Store::save`.
-    fn save(&self, table: &Table, change: &ProfileEntry) -> Result<(), PaneError> {
+    fn save(&self, table: &Table, changes: &[ProfileEntry]) -> Result<(), PaneError> {
         let doc = Doc {
             version: persist::VERSION,
-            cursor: change.event.cursor,
-            entries: table.entries_with(change),
+            cursor: changes
+                .last()
+                .map_or(table.head, |change| change.event.cursor),
+            entries: table.entries_with(changes),
         };
         persist::save_doc(&self.path, &doc).map_err(|problem| {
             log_fault(
@@ -393,15 +468,87 @@ fn load_table(path: &Path, retained: usize) -> Result<Table, PaneError> {
 /// name: after a delete, a create may spell the name another way, and its log goes on.
 fn check_name(stored: Option<&Profile>, name: &ProfileName, slug: &str) -> Result<(), PaneError> {
     match stored {
-        Some(stored) if stored.name != *name => Err(PaneError::ProfileExists {
-            what: format!(
-                "{:?} has the slug {slug:?} of the stored profile {:?}",
-                name.as_str(),
-                stored.name.as_str()
-            ),
-        }),
+        Some(stored) if stored.name != *name => Err(taken(name, slug, stored)),
         _ => Ok(()),
     }
+}
+
+/// `profile-exists`: `name`, of slug `slug`, cannot be written while `stored` holds the slug.
+fn taken(name: &ProfileName, slug: &str, stored: &Profile) -> PaneError {
+    PaneError::ProfileExists {
+        what: format!(
+            "{:?} has the slug {slug:?} of the stored profile {:?}",
+            name.as_str(),
+            stored.name.as_str()
+        ),
+    }
+}
+
+/// The checks of a rename of `from` to `to` at `expected` (the order of [`Store::rename`]'s
+/// docs, after the loads), and, when they pass, the renamed record and the entries it files:
+/// OLD's tombstone, then NEW's entry, at consecutive cursors (NEW's alone when the slug does
+/// not change). Both log entries are at the new generation, by `actor`, with one stamp that
+/// is never before either entry's last time (`entry::stamp`), so `at` never decreases in
+/// either log. Nothing is written.
+fn renamed(
+    table: &Table,
+    from: &ProfileName,
+    to: &ProfileName,
+    expected: u64,
+    actor: &Actor,
+) -> Result<(Profile, Vec<ProfileEntry>), PaneError> {
+    let (old_slug, new_slug) = (from.slug(), to.slug());
+    let moves_slug = new_slug != old_slug;
+    let previous = table.entries.get(&old_slug);
+    let Some(stored) = previous.and_then(ProfileEntry::profile) else {
+        return Err(PaneError::ProfileNotFound {
+            what: from.to_string(),
+        });
+    };
+    if *to == stored.name {
+        return Err(PaneError::Usage {
+            message: format!("{:?} is the profile's name already", to.as_str()),
+        });
+    }
+    let target = moves_slug.then(|| table.entries.get(&new_slug)).flatten();
+    if let Some(other) = target.and_then(ProfileEntry::profile) {
+        return Err(taken(to, &new_slug, other));
+    }
+    let generation = next_generation(stored.generation, expected)?;
+    let now = now_millis();
+    let at = entry::stamp(previous, now).max(entry::stamp(target, now));
+    let record = Profile {
+        name: to.clone(),
+        slug: new_slug.clone(),
+        generation,
+        updated: at,
+        ..stored.clone()
+    };
+    let mut cursor = table.next_cursor()?;
+    let mut changes = Vec::with_capacity(2);
+    let mut base = previous;
+    if moves_slug {
+        let event = ProfileEvent {
+            cursor,
+            name: stored.name.clone(),
+            profile: None,
+        };
+        let closed = log_entry(at, generation, actor, ProfileChange::Deleted);
+        changes.push(ProfileEntry::next(previous, old_slug, event, closed));
+        cursor = after(cursor)?;
+        base = target;
+    }
+    let event = ProfileEvent {
+        cursor,
+        name: to.clone(),
+        profile: Some(Box::new(record.clone())),
+    };
+    let change = ProfileChange::Renamed {
+        from: stored.name.clone(),
+    };
+    let opened = log_entry(at, generation, actor, change);
+    changes.push(ProfileEntry::next(base, new_slug, event, opened));
+    Ok((record, changes))
 }
 
 /// The log entry of a write by `actor`, stamped `at`, that left the profile at `generation`.

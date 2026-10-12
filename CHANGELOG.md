@@ -8,6 +8,21 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Profiles can be renamed, exported and imported, and `holler pane doctor` reports a pane that drifted from its
+  profile (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#665](https://github.com/Performant-Labs/holler/issues/665)). `holler profile rename OLD NEW` renames a profile and
+  every member pane's `profile` in one transaction on the hub, under both registries' locks: the panes stay attached
+  and nothing live is touched, a failed save changes nothing (if the pane file then cannot be saved back, the hub logs
+  the `error` event `profile_rename_restore_failed`), and running the same rename again completes one that a crash
+  interrupted. `holler profile export NAME [--out FILE]` writes a profile's specs as one JSON document (names and
+  non-secret values only, positions written `rRcC`, the file at mode 0600), and `holler profile import FILE
+  [--name NAME]` creates a detached profile from one, accepting any position form `GridPos` reads and refusing an
+  environment value (`profile-secret-refused`), a shell-string command (`command-not-argv`) and a taken name
+  (`profile-exists`); no refusal quotes what a spec holds, and a bad position or member is named by the spec's number.
+  `profile-drift` is a doctor finding for a pane whose record differs from its profile's spec, by the comparison
+  `holler profile show NAME` makes: one finding per drifted pane per pass, naming the fields and no value, with no
+  remedy. A pass reads the profiles once, and only when a pane in scope names a profile.
+  [ADR 0021](docs/adr/ADR-0021.md) records the rename transaction, the file format and the finding.
 - Pane control, the apply rehearsal (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): an opt-in
   scenario runs `holler profile apply` and the pane verbs around it on a scratch Herdr, tmux and OpenCode that it starts
   itself ([#667](https://github.com/Performant-Labs/holler/issues/667);
