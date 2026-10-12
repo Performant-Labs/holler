@@ -32,3 +32,23 @@
   **Source:** `crates/holler-adapter-host/src/lib.rs:246`
   **Verbatim excerpt:**
   > let ran = exec::run(&mut command, call.deadline).map_err(|failed| call.failed(failed))?;
+
+## T (green)
+
+- **Fact:** `seams_test.rs` relies on `login_status` mapping `authMethod` `claude.ai` to `LoginStatus::Ok` and a non-JSON answer to `Unavailable`; both are unchanged adapter logic.
+  **Source:** `crates/holler-adapter-claude/src/lib.rs:71` and `:348-358`
+  **Verbatim excerpt:**
+  > const SUBSCRIPTION: &str = "claude.ai";
+  > Some(SUBSCRIPTION) => Ok(LoginStatus::Ok),
+
+- **Fact:** `uncapped_output_test.rs` relies on the host's refusal text being `tmux <subcommand>: <reason>`, with no length limit, and on `ps` returning that refusal as `unavailable` for a non-missing-session stderr.
+  **Source:** `crates/holler-adapter-host/src/lib.rs:251-252` and `:401`
+  **Verbatim excerpt:**
+  > let what = format!("tmux {subcommand}: {}", ran.reason());
+  > Reply::Refused(refusal, what) => Err(refused(name, refusal, what)),
+
+- **Fact:** `tmux_capture_test.rs` relies on the OpenCode adapter quoting `tmux`'s first stderr line, whole, in `unavailable` (no length limit, only `one_line`).
+  **Source:** `crates/holler-adapter-opencode/src/attach.rs:230-232` and `crates/holler-adapter-opencode/src/lib.rs:748-753`
+  **Verbatim excerpt:**
+  > what: format!("tmux failed for pane {}: {}", self.pane, ran.reason()),
+  > fn one_line(text: &str) -> String {
