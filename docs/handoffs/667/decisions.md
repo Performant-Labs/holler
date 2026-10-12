@@ -122,3 +122,27 @@
     - No `section(&doc, 12)` in `docs_pane_control_test.rs`.
     - `CHANGELOG` and `pane-control` across `crates/`, `plugins/` and `scripts/`: only `docs_pane_control_test.rs` (its #652 pin, `:478-487`), `scripts/changelog-check.sh` and comments.
   - The two source facts are in `evidence.md`.
+
+## T (Phase 7 in the script's numbering, verify GREEN): 2026-10-11T20:24-06:00 (MDT)
+- **Decided:** GREEN with no blocking issue. Verdict PASS. No test was changed: F flagged none, and the review found none to repair. The detail is in `handoff-T-green.md`.
+  - **A16:** all seven mutants were applied by script, one at a time, each run opted in with `--exact` and then restored. Each was killed. M3 was run in both readings of the brief's wording (M3 drops `&& !take_over`, M3b never refuses), and both were killed at step 5.
+  - **Where three mutants failed:** M1 and M5 were caught at step 2's dry run, and M7 at step 1's `pane launch`, which uses the same `below()`. That is earlier than the steps A16 names. Each is still killed by the scenario, so no assertion was strengthened.
+  - **Evidence appendix:** six unchanged-source facts the scenario asserts literally were appended to `evidence.md`, each with a verbatim excerpt copied from source.
+- **Assumed:**
+  - **Mutant compilation.** A mutant written behind `std::hint::black_box(true)` is equivalent to the brief's plain edit: the original branch stays compiled, so `dead_code = "deny"` does not reject the mutant build.
+  - **The two 20:19 `/tmp/hlr649-*` directories** came from another session's `pane_integration` default run, not from this target. They held only `wired.rs`'s trap script. `profile_apply_scenario` does not include `wired.rs`. `pgrep` showed the `0835` worktree's `pane_integration` binary running, and the directories were gone once that run ended.
+- **Hedged:** the `/tmp` and `ps` checks read the whole machine, and other worktrees run tests at the same time. The baseline (10 entries) was taken before this phase's runs and compared again after the mutants.
+- **Evidence:**
+  - **The opted-in target, twice:** `ok. 2 passed` in 42.84 s, then in 36.92 s.
+  - **Workspace suite (CI command):** exit 0. That covers `pane_integration` 68 passed and 4 ignored, and `profile_apply_scenario` 5 passed and 2 ignored.
+  - **Lint and CI checks:** workspace clippy, `lint.sh`, `changelog-check.sh`, `docs_cli_test` (3), `docs_pane_control_test` (16), `cargo machete` and `wire_selftest` (3) are all clean.
+  - **Mutant failures:**
+    - M1: `plan.rs:221`
+    - M2: `probe.rs:142`
+    - M3: `scenario.rs:465`
+    - M3b: `scenario.rs:455`
+    - M4: `scenario.rs:400`
+    - M5: `plan.rs:221`
+    - M6: `scenario.rs:474`
+    - M7: `scratch/mod.rs:448`, "Herdr put the new pane ... at r1c2, not at r2c1"
+  - **After each mutant:** `git diff --stat -- crates/` was empty.
