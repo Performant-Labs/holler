@@ -598,6 +598,12 @@ fills this file in at release time.
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
 
 ### Bug Fixes
+- The OpenCode adapter reads a pane's TUI correctly when holler runs with no UTF-8 locale (`LANG=C`, `LC_ALL=C`, or
+  neither set) (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#844](https://github.com/Performant-Labs/holler/issues/844)). Its one tmux query joins five fields with TABs, and a
+  tmux client without a UTF-8 locale prints each TAB as `_`, so `attach_tui`, `select_session` and `shown_session`
+  reported "no tmux session" for a pane that was fine. Every tmux call the adapter makes now passes `-u`, which makes
+  the client print UTF-8 whatever the locale; the query, its reply and the process environment are unchanged.
 - `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic
   [#633](https://github.com/Performant-Labs/holler/issues/633),
   [#853](https://github.com/Performant-Labs/holler/issues/853)). Apply created the missing panes in workspace, row and
