@@ -1,5 +1,5 @@
 //! A real run with a `refused` step and no `failed` one exits 3 and prints only the refusal
-//! (#853; ADR-0021 section 8, "Apply's step order and its exit code", and decision 31), the
+//! (#853; ADR-0021 section 8, "Apply's step order and its exit code", and decision 33), the
 //! twin of a failed step's `assert_stopped` (the decision on O6). A dry run that plans a
 //! refusal still exits 0 with its plan (`dry_run.rs`), and a `reported` step alone still exits
 //! 0 (`rows.rs`, row d).
@@ -28,7 +28,7 @@ pub(crate) struct Refusal<'a> {
     pub ran: usize,
 }
 
-/// Decision 31, at the verb: each format on its own fresh rig (`seed`), run by `run`, exits 3
+/// Decision 33, at the verb: each format on its own fresh rig (`seed`), run by `run`, exits 3
 /// and prints only the refusal. JSON: one failure envelope, `data` null, `error.code` the first
 /// refused step's code, `error.message` starting with the pinned form `apply refused <N>
 /// step(s): <pane> (<code>), ...; <M> other step(s) ran`. Text: nothing on stdout and one
@@ -219,7 +219,7 @@ fn refused_then_failed() -> Rig {
     rig
 }
 
-/// Decision 31's order: a `failed` step still stops the run and exits 1 with the failure
+/// Decision 33's order: a `failed` step still stops the run and exits 1 with the failure
 /// alone, even beside a refused step; the refusal does not turn it into exit 3.
 #[test]
 fn a_failed_step_beside_a_refused_one_still_exits_1() {

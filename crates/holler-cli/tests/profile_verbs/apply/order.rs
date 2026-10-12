@@ -1,5 +1,5 @@
 //! The order of apply's steps (#853; ADR-0021 section 8, "Apply's step order and its exit
-//! code", decision 30): by workspace, then the workspace's column-1 cells by row, then every
+//! code", decision 32): by workspace, then the workspace's column-1 cells by row, then every
 //! other cell by row and column, the order the adapter's split planner builds a grid in. The
 //! whole 2-by-2 grid built on the split-only fake is `rows.rs`'s row b case.
 //!
@@ -25,7 +25,7 @@ fn spec_in(pane: &str, workspace: &str, (row, col): (u16, u16), port: u16) -> Pr
     spec
 }
 
-/// Acceptance 1 (decision 30): whatever P's order, the steps take each workspace in turn
+/// Acceptance 1 (decision 32): whatever P's order, the steps take each workspace in turn
 /// (`main`, then `side`), its column-1 cells by row first, then its other cells by row and
 /// column; two specs of one cell keep P's order (`dup-b` is listed before `dup-a`).
 #[test]
@@ -92,7 +92,7 @@ fn below_a_row_of_two() -> Rig {
     rig
 }
 
-/// Acceptance 4 (decision 30, the limit that stays): Herdr adds a row only below a row of one
+/// Acceptance 4 (decision 32, the limit that stays): Herdr adds a row only below a row of one
 /// pane, so `pane-n`'s create at r2c1 beside a live r1c1 and r1c2 is a `refused` step
 /// (`grid-unreachable`), nothing is made for it and nothing live moves; the other steps still
 /// run. The run exits 3 coded `grid-unreachable`, and the create's refusal came from inside

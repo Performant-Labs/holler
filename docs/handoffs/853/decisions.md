@@ -440,3 +440,29 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - the script's `buildPhaseCommitTaskPrompt`, and its routing after an S REWORK (F, then T-green);
     - `.githooks/{pre-commit,commit-msg,prepare-commit-msg}`;
     - the merged ADR-0021 list and cites, and the guide's diff against `main`.
+
+## T, verify tests (GREEN), cycle 2, after S's REWORK: 2026-10-12T07:15-06:00 (MDT)
+
+- **Decided:** PASS. I renumbered the 7 test comments that F flagged under S's item 1 (c): `order.rs:2`, `:28` and `:95`
+  (30 becomes 32); `refused.rs:2`, `:31` and `:222` (31 becomes 33); and `profile_apply_scenario/plan.rs:198` (31
+  becomes 33). They are comments only, with no assertion or test name changed. S's two done-checks now hold, and the
+  merged tree is GREEN.
+- **Assumed:**
+  - Cycle 1's removal checks still stand without a re-run. The code they reverted (`cell_key`, `refused()`, the `acted`
+    filter, and the test kit's `check_split`) is byte-identical between `c1f7deb` and `0330fa0`. The only change in
+    those files is two doc-comment lines in `profile/apply.rs`.
+  - The opt-in scratch set (`grid`, `probe`, `scenario`) did not need a re-run on Herdr 0.9.1, for the same reason.
+- **Hedged:**
+  - I took none of S's optional test-side advisories 5 and 6, and I did not reformat `refused.rs`'s pre-existing long
+    lines. S's REWORK says the next S passes once item 1 is done and nothing else has changed. rustfmt is not a gate:
+    neither CI nor `lint.sh` runs it, and `cargo fmt --check` flags 242 files across the workspace.
+- **Evidence:**
+  - `git grep -n -i -E "decision(s)? (30|31)\b|\(30 and 31\)" -- crates docs/adr docs/pane-control.md CHANGELOG.md`:
+    no match.
+  - ADR-0021's decision list reads 1 to 33, each once.
+  - `HEAD` `0330fa0` has the parents `21b29a0` and `4e691d9`, and `origin/main` is still `4e691d9`.
+  - The verify command with `--no-fail-fast`: 167 binaries, 2,606 passed, 0 failed, 37 ignored. That includes
+    `profile_verbs` 118, `docs_pane_control_test` 19, `docs_cli_test` 3, `cli_surface_test` 3, `wire_selftest` 3,
+    `fake_herdr_test` 25, `herdr_conformance_test` 22 and `plan_splits_test` 20.
+  - Clippy `-D warnings`: exit 0. `lint.sh`: exit 0. `changelog-check`: ok. `cargo machete`: clean.
+    `git diff --check`: clean.

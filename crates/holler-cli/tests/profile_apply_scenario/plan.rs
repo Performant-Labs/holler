@@ -195,7 +195,7 @@ impl Step {
     }
 }
 
-/// #853 (ADR-0021 section 8, decision 31): `out` is a real apply that refused `refused` (each
+/// #853 (ADR-0021 section 8, decision 33): `out` is a real apply that refused `refused` (each
 /// pane and its code, in step order) and ran `ran` other steps: exit 3, no `data`, `error.code`
 /// the first refused step's, and the message `apply refused <N> step(s): <pane> (<code>), ...;
 /// <M> other step(s) ran`. Returns the rest of the message (each refused step that had begun
