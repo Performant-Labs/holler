@@ -917,7 +917,7 @@ old launcher's files to the registry. This is its procedure; where it differs fr
 guide is the standing text.
 
 Before step 1, confirm the binary: `holler --version` prints the version and then the commit the binary was built from,
-such as `0.4.0 (bda1069)` (issue [#851](https://github.com/Performant-Labs/holler/issues/851)). It must name the commit
+such as `0.5.0 (bda1069)` (issue [#851](https://github.com/Performant-Labs/holler/issues/851)). It must name the commit
 of `main` the cutover runs, without `-dirty`; a version number alone does not tell two builds apart.
 
 One fact about the live fleet comes first; it is a fact, not a step:
