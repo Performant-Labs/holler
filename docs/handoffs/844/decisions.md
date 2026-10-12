@@ -22,3 +22,9 @@
 - **Assumed:** `-u` is accepted by every supported tmux (present since tmux 1.x, per the brief's risk list).
 - **Hedged:** A's warn 1 (document why the real-tmux test is not `#[ignore]`) left to T/docs; `docs/testing.md` not edited, as it is not in the brief's Files.
 - **Evidence:** `cargo test -p holler-adapter-opencode` all green incl. `utf8_locale_test` (ran, not skipped) and `ac11c`; clippy `-D warnings` and `cargo doc` clean; `pane_integration` 71 passed / 4 ignored; `changelog-check` ok; `lint.sh` exit 0.
+
+## T (verify / GREEN) — 2026-10-12
+- **Decided:** PASS. Package suite, full workspace suite and `pane_integration` are green; removing `-u` fails `ac11c`. No test needed repair (F flagged none).
+- **Assumed:** the workspace clippy error in `token_load_test.rs` is pre-existing because that file is untouched by the diff.
+- **Hedged:** `cargo machete` is not installed in this environment, so it was not run.
+- **Evidence:** `cargo test --workspace --no-fail-fast` exit 0 (168 ok results); `pane_integration` 71 passed / 4 ignored; `git diff origin/main --name-only` lacks `token_load_test.rs`.
