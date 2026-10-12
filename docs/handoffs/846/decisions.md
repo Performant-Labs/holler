@@ -10,3 +10,9 @@
 - **Why:** AC 1 greps now match exactly the four `LinkedHost`s (and not `LostChain`); W-3b is dropped; `profile_apply_scenario` is in the AC 2 command with `scratch/`, `out.rs` and `scenario.rs` untouched; the no-hub text is scoped to `no_hub.rs` and `fake_hub.rs` with both assertion strengths kept.
 - **Warnings (non-blocking):** say "five" targets, not "four", in AC 2 and the Test plan; update `verb_harness/mod.rs`'s "included by" doc line; keep the `pane_integration` helper dependency one-way; keep `FakeHarnessLink` to named modes; keep `kill_served` defined once and called twice.
 - **Output:** `docs/handoffs/846/handoff-A.md` (replaces the BLOCK from `b59e745`; history in git).
+
+## Phase 4 - T, characterisation baseline (2026-10-12)
+- **Decided:** No new test file; the RED is the AC 1 greps (4 + 4 duplicates, 2 `opencode-ran` writers) plus a recorded green baseline of the five targets (43 / 71 / 347 / 5 / 118 passed; 1 / 4 / 0 / 3 / 0 ignored) and `wc -l` of the rig files (852 / 776 / 693 / 482 / 321).
+- **Assumed:** The pipeline stays on `claude-pipeline-v0.1.7` for this in-flight story; the operator said 0.1.8 is for new stories only and not to restart work.
+- **Hedged:** A refactor has no failing behaviour assertion; the mutation check in Phase 6 is what shows the propagate/swallow modes are pinned.
+- **Evidence:** `docs/handoffs/846/handoff-T-red.md`; baseline run on `90d62fd`, exit 0.
