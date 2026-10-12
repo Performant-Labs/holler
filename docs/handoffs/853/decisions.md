@@ -247,3 +247,58 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
       8 and 6 tests. Each was restored, with an empty `git diff` against HEAD.
   - **Read:** handoff-F.md, the production diff `0064fac..07a576c`, `evidence.md`, `tx_apply/observe.rs:118-135`,
     `tx_apply/run.rs:118-130` and `.github/workflows/ci.yml`.
+
+## A, anti-duplication gate (Phase 7): 2026-10-12T06:26-06:00
+
+- **Decided:** PASS, with 0 blocks and 6 warns (see handoff-A-dup.md). F extended every object the map named:
+  - `cell_key` is still private, and it is the only order function.
+  - `refused()` sits beside `stopped()`, reusing `reconciled()`'s details, `quoted` and `ErrorCode::from`. There is no
+    second reconcile builder and no exit table.
+  - `Step` is unchanged.
+  - `check_split` is tightened in place, with no new double and no test-kit dependency on the adapter.
+  - The fake restating the planner's rule is the brief's deliberate design, and the cross-check binds the two together.
+  - T wrote one refused-form helper in `profile_verbs` (8 call sites). C25 was moved, not copied, and the planner
+    tests' map builders were reused.
+  - **Warns:**
+    1. `workspace_extents()` is a second `label=RxC` parser. The scratch snapshot could use the public
+       `wiring::env::herdr_config` instead.
+    2. `assert_refused_run` is the scratch binary's twin of `assert_refused`. Accepted, because of the binary boundary
+       and #667's precedent.
+    3. `grid.rs`'s `listed()` and `recorded` repeat `assert_end_state`'s inline projection.
+    4. The row-a test in `rows.rs` repeats its own fixture in `seed`.
+    5. `fake_spec` is the third per-file `HerdrSpec` builder in the adapter's tests.
+    6. Carry-over of round-2 warn 9: #860 (#835) also adds ADR-0021 decisions 30 and 31, and #853 now cites its
+       numbers in 11 places.
+- **Assumed:**
+  - The scratch binary cannot reasonably share `profile_verbs`' helper. No module is included by both binaries, and
+    `refused.rs` depends on the fake `Rig`.
+  - #835's local branch tip `e66d148`, matching `origin/issue-835-implementation`, is the state of PR #860.
+- **Hedged:**
+  - Warn 1's fix (`herdr_config` over a lookup) is not built or run here; A writes no code.
+  - Warn 6 depends on the merge order, which is the merging agent's call.
+- **Evidence:**
+  - **Read:**
+    - the diffs `ff981f1..a8b3048` and `b76f4d2..a8b3048`;
+    - production code in full: `profile/apply.rs`, and `tx_apply.rs` at `plan`, `cell_key`, `Step` and `halted`;
+    - the test kit's `herdr.rs` (`Placement`, `place`, `check_split`) and the adapter's `plan.rs`;
+    - the new test files in full: `refused.rs`, `order.rs` and `grid.rs`;
+    - `rig.rs:540-640`, and the diffs of `rows.rs`, `failures.rs`, `dry_run.rs`, `probe.rs` and `scenario.rs`;
+    - `plan.rs` (scratch) at 195-290, `scratch/mod.rs` at 94-115, 240-275 and 480-510, and `scratch/verbs.rs:95-125`;
+    - `plan_splits_test.rs` (the head and the cross-check), the adapter's `tests/common/mod.rs`, and the
+      `fake_herdr_test.rs` diff;
+    - `wiring/env.rs` (`herdr_config`, `workspaces`), `pane_integration/env.rs:110-140`, and `import.rs`'s
+      `Plan::refusal`;
+    - handoff-A, handoff-T-red, handoff-F and handoff-T-green.
+  - **Ran (warm build in the worktree), all ok:**
+    - `cargo test -p holler-cli --test profile_verbs apply::`: 45 passed;
+    - `cargo test -p holler-pane-testkit --test fake_herdr_test split_only`: 5 passed;
+    - `cargo test -p holler-adapter-herdr --test plan_splits_test`: 20 passed, the cross-check included.
+  - **Searched:**
+    - for a second order function or partition (`col != 1`, `col == 1`, `cell_key`) in `crates/*/src`;
+    - for `reconcile_step(` callers;
+    - for new `pub` items in production code;
+    - for the overlay's Phase 7 candidates in the added lines;
+    - for existing `HerdrSpec` builders, `herdr_snapshot()` users and `label=RxC` parsers;
+    - for the refused and stopped message heads across the tests;
+    - for cites of decisions 30 and 31 on this branch and on `issue-835-implementation`, and PR #860's state;
+    - for personal infrastructure names in the added lines: none (only generic `~/.local/bin` in the handoffs).
