@@ -38,7 +38,13 @@
 //!   [`HarnessPort::new_session_id`], [`HarnessPort::locate_process`],
 //!   [`HarnessPort::login_status`]); [`ServeSpec`] gains the model and the directory; and
 //!   [`Activity::WaitingPermission`]. [`HarnessRouter`] is the one router of the two
-//!   shapes, so [`Ports`] keeps one harness.
+//!   shapes, so [`Ports`] keeps one harness;
+//! - #647 part 2's (ADR-0021 section 12): the required `HostPort::attached_clients`, the
+//!   number of tmux clients attached to a session (`unattached`), and the required
+//!   `HarnessPort::agent_view`, what a harness server says about the agents of a session's
+//!   recent turns and the agents that can dispatch (`agent-cannot-dispatch`). Both are
+//!   read-only and required for #835's reason, so a wrapper that does not forward one does
+//!   not compile.
 
 mod process;
 mod router;
