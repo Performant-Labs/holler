@@ -513,3 +513,60 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - for every "section 14" cite in ADR-0021, and for tests that pin `:765`'s text (none);
     - for the overlay's Phase 7 candidates in the PR's added crate lines (none);
     - for private-name patterns in this cycle's added lines (none).
+
+## S, spec audit, cycle 2, after F's rework: 2026-10-12T07:52-06:00 (MDT)
+
+- **Decided:** PASS. See `handoff-S.md`, which replaces cycle 1's at `21b29a0`.
+  - **Cycle 1's one REWORK item is done:**
+    - the merge, `0330fa0`, has two parents;
+    - ADR-0021's list runs 1 to 33, each number once;
+    - all 13 cites name 32 or 33;
+    - T-green's GREEN is on the merged tree.
+  - **All six criteria are met on the merged tree**, by tests that assert behaviour. #853's code is byte-identical to
+    what cycle 1 audited, apart from two doc-comment lines.
+  - **Accepted:** F's removal of the blank line, and the advisory-2 sentence at ADR-0021 `:713`. The sentence is
+    accurate against `stopped()`, which has no dry-run guard, and `refused()`, which returns `None` for a dry run.
+  - **Advisories, none blocking:**
+    - ADR-0021 `:765` says "(section 14)" where section 13 is meant (A-dup's warn 1, confirmed);
+    - the `--help` sentence "--dry-run prints the plan, exits 0" over-claims for a dry run that fails;
+    - cycle 1's note on the unpushed history, corrected (below).
+- **Assumed:**
+  - T-green's GREEN at `c39699c` holds for `HEAD`, which adds handoffs only.
+  - Cycle 1's removal checks and opted-in runs hold, because the code they exercise is byte-identical.
+  - I re-ran no build or test, as the role says. The one script I ran is `changelog-check.sh`, a read-only check.
+- **Hedged:**
+  - **Why PASS, and not REWORK, for the section cite.**
+    - It is one word of the amendment's own text, and A passed it in both rounds.
+    - The claim is right, and nothing pins the text.
+    - Cycle 1 closed its list, and a third F cycle is out of proportion.
+  - **The unpushed history, corrected.** Cycle 1 said the push discloses nothing new because the name is on `main`. The
+    bullet holds two names:
+    - one is the machine's short hostname, already on `main` (`docs/handoffs/655-herdr-move/decisions.md`);
+    - the other is on no public ref and in no issue, but it is a common repo word joined to the same hostname.
+
+    So the push adds no new identifying fact, and I do not hold the run. No role can rewrite history, so this is not a
+    REWORK item. The hostname on `main` is a separate follow-up.
+- **Evidence:**
+  - **Live:**
+    - `git ls-remote origin` at the start and at the end: `main` is `4e691d9`, and the branch is `05d8e6a`;
+    - `gh issue view 853`: nothing new since 04:12 MDT;
+    - `gh pr list --head issue-853-implementation`: none;
+    - `gh issue view 655`: used only for the masked check.
+  - **Read:**
+    - the brief, every handoff (cycle 1's S included), this journal and `evidence.md`;
+    - the production diff in full;
+    - `order.rs`, `refused.rs` and `grid.rs` in full, every other test diff, and `rows.rs:28-167`;
+    - the ADR-0021, ADR-0003, guide and CHANGELOG diffs;
+    - ADR-0021's headings, section 13 (`:1086-1094`), section 9's rows and the decision list;
+    - `Scratch::start` and `pane_claude/mixed.rs`;
+    - `CONTRIBUTING.md`, and the release script's rework caps and PR phase.
+  - **Ran (read-only):**
+    - `git merge-tree --write-tree 21b29a0 4e691d9`, which gives `c2941f8`, then `git diff c2941f8 HEAD`;
+    - cycle 1's done-check grep: no match;
+    - the decision-list check: 1 to 33, no duplicate;
+    - a sweep of the added lines for a bare 30 or 31, and for section cites;
+    - `git grep` for the constructors of `Outcome::Refused`: `halted` only;
+    - `wc -l` of every touched file, the guard grep over `src`, and the grep for sleeps;
+    - the privacy grep over the 2,874 added lines and over each new commit;
+    - masked checks of the two session names against `main`'s tree and history, `05d8e6a`, and issues #655 and #853;
+    - `scripts/changelog-check.sh`: ok.
