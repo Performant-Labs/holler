@@ -1,11 +1,12 @@
 //! The chain of a pane whose harness is one process (#831, ADR-0021 section 15 items 6 and 13;
 //! plan review W2 and W3): Claude Code, which has no server list and no TUI.
 //!
-//! - **Observe**: the parent's `host.ps`, then `harness.health` at the process's endpoint
-//!   (whether it still runs; a gone process is `server-down`, and there is no wedge to tell
-//!   apart), `harness.shown_session` (the session it holds now; a person's `/clear` or
-//!   `/resume` moves it) and, while it runs, `harness.session_activity`: a process that waits
-//!   for a person is `pane-waiting`, with the reason.
+//! - **Observe**: the parent's `host.ps` and `host.attached_clients` (`unattached`, #647 part
+//!   2), then `harness.health` at the process's endpoint (whether it still runs; a gone process
+//!   is `server-down`, and there is no wedge to tell apart), `harness.shown_session` (the
+//!   session it holds now; a person's `/clear` or `/resume` moves it) and, while it runs,
+//!   `harness.session_activity`: a process that waits for a person is `pane-waiting`, with the
+//!   reason. It never asks `harness.agent_view`: a single process has no server to list agents.
 //! - **Compare**: `no-session-of-record`, and the one mismatch, the process holding another
 //!   session than the session of record (`shown-driven-mismatch`). The rules that need a
 //!   server's list are skipped: `session-of-record-missing`, `tui-foreign-session`,

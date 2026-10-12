@@ -285,14 +285,16 @@ pane's directory, harness, model, effort, role, env var names and context ceilin
 
 ```bash
 # the adapters are configured by environment variables (HOLLER_HERDR_SESSION, HOLLER_HERDR_WORKSPACES, HOLLER_TMUX_SOCKET, ...)
-holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 --project ~/work/demo \
-  --model anthropic/claude-sonnet-5-5 --effort medium --ctx-soft 800000 --ctx-hard 900000
+holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 --project ~/work/demo --model anthropic/claude-sonnet-5-5 --effort medium --ctx-soft 800000 --ctx-hard 900000
 holler pane list                        # every pane: place, harness, health, session of record, hold; unmanaged Herdr panes in a second table
 holler pane doctor [PANE] [--fix]       # compare the record with reality; repair or report
 holler pane switch PANE SESSION         # move a pane to another session; also: reset, relaunch, park, unpark, close, get, watch
 holler profile create fleet --from-current
 holler profile apply fleet --dry-run    # the plan; drop --dry-run to converge the live panes on the profile
-holler profile show|rename|export|import ...
+holler profile show fleet
+holler profile rename fleet fleet-2
+holler profile export fleet --out fleet.json
+holler profile import fleet.json
 holler say --pane demo-alpha "hello"    # say, interrupt and answer also take --pane NAME
 ```
 
@@ -306,7 +308,11 @@ holler say --pane demo-alpha "hello"    # say, interrupt and answer also take --
 - A Claude Code pane that was set up by hand stays outside the registry (`scripts/pane-restart` restarts it); the
   import leaves it alone, and `--adopt-claude-code` is refused until #831 closes. `say --pane` does not reach a Claude
   Code pane until #850 (a body driver) merges.
-- `holler --version` now reads `holler 0.5.0 (abc1234)`: the version, then the commit the binary was built from.
+- `holler --version` now prints the version, then the commit the binary was built from:
+
+  ```output
+  holler 0.5.0 (abc1234)
+  ```
 
 The full operator guide, including the cutover from the launcher's files and the rollback, is
 [docs/pane-control.md](docs/pane-control.md). [PENDING #850/#831: update the Claude Code lines above when they merge.]

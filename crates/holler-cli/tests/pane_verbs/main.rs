@@ -74,6 +74,12 @@ fn unwired_ports_answer_not_implemented() {
         ports.harness.new_session_id().map(drop),
         ports.harness.locate_process(&name, "s-1").map(drop),
         ports.harness.login_status().map(drop),
+        // #647 part 2: the two required reads.
+        ports.host.attached_clients(&name).map(drop),
+        ports
+            .harness
+            .agent_view(&holler_pane::HarnessEndpoint::Port(1), "ses_1", 3)
+            .map(drop),
     ];
     for answer in amended {
         let code = answer.err().map(|e| e.code().to_string());

@@ -14,15 +14,23 @@
 //!   (opencode-pane-spike.md:117-124), so its `true` proves nothing. Both methods query
 //!   the pane every `SETTLE_POLL` (the crate's one poll), within `settle`, until it is a
 //!   live attach to that server whose title shows the session; otherwise the answer is
-//!   `timeout`.
+//!   `timeout`. `select_session` sends the select request again after each query whose
+//!   title does not show the session yet (#845): a TUI that has just started answers
+//!   `true` before it takes a switch, and selecting a session is idempotent.
 //! - **No keystroke is ever sent** (I4): the TUI is switched only over the API.
+//! - **Every tmux call is run by the shared bounded runner** of `holler-pane` (#696), never
+//!   through a shell, as [`TMUX_RUN`] says; [`capture`] maps its answer to this adapter's
+//!   errors, naming the program and none of its arguments.
 
+use std::fmt::Display;
+use std::path::Path;
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
+use holler_pane::bounded::{self, Capture, KillScope, Over, RunError, Spec};
 use holler_pane::{PaneError, PaneId, PaneName};
 use serde_json::{json, Value};
 
-use crate::exec;
 use crate::tui::{self, Query, Refusal, TitleShows};
 use crate::{deadline_after, json_of, known, one_line, poll, session_path, session_reply};
 use crate::{string_at, Call, OpenCodeHarness, TmuxConfig, GET_SESSION, SELECT};
@@ -48,7 +56,7 @@ pub(crate) fn attach_tui(
     let tui = Tui::of(harness, pane, OP_ATTACH_TUI, call.deadline)?;
     tui.change(&tui::remain_on_exit_args(&tui.session))?;
     tui.change(&tui::respawn_args(&tui.session, directory, &argv))?;
-    match tui.watch(port, session, config.timeouts.settle)? {
+    match tui.watch(port, session, config.timeouts.settle, |_| Ok(()))? {
         Seen::Shown => Ok(()),
         Seen::Dead(status) => Err(exited(&call, &path, session, &tui, status)),
         Seen::Gone => Err(tui.no_session()),
@@ -59,7 +67,10 @@ pub(crate) fn attach_tui(
 /// server, so the TUI is found first, and a pane with no TUI is `unavailable` before
 /// anything is sent (case 14). Then the session is checked (an unknown one is
 /// `session-not-found`, and the screen stays: case 13), the switch is asked for, and the
-/// title is watched until it shows the session.
+/// title is watched until it shows the session. The switch is asked for again after each
+/// query of the watch that finds the TUI live but not showing the session (#845), by the
+/// same rules as the first request; a dead or missing TUI ends the watch with no further
+/// request.
 pub(crate) fn select_session(
     harness: &OpenCodeHarness,
     pane: &PaneId,
@@ -75,7 +86,20 @@ pub(crate) fn select_session(
     .ok_or_else(|| tui.no_tui())?;
     let call = harness.call_until(port, OP_SELECT_SESSION, deadline);
     known(&call, &session_path(session), session)?;
-    let reply = call.send(SELECT, SELECT.label, Some(&json!({ "sessionID": session })))?;
+    select(&call, session, deadline)?;
+    let again = |until| select(&call, session, until);
+    match tui.watch(port, session, config.timeouts.settle, again)? {
+        Seen::Shown => Ok(()),
+        Seen::Dead(_) | Seen::Gone => Err(tui.no_tui()),
+    }
+}
+
+/// One `POST /tui/select-session` for `session`, within `until` and the call's bounds. A 404
+/// is `session-not-found`; any answer but `true` is `unavailable`. `true` only means the
+/// request was taken (I3): the title is what confirms the switch.
+fn select(call: &Call, session: &str, until: Instant) -> Result<(), PaneError> {
+    let body = json!({ "sessionID": session });
+    let reply = call.send_by(SELECT, SELECT.label, Some(&body), until)?;
     if reply.status == 404 {
         return Err(PaneError::SessionNotFound {
             what: session.to_owned(),
@@ -84,10 +108,7 @@ pub(crate) fn select_session(
     if json_of(&reply) != Some(Value::Bool(true)) {
         return Err(call.unexpected(SELECT, &reply, "true"));
     }
-    match tui.watch(port, session, config.timeouts.settle)? {
-        Seen::Shown => Ok(()),
-        Seen::Dead(_) | Seen::Gone => Err(tui.no_tui()),
-    }
+    Ok(())
 }
 
 /// `HarnessPort::shown_session`: one query of the pane, read by [`showing`]. It never asks
@@ -196,16 +217,29 @@ impl<'a> Tui<'a> {
 
     /// Query the pane every `SETTLE_POLL`, through the crate's one poll, until it is a live
     /// attach to the server on `port` whose title shows `id`, a dead pane or no pane, within
-    /// `settle` and the method's deadline. None of them in time is `timeout`.
-    fn watch(&self, port: u16, id: &str, settle: Duration) -> Result<Seen, PaneError> {
+    /// `settle` and the method's deadline. None of them in time is `timeout`. After a query
+    /// that finds the pane live but not showing `id`, `unseen` runs with the poll's end (a
+    /// switch asks for itself again there); its `Err` ends the watch.
+    fn watch(
+        &self,
+        port: u16,
+        id: &str,
+        settle: Duration,
+        mut unseen: impl FnMut(Instant) -> Result<(), PaneError>,
+    ) -> Result<Seen, PaneError> {
         poll(settle, self.deadline, self.op, |until| {
             let query = self.query(until)?;
             Ok(match query {
                 Query::NoPane => Some(Seen::Gone),
                 Query::Dead(status) => Some(Seen::Dead(status)),
-                Query::Live { .. } => showing(&query)
-                    .is_some_and(|(at, shows)| at == port && shows == id)
-                    .then_some(Seen::Shown),
+                Query::Live { .. } => {
+                    if showing(&query).is_some_and(|(at, shows)| at == port && shows == id) {
+                        Some(Seen::Shown)
+                    } else {
+                        unseen(until)?;
+                        None
+                    }
+                }
             })
         })
     }
@@ -214,7 +248,7 @@ impl<'a> Tui<'a> {
     /// its pane or the server is missing. Any other failure is `unavailable` with tmux's
     /// first stderr line, never one of the call's arguments.
     fn run(&self, args: &[String], until: Instant) -> Result<Option<String>, PaneError> {
-        let ran = exec::capture(tui::tmux_command(self.tmux, args), self.op, until)?;
+        let ran = capture(tui::tmux_command(self.tmux, args), self.op, until)?;
         if ran.status.success() {
             return Ok(Some(ran.stdout));
         }
@@ -236,5 +270,71 @@ impl<'a> Tui<'a> {
         PaneError::Unavailable {
             what: format!("no TUI in pane {}", self.pane),
         }
+    }
+}
+
+/// How a tmux call is run: stdin null, each output kept up to 64 KiB with the rest read and
+/// dropped (so a child that writes more than a pipe holds cannot block), the child alone
+/// killed and reaped at the deadline, and its exit polled every 5 ms.
+const TMUX_RUN: Spec = Spec {
+    stdout: KEPT,
+    stderr: KEPT,
+    kill: KillScope::Child,
+    poll: Duration::from_millis(5),
+};
+
+/// One output of a tmux call: its first 64 KiB.
+const KEPT: Capture = Capture::Keep {
+    cap: 64 << 10,
+    over: Over::Truncate,
+};
+
+/// A tmux call that ran to its exit: its status, and what it printed, decoded lossily.
+struct Ran {
+    status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+impl Ran {
+    /// Why a call that failed failed, on one line: its first non-empty stderr line, or its
+    /// exit status when it printed nothing there.
+    fn reason(&self) -> String {
+        self.stderr
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map_or_else(|| self.status.to_string(), one_line)
+    }
+}
+
+/// Run `command` to its exit before `deadline`, under [`TMUX_RUN`]. Nothing is started once
+/// `deadline` has passed; that, a child still running at `deadline`, and outputs still open
+/// at `deadline` (something the child started holds them) are `timeout` with `op`. A program
+/// that cannot be run is `unavailable`, naming it and none of its arguments.
+fn capture(mut command: Command, op: &str, deadline: Instant) -> Result<Ran, PaneError> {
+    let program = Path::new(command.get_program()).display().to_string();
+    let ran = bounded::run(&mut command, &TMUX_RUN, deadline).map_err(|error| match error {
+        RunError::Expired => PaneError::Timeout { op: op.to_owned() },
+        RunError::Spawn(error) => cannot("run", &program, &error),
+        RunError::ReaderFailed(error) => cannot("read the output of", &program, &error),
+        RunError::WaitFailed(error) => cannot("wait for", &program, &error),
+        // `Overflow` cannot happen: the outputs are truncated, never failed.
+        RunError::OutputLost | RunError::Overflow => PaneError::Unavailable {
+            what: format!("cannot read the output of {program}: it was lost"),
+        },
+    })?;
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    Ok(Ran {
+        status: ran.status,
+        stdout: text(&ran.stdout),
+        stderr: text(&ran.stderr),
+    })
+}
+
+/// `unavailable`: the adapter cannot do `doing` with `program`, for `error`.
+fn cannot(doing: &str, program: &str, error: &dyn Display) -> PaneError {
+    PaneError::Unavailable {
+        what: one_line(&format!("cannot {doing} {program}: {error}")),
     }
 }

@@ -16,9 +16,9 @@ use holler_pane::error::{class_of, ErrorClass};
 use holler_pane::hub::{Advertised, HubPort, PromptMode};
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
-    next_generation, run_probe, Actor, AgentKey, Argv, Cursor, HarnessEndpoint, HarnessPort,
-    HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneId,
-    PaneName, PaneObservation, PaneReply, PaneStore, Ports, ProbeResult, Prober, Profile,
+    next_generation, run_probe, Actor, AgentKey, AgentView, Argv, Cursor, HarnessEndpoint,
+    HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError,
+    PaneId, PaneName, PaneObservation, PaneReply, PaneStore, Ports, ProbeResult, Prober, Profile,
     ProfileEvent, ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec, ProfileStore,
     ResolvedScope, ServeSpec, SpecEdit, SystemProber, Watch,
 };
@@ -220,6 +220,10 @@ impl HostPort for TestHost {
     fn foreground_commands(&self, _name: &PaneName) -> Result<Vec<String>, PaneError> {
         Ok(vec!["bash".to_string()])
     }
+    // Required since #647 part 2.
+    fn attached_clients(&self, _name: &PaneName) -> Result<u32, PaneError> {
+        Ok(1)
+    }
 }
 
 struct TestHarness;
@@ -265,6 +269,15 @@ impl HarnessPort for TestHarness {
         _at: &HarnessEndpoint,
     ) -> Result<Option<String>, PaneError> {
         Ok(Some("ses_abc".to_string()))
+    }
+    // Required since #647 part 2.
+    fn agent_view(
+        &self,
+        _at: &HarnessEndpoint,
+        _session: &str,
+        _max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        Ok(AgentView::default())
     }
 }
 

@@ -8,8 +8,8 @@ use holler_cli::output::Format;
 use holler_pane::findings::FindingKind as K;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
-    Argv, EnvVarName, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ProfileName,
-    ServeSpec,
+    AgentView, Argv, EnvVarName, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName,
+    ProfileName, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fault::Fault;
@@ -525,6 +525,14 @@ impl HarnessPort for HealthGate<'_> {
         at: &HarnessEndpoint,
     ) -> Result<Option<String>, PaneError> {
         self.inner.shown_session(pane, at)
+    }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
     }
 }
 

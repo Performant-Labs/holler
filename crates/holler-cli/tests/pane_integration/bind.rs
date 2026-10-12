@@ -24,10 +24,9 @@ use holler_cli::pane::wiring::bind::{
 };
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Actor, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
-    PaneError, PaneId, PaneName, PaneStore, Ports, ServeSpec,
+    Actor, AgentKey, AgentView, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSpec, HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, ServeSpec, TurnAgent,
 };
-use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
 use holler_pane_testkit::conformance::host::run_host_conformance;
 use holler_pane_testkit::fixture::sample_pane;
 use holler_pane_testkit::harness::FakeHarness;
@@ -38,7 +37,9 @@ use holler_pane_testkit::prober::FakeProber;
 use holler_pane_testkit::profile_scope::FakeProfileScope;
 use holler_pane_testkit::profile_store::FakeProfileStore;
 
+use crate::verb_harness::linked_host::{FakeHarnessLink, LinkedHost, OnStart, OnStop};
 use crate::verb_harness::run_verb_with;
+use crate::wrappers::{herdr_suite_over, unbuildable_lazy_herdr, CallLog};
 
 /// The Herdr session the fakes serve and the wiring is configured with.
 const SESSION: &str = "scratch";
@@ -132,14 +133,7 @@ fn the_lazy_herdr_is_built_on_its_first_use_and_kept() {
 
 #[test]
 fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
-    let built = Arc::new(AtomicUsize::new(0));
-    let count = Arc::clone(&built);
-    let lazy = LazyHerdr::new(move || {
-        count.fetch_add(1, Ordering::SeqCst);
-        Err(PaneError::Usage {
-            message: "no Herdr session: set HOLLER_HERDR_SESSION".to_owned(),
-        })
-    });
+    let (lazy, built) = unbuildable_lazy_herdr();
     let pane = PaneId::new("w1:p1");
     let codes = [
         lazy.ensure_pane(&spec(1, 1)).err(),
@@ -163,64 +157,66 @@ fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
 
 /// A harness that records which method was called and answers each distinctively: the
 /// default-armed methods answer what their defaults never would (#645's two; #831's four
-/// process methods, whose defaults refuse `process-unsupported`).
+/// process methods, whose defaults refuse `process-unsupported`), and the required
+/// `agent_view` (#647 part 2) answers [`distinctive_view`] and records its arguments.
 #[derive(Default)]
 struct Recording {
-    calls: Mutex<Vec<&'static str>>,
+    calls: CallLog,
+    agent_view_args: Mutex<Vec<(HarnessEndpoint, String, usize)>>,
 }
 
-impl Recording {
-    fn note(&self, method: &'static str) {
-        self.calls
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(method);
-    }
+/// What [`Recording::agent_view`] answers: one turn as `orchestrator` that can dispatch, and
+/// the one dispatcher `reviewer`, which no empty or constant view equals.
+fn distinctive_view() -> AgentView {
+    let key = |text: &str| AgentKey::parse(text).unwrap();
+    AgentView::default()
+        .with_turns(vec![TurnAgent::new(Some(key("orchestrator")), Some(true))])
+        .with_dispatchers(vec![key("reviewer")])
 }
 
 impl HarnessPort for Recording {
     fn serve_command(&self, _: &PaneName, _: u16, _: &ServeSpec) -> Result<Argv, PaneError> {
-        self.note("serve_command");
+        self.calls.note("serve_command");
         Ok(Argv::new(vec!["serve".to_owned()]))
     }
     fn verify_serving(&self, _: &HarnessEndpoint, _: &ServeSpec) -> Result<(), PaneError> {
-        self.note("verify_serving");
+        self.calls.note("verify_serving");
         Ok(())
     }
     fn health(&self, _: &HarnessEndpoint) -> Result<bool, PaneError> {
-        self.note("health");
+        self.calls.note("health");
         Ok(true)
     }
     fn create_session(&self, _: &HarnessEndpoint) -> Result<String, PaneError> {
-        self.note("create_session");
+        self.calls.note("create_session");
         Ok("ses_1".to_owned())
     }
     fn list_sessions(&self, _: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
-        self.note("list_sessions");
+        self.calls.note("list_sessions");
         Ok(Vec::new())
     }
     fn abort(&self, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
-        self.note("abort");
+        self.calls.note("abort");
         Ok(())
     }
     fn attach_tui(&self, _: &PaneId, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
-        self.note("attach_tui");
+        self.calls.note("attach_tui");
         Ok(())
     }
     fn select_session(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
-        self.note("select_session");
+        self.calls.note("select_session");
         Ok(())
     }
     fn shown_session(&self, _: &PaneId, _: &HarnessEndpoint) -> Result<Option<String>, PaneError> {
-        self.note("shown_session");
+        self.calls.note("shown_session");
         Ok(None)
     }
     fn send_prompt(&self, _: &HarnessEndpoint, _: &str, _: &str) -> Result<(), PaneError> {
-        self.note("send_prompt");
+        self.calls.note("send_prompt");
         Ok(())
     }
     fn session_activity(&self, _: &HarnessEndpoint, _: &str) -> Result<Activity, PaneError> {
-        self.note("session_activity");
+        self.calls.note("session_activity");
         Ok(Activity::Busy)
     }
     fn process_command(
@@ -229,20 +225,33 @@ impl HarnessPort for Recording {
         _: &ServeSpec,
         _: &SessionChoice,
     ) -> Result<Argv, PaneError> {
-        self.note("process_command");
+        self.calls.note("process_command");
         Ok(Argv::new(vec!["claude".to_owned()]))
     }
     fn new_session_id(&self) -> Result<String, PaneError> {
-        self.note("new_session_id");
+        self.calls.note("new_session_id");
         Ok("s-1".to_owned())
     }
     fn locate_process(&self, _: &PaneName, _: &str) -> Result<Option<u32>, PaneError> {
-        self.note("locate_process");
+        self.calls.note("locate_process");
         Ok(Some(4242))
     }
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
-        self.note("login_status");
+        self.calls.note("login_status");
         Ok(LoginStatus::Missing)
+    }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.calls.note("agent_view");
+        self.agent_view_args
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((at.clone(), session.to_owned(), max_turns));
+        Ok(distinctive_view())
     }
 }
 
@@ -313,6 +322,10 @@ fn call_every_method(harness: &dyn HarnessPort) -> Vec<Result<String, String>> {
             .login_status()
             .map(|s| format!("{s:?}"))
             .map_err(code),
+        harness
+            .agent_view(&port, "ses_1", 3)
+            .map(|view| format!("{view:?}"))
+            .map_err(code),
     ]
 }
 
@@ -333,7 +346,7 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
         "send_prompt is the inner one's, not the default prompt-unsupported"
     );
     assert_eq!(
-        answers[11..],
+        answers[11..15],
         [
             Ok("process_command".to_owned()),
             Ok("new_session_id".to_owned()),
@@ -343,7 +356,7 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
         "#831's four process methods are the inner one's, not the process-unsupported defaults"
     );
     assert_eq!(
-        *inner.calls.lock().unwrap(),
+        inner.calls.list(),
         vec![
             "serve_command",
             "verify_serving",
@@ -360,8 +373,19 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
             "new_session_id",
             "locate_process",
             "login_status",
+            "agent_view",
         ],
         "each method reached the inner harness once"
+    );
+    assert_eq!(
+        answers[15],
+        Ok(format!("{:?}", distinctive_view())),
+        "#647 part 2: agent_view is the inner one's answer, not a constant"
+    );
+    assert_eq!(
+        *inner.agent_view_args.lock().unwrap(),
+        vec![(HarnessEndpoint::Port(48100), "ses_1".to_owned(), 3)],
+        "agent_view reached the inner harness with every argument"
     );
 }
 
@@ -379,26 +403,7 @@ fn a_misconfigured_wired_harness_answers_its_error_from_every_method() {
 
 #[test]
 fn the_binding_herdr_passes_the_herdr_conformance_suite() {
-    let rename = |fixture: &HerdrFixture<BindingHerdr>,
-                  fake: &Arc<FakeHerdr>,
-                  pane: &PaneId,
-                  label: &str| {
-        let _ = fixture;
-        fake.rename(pane, label)
-    };
-    let result = run_herdr_conformance(
-        || {
-            let fake = Arc::new(FakeHerdr::new("scratch").with_workspace("scratch", 2, 1).unwrap());
-            let inner: Arc<dyn HerdrPort> = fake.clone();
-            let fixture = HerdrFixture {
-                port: BindingHerdr::new(inner, Bindings::new()),
-                session: "scratch".into(),
-                workspace: "scratch".into(),
-            };
-            (fixture, fake)
-        },
-        Some(&rename),
-    );
+    let result = herdr_suite_over(|inner| BindingHerdr::new(inner, Bindings::new()));
     assert_eq!(result, Ok(()));
 }
 
@@ -514,35 +519,6 @@ fn the_bindings_come_before_the_registry_and_the_registry_before_the_label() {
 
 // --- the pin of D8's call order (W-12) ----------------------------------------------------
 
-/// The fake host, linked to the fake harness: running the argv the harness built starts its
-/// server (as the launch rig of `pane_verbs` links them, #802).
-struct LinkedHost {
-    host: FakeHost,
-    harness: Arc<FakeHarness>,
-}
-
-impl HostPort for LinkedHost {
-    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-        self.host.ensure_session(name, cwd)
-    }
-    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-        self.host.run(name, cwd, argv)?;
-        if let Some(started) = self.harness.start_server(argv) {
-            started?;
-        }
-        Ok(())
-    }
-    fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-        self.host.stop_owned(name)
-    }
-    fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-        self.host.ps(name)
-    }
-    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
-        self.host.foreground_commands(name)
-    }
-}
-
 /// What `attach_tui` saw: the resolver's answer for its pane, and whether the pane store
 /// held any record at that moment.
 type Seen = Mutex<Vec<(Result<PaneName, String>, bool)>>;
@@ -610,6 +586,14 @@ impl HarnessPort for Resolving {
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.inner.session_activity(at, session)
     }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
+    }
 }
 
 /// `pane launch` (the engine, unchanged) over the wiring's decorators wrapping the fakes:
@@ -627,9 +611,15 @@ fn launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists()
     let store: Arc<dyn PaneStore> = panes.clone();
     let herdr = BindingHerdr::new(Arc::clone(&inner), bindings.clone());
     let host = BindingHost::new(
+        // The fake host, linked to the fake harness: running the argv the harness built starts
+        // its server (as the launch rig of `pane_verbs` links them, #802); stopping kills none.
         Arc::new(LinkedHost {
             host: FakeHost::new(),
-            harness: Arc::clone(&harness),
+            link: FakeHarnessLink {
+                harness: Arc::clone(&harness),
+                on_start: OnStart::Propagate,
+                on_stop: OnStop::KillNothing,
+            },
         }),
         bindings.clone(),
     );

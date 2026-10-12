@@ -14,7 +14,6 @@
 
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -22,23 +21,8 @@ use holler_cli::pane::wiring::Wiring;
 use holler_pane::{HarnessEndpoint, PaneError, PaneId, PaneName};
 
 use crate::support::{Hub, StateDir};
+use crate::traps::{opencode_trap, OPENCODE_MARK};
 use crate::with_env;
-
-/// A scratch directory holding the OpenCode trap; `TMUX_TMPDIR` points at it too.
-fn trap_dir() -> tempfile::TempDir {
-    let dir = tempfile::Builder::new()
-        .prefix("hlr649-")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let script = dir.path().join("opencode");
-    std::fs::write(
-        &script,
-        format!("#!/bin/sh\ntouch '{}'\n", dir.path().join("opencode-ran").display()),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    dir
-}
 
 /// What the run touched in the trap directory: a tmux socket directory, or the OpenCode mark.
 fn touched(dir: &Path) -> Vec<String> {
@@ -46,7 +30,7 @@ fn touched(dir: &Path) -> Vec<String> {
         .unwrap()
         .filter_map(Result::ok)
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.starts_with("tmux-") || name == "opencode-ran")
+        .filter(|name| name.starts_with("tmux-") || name == OPENCODE_MARK)
         .collect()
 }
 
@@ -86,7 +70,8 @@ fn usage_naming_the_socket(method: &str, result: Result<impl std::fmt::Debug, Pa
 fn assert_the_socket_is_usage_never_the_default_server(socket: &OsStr) {
     let state = StateDir::new();
     let _hub = Hub::start(&state);
-    let trap = trap_dir();
+    // The OpenCode trap's directory; `TMUX_TMPDIR` points at it too.
+    let trap = opencode_trap();
     let tmpdir = trap.path().as_os_str().to_owned();
     let opencode = trap.path().join("opencode").into_os_string();
     let vars: &[(&str, Option<&OsStr>)] = &[
@@ -109,8 +94,10 @@ fn assert_the_socket_is_usage_never_the_default_server(socket: &OsStr) {
             usage_naming_the_socket("host.ensure_session", ports.host.ensure_session(&name, "/tmp")),
             usage_naming_the_socket("host.ps", ports.host.ps(&name)),
             usage_naming_the_socket("host.foreground_commands", ports.host.foreground_commands(&name)),
+            usage_naming_the_socket("host.attached_clients", ports.host.attached_clients(&name)),
             usage_naming_the_socket("harness.health", ports.harness.health(&HarnessEndpoint::Port(48199))),
             usage_naming_the_socket("harness.shown_session", ports.harness.shown_session(&pane, &HarnessEndpoint::Port(48199))),
+            usage_naming_the_socket("harness.agent_view", ports.harness.agent_view(&HarnessEndpoint::Port(48199), "ses_1", 3)),
         ]
         .into_iter()
         .flatten()

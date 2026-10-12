@@ -38,33 +38,6 @@ fn delete_strays(scratch: &Scratch, port: u16, keep: &BTreeSet<String>) {
     }
 }
 
-/// `pane switch <pane> <target>`, sent again while it answers `timeout`, for at most 20 s.
-///
-/// A finding of this scenario, outside #649's Blast radius: right after `pane relaunch`, the
-/// relaunched TUI shows its session (so `attach_tui` returns) before it takes
-/// `/tui/select-session`, and a switch sent in the next few seconds times out in
-/// `harness.select_session` (seen on OpenCode 1.19.0; one sent 8 s later succeeds). A failed
-/// switch records nothing (`tx_switch.rs`, step 3), so sending it again is safe. Each retry is
-/// printed, so the race stays visible in the run's output.
-fn switch_once_the_tui_takes_it(scratch: &Scratch, pane: &str, target: &str) {
-    let mut tries = 0;
-    let done = wait_for(Duration::from_secs(20), || {
-        tries += 1;
-        let out = scratch.holler(&["pane", "switch", pane, target, "--format=json"]);
-        let envelope = check_envelope(&out.stdout, out.code)
-            .unwrap_or_else(|fault| panic!("pane switch: not one envelope: {fault}: {out:?}"));
-        match envelope.error {
-            None => Some(()),
-            Some(error) if error.code == "timeout" => None,
-            Some(error) => panic!("pane switch {pane} {target}: {error:?}: {out:?}"),
-        }
-    });
-    assert!(done.is_some(), "pane switch {pane} {target} never succeeded in 20 s");
-    if tries > 1 {
-        eprintln!("pane switch {pane}: took {tries} tries (the TUI-readiness race after relaunch)");
-    }
-}
-
 /// Scenario steps 1 to 8 in the order the acceptance lists them, then the repairs of D21 and
 /// the end state: two launches; a relaunch of one; a reset of one with a first message; a
 /// switch of one; a park of one; a killed server found by `doctor`; a session deleted under a
@@ -98,7 +71,7 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
 
     // 4. A switch of one, to a session its server already has, made through the port.
     let target = scratch.harness().create_session(&HarnessEndpoint::Port(p1)).expect("create_session");
-    switch_once_the_tui_takes_it(&scratch, C1, &target);
+    scratch.json(&["pane", "switch", C1, &target], 0);
     let switched = scratch.record(C1);
     assert_eq!(switched["session_of_record"], target.as_str());
     assert_eq!(switched["last_observed"]["shown"], target.as_str(), "SHOWN against the record");
@@ -173,8 +146,10 @@ fn break_both(scratch: &Scratch, p1: u16, p2: u16, target: &str) {
         found.contains(&(C2.to_owned(), "server-down".to_owned())),
         "doctor finds C2's server down: {found:?}"
     );
+    // A scratch session has no tmux client, so C1 is `unattached` too (#647 part 2): left
+    // out, so the check still proves the deleted session is found.
     assert!(
-        found.iter().any(|(pane, _)| pane == C1),
+        found.iter().any(|(pane, kind)| pane == C1 && kind != "unattached"),
         "doctor reports C1's deleted session: {found:?}"
     );
 }

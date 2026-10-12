@@ -11,14 +11,17 @@
 //! tmux session and stops it there.
 
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+    TurnAgent,
+};
 use holler_pane_testkit::claude::FakeClaude;
 use holler_pane_testkit::conformance::claude::{claude_cases, run_claude_conformance, ClaudeRig};
 use holler_pane_testkit::conformance::Conformance;
 
 /// The case ids, in order. W1 (switch keeps its `session-not-found`) is case 6; W12 (delivery is
-/// proven at `send_prompt`) is cases 8 and 9.
-const DOCUMENTED_CASES: [&str; 12] = [
+/// proven at `send_prompt`) is cases 8 and 9. #647 part 2's `agent_view` is case 13.
+const DOCUMENTED_CASES: [&str; 13] = [
     "process-command-starts-nothing",
     "launch-then-located",
     "new-session-ids-are-distinct",
@@ -31,6 +34,7 @@ const DOCUMENTED_CASES: [&str; 12] = [
     "stopped-process-is-not-healthy",
     "abort-is-unsupported",
     "login-status-answers",
+    "agent-view-of-a-process-is-empty",
 ];
 
 fn launch_fake(fake: &FakeClaude, _: &PaneName, argv: &Argv) -> Result<(), PaneError> {
@@ -111,6 +115,8 @@ enum Broken {
     AcksAbort,
     /// `login_status` fails.
     LoginFails,
+    /// `agent_view` guesses a turn it cannot know (#647 part 2).
+    GuessesATurn,
 }
 
 /// The fake, with one rule broken.
@@ -225,6 +231,18 @@ impl HarnessPort for Mutant {
         }
         self.inner.login_status()
     }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        let view = self.inner.agent_view(at, session, max_turns)?;
+        if self.is(Broken::GuessesATurn) {
+            return Ok(view.with_turns(vec![TurnAgent::new(None, Some(false))]));
+        }
+        Ok(view)
+    }
 }
 
 fn run_mutant(broken: Broken) -> Conformance {
@@ -284,6 +302,7 @@ fn every_case_has_a_mutant_that_it_catches() {
         (Broken::HealthyForever, "stopped-process-is-not-healthy"),
         (Broken::AcksAbort, "abort-is-unsupported"),
         (Broken::LoginFails, "login-status-answers"),
+        (Broken::GuessesATurn, "agent-view-of-a-process-is-empty"),
     ];
     let covered: Vec<&str> = pairs.iter().map(|&(_, case)| case).collect();
     assert_eq!(

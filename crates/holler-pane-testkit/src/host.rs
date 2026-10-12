@@ -5,9 +5,11 @@
 //! The fake passes the `HostPort` conformance suite ([`crate::conformance::host`]).
 //! What only the fake has is fault injection ([`FakeHost::faults`]), the log of every
 //! argv run and the directory it was run in ([`FakeHost::runs`]), the inspection of its
-//! sessions, and two scenarios the port cannot cause: a process that exits by itself
-//! ([`FakeHost::exit_process`]) and a session killed outside Holler
-//! ([`FakeHost::end_session`]).
+//! sessions, and the scenarios the port cannot cause: a process that exits by itself
+//! ([`FakeHost::exit_process`]), a session killed outside Holler
+//! ([`FakeHost::end_session`]), and a tmux client attaching to a session or leaving it
+//! ([`FakeHost::attach_client`], [`FakeHost::detach_clients`]; #647 part 2): what a Herdr pane
+//! that shows the session runs.
 //!
 //! The host and harness fakes share no state. `run` of a server's argv (#802: the argv
 //! `HarnessPort::serve_command` builds) starts no [`crate::harness::FakeHarness`] server,
@@ -35,6 +37,7 @@ pub enum HostOp {
     StopOwned,
     Ps,
     ForegroundCommands,
+    AttachedClients,
 }
 
 impl PortOp for HostOp {
@@ -45,6 +48,7 @@ impl PortOp for HostOp {
             HostOp::StopOwned => "host.stop_owned",
             HostOp::Ps => "host.ps",
             HostOp::ForegroundCommands => "host.foreground_commands",
+            HostOp::AttachedClients => "host.attached_clients",
         }
     }
 }
@@ -71,6 +75,11 @@ impl PortOp for HostOp {
 ///   command name of each of the session's processes, in the order they started: the
 ///   basename of the argv's first element, as tmux names a pane's process (`sleep` for
 ///   `/usr/bin/sleep 30`). A name leaves with its process.
+/// - `attached_clients` (#647 part 2) of a missing session is `pane-not-found`; otherwise the
+///   number of clients attached to it. A fresh session has none, as a fresh detached tmux
+///   session has none (the suite pins it). A client is not a process: `stop_owned` and a
+///   second `ensure_session` leave the count alone, and a session ended outside Holler takes
+///   its clients with it.
 ///
 /// Two behaviours are the fake's own, and the suite does not assert them because a real
 /// tmux session may differ: a fresh session has no process (the fake has no shell), so
@@ -103,6 +112,8 @@ struct Session {
     cwd: String,
     /// Its processes, in the order they started.
     processes: Vec<Process>,
+    /// How many tmux clients are attached to it (#647 part 2).
+    clients: u32,
 }
 
 /// One process `run` started.
@@ -166,14 +177,39 @@ impl FakeHost {
         Ok(())
     }
 
-    /// The tmux session `name` ended outside Holler (it was killed): the session and
-    /// its processes are gone. `pane-not-found` when there is no such session.
+    /// The tmux session `name` ended outside Holler (it was killed): the session, its
+    /// processes and its clients are gone. `pane-not-found` when there is no such session.
     pub fn end_session(&self, name: &PaneName) -> Result<(), PaneError> {
         self.lock()
             .sessions
             .remove(name)
             .map(drop)
             .ok_or_else(|| not_found(name))
+    }
+
+    /// A tmux client attached to the session `name` (#647 part 2): what a Herdr pane runs to
+    /// show the session, or a person's terminal. Each call adds one. `pane-not-found` when
+    /// there is no such session, and nothing is created.
+    pub fn attach_client(&self, name: &PaneName) -> Result<(), PaneError> {
+        let mut state = self.lock();
+        let session = state
+            .sessions
+            .get_mut(name)
+            .ok_or_else(|| not_found(name))?;
+        session.clients = session.clients.saturating_add(1);
+        Ok(())
+    }
+
+    /// Every tmux client of the session `name` detached (#647 part 2): no pane shows it now.
+    /// `pane-not-found` when there is no such session.
+    pub fn detach_clients(&self, name: &PaneName) -> Result<(), PaneError> {
+        let mut state = self.lock();
+        state
+            .sessions
+            .get_mut(name)
+            .ok_or_else(|| not_found(name))?
+            .clients = 0;
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, HostState> {
@@ -196,6 +232,7 @@ impl HostPort for FakeHost {
             .or_insert_with(|| Session {
                 cwd: cwd.to_owned(),
                 processes: Vec::new(),
+                clients: 0,
             });
         Ok(())
     }
@@ -222,6 +259,15 @@ impl HostPort for FakeHost {
         self.faults.enter(HostOp::ForegroundCommands)?;
         self.lock()
             .each_process(name, |process| process.command.clone())
+    }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.faults.enter(HostOp::AttachedClients)?;
+        self.lock()
+            .sessions
+            .get(name)
+            .map(|session| session.clients)
+            .ok_or_else(|| not_found(name))
     }
 }
 

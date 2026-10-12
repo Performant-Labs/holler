@@ -3,13 +3,16 @@
 //! what was observed. A pass runs one chain per pane, each on a thread of its own; the
 //! parent module has the rules and what the record write means.
 //!
-//! A server's chain makes at most seven port calls, each bounded by I5: `ps`, `health`,
-//! `list_sessions`, `shown_session`, and with `--fix` `select_session` and `shown_session`
-//! again, then one `cas_put`; the pass's one `hub.advertised` (#839) is shared by every chain.
-//! A single process's chain (#831) is the child module `process`: at most `ps`, `health`,
-//! `shown_session` and `session_activity`, then with `--fix` the caller's relaunch (a launch
-//! engine run, under its own budget) or one `cas_put`.
+//! A server's chain makes at most nine port calls, each bounded by I5: `ps`,
+//! `attached_clients` (only when `ps` answered), `health`, `list_sessions`, `shown_session`,
+//! `agent_view` (only when the record names no agent and the healthy server lists the session
+//! of record: the child module `agent`, #647 part 2), and with `--fix` `select_session` and
+//! `shown_session` again, then one `cas_put`; the pass's one `hub.advertised` (#839) is shared
+//! by every chain. A single process's chain (#831) is the child module `process`: at most
+//! `ps`, `attached_clients`, `health`, `shown_session` and `session_activity`, then with
+//! `--fix` the caller's relaunch (a launch engine run, under its own budget) or one `cas_put`.
 
+mod agent;
 mod process;
 
 use crate::driven::{self, driver_of, Driver};
@@ -24,6 +27,7 @@ use super::{
 
 /// The calls of a chain, named as `<port>.<method>` in an `observe-failed` message.
 const HOST_PS: &str = "host.ps";
+const HOST_ATTACHED_CLIENTS: &str = "host.attached_clients";
 const HARNESS_HEALTH: &str = "harness.health";
 const HARNESS_LIST_SESSIONS: &str = "harness.list_sessions";
 const HARNESS_SHOWN_SESSION: &str = "harness.shown_session";
@@ -147,6 +151,7 @@ pub(super) fn check_pane(
     let server = observe_server(ports, pane, &at, &mut findings);
     let screen = observe_screen(ports, pane, &at, &mut findings);
     check_session_of_record(pane, &server, &mut findings);
+    agent::check(ports, pane, &at, &server, &mut findings);
     let screen = check_screen(ports, request, pane, &server, screen, &mut findings);
     let driven = check_driven(bodies, pane, &server, &screen, &mut findings);
     findings.extend(record_with(ports, request, pane, &server, &screen, driven));
@@ -178,10 +183,14 @@ fn summary(pane: &Pane, shown: Option<&str>, health: ObservedHealth) -> PaneSumm
     }
 }
 
-/// `tmux-session-missing` when the pane's tmux session (named as the pane) is gone.
+/// `tmux-session-missing` when the pane's tmux session (named as the pane) is gone, and
+/// otherwise `unattached` when no tmux client is attached to it (#647 part 2), whatever the
+/// pane's hold, role or harness: the operator sees nothing of it in any case. The count is
+/// asked only once `ps` answered, so a chain raises at most one of the two, or one
+/// `observe-failed`.
 fn check_tmux(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) {
     match ports.host.ps(&pane.name) {
-        Ok(_) => {}
+        Ok(_) => findings.extend(check_attached(ports, pane)),
         Err(PaneError::PaneNotFound { .. }) => {
             let message = format!("the tmux session {} does not exist", pane.name);
             findings.push(Finding::about(
@@ -191,6 +200,24 @@ fn check_tmux(ports: Ports<'_>, pane: &Pane, findings: &mut Vec<Finding>) {
             ));
         }
         Err(error) => findings.push(observe_failed(pane, HOST_PS, &error)),
+    }
+}
+
+/// `unattached` when the pane's existing tmux session has no client: no Herdr pane shows it.
+/// A client in any terminal counts (which Herdr pane shows a session is not observable,
+/// ADR-0021 section 12), and no Holler verb attaches one, so the finding names no command.
+fn check_attached(ports: Ports<'_>, pane: &Pane) -> Option<Finding> {
+    match ports.host.attached_clients(&pane.name) {
+        Ok(0) => {
+            let message = format!(
+                "no tmux client is attached to the tmux session {}, so no Herdr pane shows it; \
+                 no Holler verb attaches one",
+                pane.name
+            );
+            Some(Finding::about(FindingKind::Unattached, pane, message))
+        }
+        Ok(_) => None,
+        Err(error) => Some(observe_failed(pane, HOST_ATTACHED_CLIENTS, &error)),
     }
 }
 

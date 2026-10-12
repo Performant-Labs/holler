@@ -13,15 +13,19 @@
 
 use std::sync::Mutex;
 
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+    TurnAgent,
+};
 use holler_pane_testkit::conformance::harness::{
     harness_cases, run_harness_conformance, HarnessRig,
 };
 use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::harness::{FakeHarness, Quirk};
 
-/// The 16 case ids of the brief's table, in order (#802 renamed case 2 and added case 16).
-const DOCUMENTED_CASES: [&str; 16] = [
+/// The 16 case ids of the brief's table, in order (#802 renamed case 2 and added case 16),
+/// and #647 part 2's `agent_view` case.
+const DOCUMENTED_CASES: [&str; 17] = [
     "health-of-unserved-port-is-false",
     "launch-then-healthy",
     "fresh-server-has-no-sessions",
@@ -38,6 +42,7 @@ const DOCUMENTED_CASES: [&str; 16] = [
     "select-without-tui-fails",
     "select-reaches-only-its-pane",
     "serve-command-carries-the-agent",
+    "agent-view-of-a-fresh-session-has-no-turns",
 ];
 
 /// The fake's launcher: start the server the argv describes, as a host's `run` would.
@@ -152,6 +157,11 @@ enum Break {
     SelectUnknownGoesHome,
     /// `select_session` switches every attached TUI of the rig.
     SelectBroadcasts,
+    /// `agent_view` answers an empty view whatever it is asked, as a wrapper that answers a
+    /// constant would (#647 part 2).
+    AgentViewAlwaysEmpty,
+    /// `agent_view` invents a turn the session never had.
+    AgentViewInventsATurn,
 }
 
 struct Mutant {
@@ -276,6 +286,22 @@ impl HarnessPort for Mutant {
     ) -> Result<Option<String>, PaneError> {
         self.inner.shown_session(pane, at)
     }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        match self.broken {
+            Break::AgentViewAlwaysEmpty => Ok(AgentView::default()),
+            Break::AgentViewInventsATurn => self
+                .inner
+                .agent_view(at, session, max_turns)
+                .map(|view| view.with_turns(vec![TurnAgent::new(None, Some(false))])),
+            _ => self.inner.agent_view(at, session, max_turns),
+        }
+    }
 }
 
 fn assert_suite_fails_on(broken: Break, case: &str) {
@@ -343,4 +369,20 @@ fn a_harness_whose_select_of_an_unknown_id_goes_home_fails() {
 #[test]
 fn a_harness_whose_select_switches_every_tui_fails() {
     assert_suite_fails_on(Break::SelectBroadcasts, "select-reaches-only-its-pane");
+}
+
+#[test]
+fn a_harness_whose_agent_view_is_always_empty_fails() {
+    assert_suite_fails_on(
+        Break::AgentViewAlwaysEmpty,
+        "agent-view-of-a-fresh-session-has-no-turns",
+    );
+}
+
+#[test]
+fn a_harness_whose_agent_view_invents_a_turn_fails() {
+    assert_suite_fails_on(
+        Break::AgentViewInventsATurn,
+        "agent-view-of-a-fresh-session-has-no-turns",
+    );
 }

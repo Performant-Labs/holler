@@ -5,11 +5,11 @@
 //! `crate::launch::rig`. It builds on #643's `crate::list::Rig` (its fakes, unchanged, with a
 //! Herdr workspace `main` of 3 by 3) and adds only what a live verb needs:
 //!
-//! - a **linked host** (#802): `run` hands the argv to the fake harness's scenario method
-//!   `start_server`, so the argv `serve_command` built starts a fake server when the host runs
-//!   it (any other argv starts none), and `stop_owned(name)` also kills the harness server of
-//!   every rig port that runs for `name`, when linked. The two fakes still share no state;
-//!   this wrapper is what links them;
+//! - a **linked host** (#802; `verb_harness::linked_host`, #846): `run` hands the argv to the
+//!   fake harness's scenario method `start_server`, so the argv `serve_command` built starts a
+//!   fake server when the host runs it (any other argv starts none), and `stop_owned(name)`
+//!   also kills the harness server of every rig port that runs for `name`, when linked. The two
+//!   fakes still share no state; this wrapper is what links them;
 //! - **hooks**: a test closure run once, right after a named `HarnessPort` method returns, or
 //!   right after the host ran a server argv ([`Rig::after_server_start`]): to freeze a server
 //!   once it started, vanish a Herdr pane at `attach_tui`, make another writer move a record
@@ -33,9 +33,9 @@ use holler_pane::pane::{
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
-    Actor, AgentKey, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec,
-    HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, Profile, ProfileLogEntry,
-    ProfileName, ProfileScope, ProfileSpec, ProfileStore, ServeSpec,
+    Actor, AgentKey, AgentView, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSpec, HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, Profile,
+    ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -48,6 +48,7 @@ use holler_pane_testkit::profile_store::ProfileStoreOp;
 
 use super::displaced::{Armed, Displace, DisplacingHerdr};
 use crate::list::Rig as Fakes;
+use crate::verb_harness::linked_host::{HarnessLink, LinkedHost, OnStop};
 use crate::verb_harness::{run_verb_with, Outcome};
 
 /// The brief's `LAUNCH`: `demo-c1r1` at `main r2c1`, port 48100, no profile, no command and
@@ -308,10 +309,18 @@ impl Rig {
             herdr: &self.fakes.herdr,
             armed: &self.displaced,
         };
+        let on_stop = if self.linked {
+            OnStop::KillServed(&RIG_PORTS)
+        } else {
+            OnStop::KillNothing
+        };
         let host = LinkedHost {
-            fakes: &self.fakes,
-            linked: self.linked,
-            hooks: &self.hooks,
+            host: &self.fakes.host,
+            link: HookedLink {
+                fakes: &self.fakes,
+                hooks: &self.hooks,
+                on_stop,
+            },
         };
         let harness = HookedHarness {
             fakes: &self.fakes,
@@ -681,24 +690,18 @@ pub(crate) fn launch_spec() -> ProfileSpec {
     }
 }
 
-/// A `HostPort` over the rig's `FakeHost` whose `run` also starts the fake server an argv of
-/// `serve_command` describes (and fires the server-start hooks), and whose `stop_owned` also
-/// kills the servers that run for the pane, when linked. `run` answers what `FakeHost::run`
-/// answers: a server the fake refuses to start (a port another pane's server holds, a frozen
-/// one) is not `run`'s error, as tmux starts the process anyway; the health wait sees it.
-struct LinkedHost<'a> {
+/// The launch rig's link (#846): `run` of an argv of `serve_command` starts the fake server it
+/// describes and fires the server-start hooks, with the started port. A server the fake refuses
+/// to start (a port another pane's server holds, a frozen one) is not `run`'s error, as tmux
+/// starts the process anyway; the health wait sees it. `stop_owned` ends what `on_stop` says.
+struct HookedLink<'a> {
     fakes: &'a Fakes,
-    linked: bool,
     hooks: &'a Hooks,
+    on_stop: OnStop,
 }
 
-impl HostPort for LinkedHost<'_> {
-    fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError> {
-        self.fakes.host.ensure_session(name, cwd)
-    }
-
-    fn run(&self, name: &PaneName, cwd: &str, argv: &Argv) -> Result<(), PaneError> {
-        self.fakes.host.run(name, cwd, argv)?;
+impl HarnessLink for HookedLink<'_> {
+    fn started(&self, argv: &Argv) -> Result<(), PaneError> {
         let harness = &self.fakes.harness;
         if let Some(started) = harness.start_server(argv) {
             let port = started.ok().and_then(|pid| {
@@ -712,29 +715,8 @@ impl HostPort for LinkedHost<'_> {
         Ok(())
     }
 
-    fn stop_owned(&self, name: &PaneName) -> Result<(), PaneError> {
-        self.fakes.host.stop_owned(name)?;
-        if self.linked {
-            for port in RIG_PORTS {
-                if self
-                    .fakes
-                    .harness
-                    .server(port)
-                    .is_some_and(|s| s.name == *name)
-                {
-                    self.fakes.harness.kill(port)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
-        self.fakes.host.ps(name)
-    }
-
-    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
-        self.fakes.host.foreground_commands(name)
+    fn stopped(&self, name: &PaneName) -> Result<(), PaneError> {
+        self.on_stop.end(&self.fakes.harness, name)
     }
 }
 
@@ -835,6 +817,15 @@ impl HarnessPort for HookedHarness<'_> {
         let answer = self.fakes.harness.shown_session(pane, at);
         self.fire(HarnessOp::ShownSession, pane_only(pane));
         answer
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.fakes.harness.agent_view(at, session, max_turns)
     }
 }
 

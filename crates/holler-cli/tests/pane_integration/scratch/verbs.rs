@@ -92,15 +92,36 @@ impl Scratch {
         assert!(wait_for(Duration::from_secs(10), || refused(port).then_some(())).is_some());
     }
 
-    /// The end state: `doctor` reports no finding, the records of `panes` equal Herdr's
-    /// snapshot of the scratch panes in `workspaces` (pane id and cell), and none of them is in
-    /// `pane list`'s unmanaged table.
+    /// The end state: `doctor` reports no finding but one `unattached` for each of `panes`,
+    /// the records of `panes` equal Herdr's snapshot of the scratch panes in `workspaces` (pane
+    /// id and cell), and none of them is in `pane list`'s unmanaged table.
+    ///
+    /// A scratch pane's tmux session is detached by design (no Herdr pane runs a tmux client
+    /// in it), so `doctor` reports it `unattached` (#647 part 2, ADR-0021 section 12); that
+    /// finding, exactly once per pane, is the clean world here. Anything else fails, as the
+    /// empty list did before: another kind, a second `unattached` for one pane, one about a
+    /// pane outside `panes`, or a finding about no pane.
     pub fn assert_end_state(&self, panes: &[&str], workspaces: &[&str]) {
         let report = self.json(&["pane", "doctor"], 0).data();
+        let mut found: Vec<(String, String)> = report["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| {
+                let pane = f["pane"].as_str().unwrap_or("-").to_owned();
+                (pane, f["kind"].as_str().unwrap_or_default().to_owned())
+            })
+            .collect();
+        found.sort();
+        let mut expected: Vec<(String, String)> = panes
+            .iter()
+            .map(|pane| ((*pane).to_owned(), "unattached".to_owned()))
+            .collect();
+        expected.sort();
         assert_eq!(
-            report["findings"],
-            json!([]),
-            "doctor reports no finding: {report}"
+            found, expected,
+            "doctor reports no finding but each scratch pane's `unattached`: {report}"
         );
         let observed: BTreeSet<(String, String)> = self
             .herdr_snapshot()

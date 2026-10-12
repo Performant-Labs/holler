@@ -2,7 +2,9 @@
 //! record per pane that matches it.
 //!
 //! For each seeded pane it makes a Herdr pane (`ensure_pane`), a tmux session
-//! (`ensure_session`), a harness server on its own port (`serve`, 48100 + index), a
+//! (`ensure_session`) with one tmux client attached to it (the fake host's scenario method
+//! `attach_client`: the client a Herdr pane runs to show the session, #647 part 2, so the
+//! pane is not `unattached`), a harness server on its own port (`serve`, 48100 + index), a
 //! session on it (`create_session`) and a TUI showing that session (`attach_tui`), then
 //! stores a `sample_pane` naming all of them, with that session as its session of record.
 //! Each profile a seed names is built from its members' records (`profile_from_panes`), so
@@ -49,6 +51,19 @@ pub const FOREIGN_PORT: u16 = 48150;
 
 /// The Herdr session and workspace of the rig (the test kit's scratch name).
 const SCRATCH: &str = "scratch";
+
+/// The host methods a doctor pass may call: reads only (ADR-0021 section 12; #647 part 2 added
+/// `attached_clients`). The one list both read-only assertions use (plan review W-6).
+pub const HOST_READS: [HostOp; 2] = [HostOp::Ps, HostOp::AttachedClients];
+
+/// The harness methods a doctor pass without `--fix` may call: reads only (#647 part 2 added
+/// `agent_view`).
+pub const HARNESS_READS: [HarnessOp; 4] = [
+    HarnessOp::Health,
+    HarnessOp::ListSessions,
+    HarnessOp::ShownSession,
+    HarnessOp::AgentView,
+];
 
 /// One pane to seed.
 #[derive(Debug, Clone)]
@@ -396,6 +411,8 @@ fn make_live(
     let pane = herdr.ensure_pane(&spec).expect("place the pane");
     host.ensure_session(&name, "/srv/demo")
         .expect("the tmux session");
+    host.attach_client(&name)
+        .expect("the Herdr pane's tmux client");
     if let Some(dir) = seed.data_dir {
         harness.set_data_dir(port, dir);
     }

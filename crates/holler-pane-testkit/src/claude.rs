@@ -37,6 +37,9 @@
 //!   `inbound-held` for a process that does not accept a cross-session message.
 //! - `abort`: `abort-unsupported`. `login_status`: the login [`FakeClaude::set_login`] set (`Ok`
 //!   at first).
+//! - `agent_view(at, _, _)` (#647 part 2): the empty view for a process endpoint, whatever the
+//!   process is doing (a single process has no server to list agents or turns, so it cannot
+//!   tell), and `server-unsupported` for a port, as the real adapter answers.
 //! - A server's or a TUI's step (`serve_command`, `verify_serving`, `create_session`,
 //!   `list_sessions`, `attach_tui`, `select_session`) is `server-unsupported`, and so is an
 //!   endpoint that names a port. A call to a process that does not run is `unavailable`.
@@ -53,7 +56,9 @@ use holler_pane::ports::{
     Activity, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, AGENT_UNSUPPORTED, INBOUND_HELD,
     SERVER_UNSUPPORTED, SESSION_MISMATCH,
 };
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 
 use crate::fault::{FaultSwitch, PortOp};
 
@@ -102,6 +107,7 @@ pub enum ClaudeOp {
     NewSessionId,
     LocateProcess,
     LoginStatus,
+    AgentView,
 }
 
 impl PortOp for ClaudeOp {
@@ -122,6 +128,7 @@ impl PortOp for ClaudeOp {
             ClaudeOp::NewSessionId => "harness.new_session_id",
             ClaudeOp::LocateProcess => "harness.locate_process",
             ClaudeOp::LoginStatus => "harness.login_status",
+            ClaudeOp::AgentView => "harness.agent_view",
         }
     }
 }
@@ -440,6 +447,17 @@ impl HarnessPort for FakeClaude {
     fn login_status(&self) -> Result<LoginStatus, PaneError> {
         self.faults.enter(ClaudeOp::LoginStatus)?;
         Ok(self.lock().login)
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        _session: &str,
+        _max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.faults.enter(ClaudeOp::AgentView)?;
+        at.process()?;
+        Ok(AgentView::default())
     }
 }
 

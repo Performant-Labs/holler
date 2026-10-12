@@ -13,7 +13,7 @@
 //! (`closed_port`) is the client end of a held connection, which never had a listener, and the
 //! wrapper checks it and repeats as a backstop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -43,12 +43,27 @@ pub struct Seen {
     pub body: Vec<u8>,
 }
 
+/// `run` is taken when the `nth` request of `route` arrives.
+struct Hook {
+    route: (String, String),
+    nth: usize,
+    run: Option<Box<dyn FnOnce() + Send>>,
+}
+
 #[derive(Default)]
 struct State {
     routes: HashMap<(String, String), Canned>,
     /// A reply for the next request of a route only; after it the route answers as `routes`.
     once: HashMap<(String, String), Canned>,
     frozen: bool,
+    /// Routes that are accepted and read, and never answered (#845): one route frozen, not
+    /// the whole server.
+    hung: HashSet<(String, String)>,
+    /// How many requests each route has received, this one included (#845).
+    counts: HashMap<(String, String), usize>,
+    /// Run once, when its route receives its `n`th request, before that request is answered
+    /// (#845).
+    hooks: Vec<Hook>,
     raw: Option<Vec<u8>>,
     seen: Vec<Seen>,
     held: Vec<TcpStream>,
@@ -158,6 +173,34 @@ impl Stub {
         lock(&self.state).frozen = true;
     }
 
+    /// `method path` is accepted and read, and never answered, while every other route answers
+    /// as set (#845: a TUI that is not ready may hang a select request). [`Stub::freeze`] is
+    /// the whole server.
+    #[allow(dead_code)] // #642: not every test crate uses it
+    pub fn hang(&self, method: &str, path: &str) {
+        lock(&self.state)
+            .hung
+            .insert((method.to_string(), path.to_string()));
+    }
+
+    /// Run `run` once, when `method path` receives its `nth` request (1 is the first) and
+    /// before that request is answered (#845: the title of a pane turns when a select request
+    /// arrives).
+    #[allow(dead_code)] // #642: not every test crate uses it
+    pub fn on_nth(
+        &self,
+        method: &str,
+        path: &str,
+        nth: usize,
+        run: impl FnOnce() + Send + 'static,
+    ) {
+        lock(&self.state).hooks.push(Hook {
+            route: (method.to_string(), path.to_string()),
+            nth,
+            run: Some(Box::new(run)),
+        });
+    }
+
     /// Every request received, in order.
     pub fn seen(&self) -> Vec<Seen> {
         lock(&self.state).seen.clone()
@@ -247,9 +290,26 @@ fn serve_one(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()>
         let method = parts.next().unwrap_or_default().to_string();
         (method, parts.next().unwrap_or_default().to_string())
     };
+    let route = (method, path);
     let mut st = lock(state);
     st.seen.push(seen);
-    if st.frozen {
+    let count = {
+        let count = st.counts.entry(route.clone()).or_insert(0);
+        *count += 1;
+        *count
+    };
+    let due: Vec<Box<dyn FnOnce() + Send>> = st
+        .hooks
+        .iter_mut()
+        .filter(|hook| hook.route == route && hook.nth == count)
+        .filter_map(|hook| hook.run.take())
+        .collect();
+    if !due.is_empty() {
+        drop(st);
+        due.into_iter().for_each(|run| run());
+        st = lock(state);
+    }
+    if st.frozen || st.hung.contains(&route) {
         st.held.push(stream);
         return Ok(());
     }
@@ -258,7 +318,6 @@ fn serve_one(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()>
         stream.write_all(&raw)?;
         return stream.flush();
     }
-    let route = (method, path);
     let once = st.once.remove(&route);
     let canned = once
         .or_else(|| st.routes.get(&route).cloned())

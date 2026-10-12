@@ -35,6 +35,7 @@ use holler_proto::{Code, CorrelationId, Envelope, WireError};
 use serde_json::{json, Value};
 
 use crate::support::StateDir;
+use crate::traps::NO_HUB;
 use crate::with_state_dir;
 
 /// What the fake hub does with one connection, after reading its request line.
@@ -346,7 +347,7 @@ fn every_read_and_write_with_no_hub_is_unavailable_naming_the_hub() {
         let state = StateDir::new();
         let (code, text) = with_state_dir(state.path(), call);
         assert_eq!(code, "unavailable", "{method}: {text}");
-        let want = format!("no live holler hub reachable at {}", state.path().display());
+        let want = format!("{NO_HUB} at {}", state.path().display());
         assert!(text.contains(&want), "{method}: the message says {want:?}: {text}");
     }
 }
@@ -420,7 +421,7 @@ fn watch_with_no_hub_is_unavailable_from_watch_itself() {
     let answer = with_state_dir(state.path(), || HubPaneStore::new().watch(Cursor(0)).map(drop));
     let error = answer.expect_err("watch() fails at once");
     assert_eq!(error.code(), "unavailable", "{error}");
-    assert!(error.to_string().contains("no live holler hub reachable"), "{error}");
+    assert!(error.to_string().contains(NO_HUB), "{error}");
 }
 
 /// D4: a watch request's own timeout is the hub's window plus a margin (`WATCH_WAIT` + 5 s),

@@ -33,6 +33,13 @@
 //! the most recently updated first. A frozen or killed server, a deleted session, a TUI
 //! moved by hand and a closed TUI cannot be caused through the port, so the suite does
 //! not drive them; the fake's own tests pin them.
+//!
+//! `agent_view` (#647 part 2, ADR-0021 section 12) is read through the port only as far as a
+//! real server agrees without a configured project: a session no prompt was sent to has no
+//! turn, an id the server does not know is `session-not-found`, and a port with no server is
+//! `unavailable`, checked first (case 17). What a turn's agent is, and which agents dispatch,
+//! need turns and agents the port cannot make; the fake's own tests and the adapter's
+//! fixtures pin them.
 
 use std::time::Instant;
 
@@ -97,7 +104,7 @@ impl HarnessRig {
 
 /// The suite, in order: the one table that the runner iterates and [`harness_cases`]
 /// lists.
-const CASES: [(&str, Case); 16] = [
+const CASES: [(&str, Case); 17] = [
     (
         "health-of-unserved-port-is-false",
         health_of_unserved_port_is_false,
@@ -137,6 +144,10 @@ const CASES: [(&str, Case); 16] = [
     (
         "serve-command-carries-the-agent",
         serve_command_carries_the_agent,
+    ),
+    (
+        "agent-view-of-a-fresh-session-has-no-turns",
+        agent_view_of_a_fresh_session_has_no_turns,
     ),
 ];
 
@@ -502,6 +513,38 @@ fn serve_command_carries_the_agent(
             e.code()
         )),
     }
+}
+
+/// Case 17 (#647 part 2): `agent_view` on a port never served is `unavailable`, before the
+/// id is looked at; on a running server, an id it does not know is `session-not-found`, and a
+/// session just created, to which no prompt was sent, answers no turn.
+fn agent_view_of_a_fresh_session_has_no_turns(
+    h: &dyn HarnessPort,
+    l: &Launcher<'_>,
+    rig: &HarnessRig,
+) -> Result<(), String> {
+    let [p0, _] = rig.ports;
+    expect_code(
+        "agent_view on a port never served",
+        h.agent_view(&at(p0), UNKNOWN, 3),
+        UNAVAILABLE,
+    )?;
+    launch(h, l, C1, p0)?;
+    expect_code(
+        "agent_view of an id the server does not know",
+        h.agent_view(&at(p0), UNKNOWN, 3),
+        NOT_FOUND,
+    )?;
+    let a = create(h, p0)?;
+    let view = succeeds(
+        &format!("agent_view({p0}, {a}, 3)"),
+        h.agent_view(&at(p0), &a, 3),
+    )?;
+    expect_eq(
+        &format!("the turns of the fresh session {a}"),
+        view.turns,
+        Vec::new(),
+    )
 }
 
 // --- helpers ---

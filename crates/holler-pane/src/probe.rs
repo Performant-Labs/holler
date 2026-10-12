@@ -2,45 +2,39 @@
 //! contain every `expect` string.
 //!
 //! **Frozen by #637:** [`ProbeResult`] (which `Pane.probe.last` persists) and the
-//! signature of [`run_probe`]. The runner is #663's, and it is this crate's one direct
-//! side effect (ADR-0021 section 5): it starts a process with the standard library
-//! alone, so it takes no new dependency, and the group kill goes through the `kill`
-//! program because `std` cannot signal a process group.
+//! signature of [`run_probe`]. The verdict is #663's; the process is run by the crate's one
+//! bounded runner, [`crate::bounded`] (#696), which the adapters share: this module only says
+//! how a probe is run (`PROBE`) and turns what the runner answers into a [`ProbeResult`]
+//! (`verdict`), so the runner's mechanics and the pid-reuse rule are documented there.
 //!
-//! **The mechanics are kept apart from the verdict**, so #696 can lift them into the one
-//! bounded runner the adapters share without a behaviour change: `run_bounded` (with
-//! `spawn`, `start_reader`, `wait_for_exit` and `kill_and_reap`) runs the process and
-//! answers an `Outcome`, and `verdict` alone turns that into a [`ProbeResult`]. Three
-//! points are fixed here on purpose and are #696's to parameterize: **stderr** (discarded
-//! here), **the signal and its grace** (`KILL` with no `TERM` grace: a probe is a
-//! read-only check with nothing to clean up) and **the kill program** (`kill` from
-//! `PATH`, with no seam for a fake).
-//!
-//! **The pid-reuse rule.** The group's id is the leader's pid, which no other process can
-//! take while the leader is unreaped (alive or a zombie). So the runner signals only
-//! while `try_wait` has not yet returned the leader's status: it waits for the end of
-//! stdout first and for the exit only after that, and once the exit is seen it never
-//! signals. A change that reaps the leader before it kills the group (a `try_wait`
-//! before the end of stdout, then a kill) reopens the race.
+//! A probe's run is fixed, not a choice: stdout kept up to 1 MiB with one byte more an
+//! error, stderr discarded, and on the deadline its whole process group killed with `KILL`
+//! (no `TERM` grace: a probe is a read-only check with nothing to clean up) through `kill`
+//! from `PATH`, with no seam for a fake.
 
-use std::io::{self, Read};
-use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::argv::Argv;
+use crate::bounded::{self, Capture, KillScope, Over, Ran, RunError, Spec};
 
 /// The most a probe may write to stdout (1 MiB); one byte more is an `Error`.
 const MAX_OUTPUT: usize = 1 << 20;
 
-/// The one budget the group kill and the reap of the leader share, once the runner gives up.
-const CLEANUP: Duration = Duration::from_secs(1);
-
-/// How often the runner polls `Child::try_wait`.
-const POLL: Duration = Duration::from_millis(10);
+/// How a probe is run: stdout read up to [`MAX_OUTPUT`] (one byte more fails the run), stderr
+/// discarded, the probe in a process group of its own that the deadline kills whole, and its
+/// exit polled every 10 ms.
+const PROBE: Spec = Spec {
+    stdout: Capture::Keep {
+        cap: MAX_OUTPUT,
+        over: Over::Fail,
+    },
+    stderr: Capture::Discard,
+    kill: KillScope::Group,
+    poll: Duration::from_millis(10),
+};
 
 /// What one run of a health probe found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,41 +94,19 @@ pub fn run_probe(argv: &Argv, expect: &[String], timeout: Duration) -> ProbeResu
     let Some(deadline) = Instant::now().checked_add(timeout) else {
         return error("the probe timeout is too large");
     };
-    verdict(run_bounded(program, args, deadline), expect, timeout)
+    let mut command = Command::new(program);
+    command.args(args);
+    verdict(
+        bounded::run(&mut command, &PROBE, deadline),
+        expect,
+        timeout,
+    )
 }
 
-/// What the run of one probe process came to: the mechanics' answer, before any verdict.
-enum Outcome {
-    /// The process exited, after its whole stdout was read.
-    Exited { status: ExitStatus, stdout: Vec<u8> },
-    /// The deadline passed first.
-    TimedOut,
-    /// It wrote more than [`MAX_OUTPUT`] bytes to stdout.
-    Overflow,
-    /// It could not be started.
-    SpawnFailed(io::ErrorKind),
-    /// The thread that reads its stdout could not be started.
-    ReaderFailed,
-    /// Reading its stdout failed.
-    ReadFailed,
-    /// Its exit status could not be read.
-    WaitFailed,
-}
-
-/// What the reader thread found on stdout.
-enum Output {
-    /// The end of stdout, and every byte before it.
-    Ended(Vec<u8>),
-    /// More than [`MAX_OUTPUT`] bytes; reading stopped there.
-    Overflow,
-    /// A read failed.
-    Failed,
-}
-
-/// The [`ProbeResult`] of `outcome`, with the fixed reasons of [`run_probe`].
-fn verdict(outcome: Outcome, expect: &[String], timeout: Duration) -> ProbeResult {
+/// The [`ProbeResult`] of what the runner answered, with the fixed reasons of [`run_probe`].
+fn verdict(outcome: Result<Ran, RunError>, expect: &[String], timeout: Duration) -> ProbeResult {
     match outcome {
-        Outcome::Exited { status, stdout } if status.success() => {
+        Ok(Ran { status, stdout, .. }) if status.success() => {
             let missing: Vec<String> = expect
                 .iter()
                 .filter(|wanted| !contains(&stdout, wanted.as_bytes()))
@@ -146,21 +118,22 @@ fn verdict(outcome: Outcome, expect: &[String], timeout: Duration) -> ProbeResul
                 ProbeResult::Failed { missing }
             }
         }
-        Outcome::Exited { status, .. } => match status.code() {
+        Ok(Ran { status, .. }) => match status.code() {
             Some(code) => error(format!("the probe exited with status {code}")),
             None => error("the probe was ended by a signal"),
         },
-        Outcome::TimedOut => error(format!(
+        Err(RunError::Expired) => error(format!(
             "the probe timed out after {} ms",
             timeout.as_millis()
         )),
-        Outcome::Overflow => error("the probe wrote more than 1 MiB to stdout"),
-        Outcome::SpawnFailed(kind) => {
-            error(format!("the probe program could not be started: {kind}"))
-        }
-        Outcome::ReaderFailed => error("the probe could not start its output reader"),
-        Outcome::ReadFailed => error("the probe's output could not be read"),
-        Outcome::WaitFailed => error("the probe's exit status could not be read"),
+        Err(RunError::Overflow) => error("the probe wrote more than 1 MiB to stdout"),
+        Err(RunError::Spawn(e)) => error(format!(
+            "the probe program could not be started: {}",
+            e.kind()
+        )),
+        Err(RunError::ReaderFailed(_)) => error("the probe could not start its output reader"),
+        Err(RunError::OutputLost) => error("the probe's output could not be read"),
+        Err(RunError::WaitFailed(_)) => error("the probe's exit status could not be read"),
     }
 }
 
@@ -175,136 +148,6 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         || haystack
             .windows(needle.len())
             .any(|window| window == needle)
-}
-
-/// Run `program` with `args` until it exits or `deadline` passes, reading its stdout up to the
-/// cap. Until the end of stdout the leader is never reaped, so every path here may kill.
-fn run_bounded(program: &str, args: &[String], deadline: Instant) -> Outcome {
-    let mut child = match spawn(program, args) {
-        Ok(child) => child,
-        Err(e) => return Outcome::SpawnFailed(e.kind()),
-    };
-    let Some(output) = start_reader(&mut child) else {
-        kill_and_reap(&mut child);
-        return Outcome::ReaderFailed;
-    };
-    let outcome = match output.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-        Ok(Output::Ended(stdout)) => return wait_for_exit(&mut child, stdout, deadline),
-        Ok(Output::Overflow) => Outcome::Overflow,
-        Ok(Output::Failed) | Err(RecvTimeoutError::Disconnected) => Outcome::ReadFailed,
-        Err(RecvTimeoutError::Timeout) => Outcome::TimedOut,
-    };
-    kill_and_reap(&mut child);
-    outcome
-}
-
-/// Start `program` itself (no shell) with `args`, stdin null, stdout piped and stderr
-/// discarded, in a process group of its own, so the group id is its pid.
-fn spawn(program: &str, args: &[String]) -> io::Result<Child> {
-    let mut command = Command::new(program);
-    command
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    command.spawn()
-}
-
-/// Start the thread that reads the child's stdout up to the cap and sends what it found. It is
-/// detached on purpose: the runner never joins it, so a kill never waits on its pipe.
-fn start_reader(child: &mut Child) -> Option<mpsc::Receiver<Output>> {
-    let stdout = child.stdout.take()?;
-    let (sender, receiver) = mpsc::channel();
-    let reader = thread::Builder::new()
-        .name("holler-probe-stdout".to_owned())
-        .spawn(move || {
-            // The runner may have stopped listening (it gave up); that is not this thread's error.
-            let _ = sender.send(read_capped(stdout));
-        });
-    reader.ok().map(|_detached| receiver)
-}
-
-/// Read `stdout` to its end, or until it passes the cap (one byte past it is enough to know).
-fn read_capped(stdout: ChildStdout) -> Output {
-    let mut bytes = Vec::new();
-    match stdout.take(MAX_OUTPUT as u64 + 1).read_to_end(&mut bytes) {
-        Ok(_) if bytes.len() > MAX_OUTPUT => Output::Overflow,
-        Ok(_) => Output::Ended(bytes),
-        Err(_) => Output::Failed,
-    }
-}
-
-/// Stdout has ended: wait for the leader's exit until `deadline`. Past it the leader is still
-/// unreaped, so the group can be killed; a status that cannot be read is never followed by a
-/// signal, since the child may have been reaped elsewhere and its pid reused.
-fn wait_for_exit(child: &mut Child, stdout: Vec<u8>, deadline: Instant) -> Outcome {
-    match wait_until(child, deadline) {
-        Ok(Some(status)) => Outcome::Exited { status, stdout },
-        Ok(None) => {
-            kill_and_reap(child);
-            Outcome::TimedOut
-        }
-        Err(_) => Outcome::WaitFailed,
-    }
-}
-
-/// Kill the probe's whole process group, then its leader, and reap the leader, all within the
-/// one cleanup budget. Called only while the leader is unreaped (the pid-reuse rule); a leader
-/// still unreaped when the budget runs out is left, a zombie, for the caller's exit.
-fn kill_and_reap(child: &mut Child) {
-    let budget = Instant::now()
-        .checked_add(CLEANUP)
-        .unwrap_or_else(Instant::now);
-    kill_group(child.id(), budget);
-    // The leader too, in case the group kill could not run; an error means it is gone already.
-    let _ = child.kill();
-    let _ = wait_until(child, budget);
-}
-
-/// Signal the process group `group` with `KILL` through `kill -s KILL -- -<group>`, waiting for
-/// the `kill` program within `budget` and ignoring its outcome (the group may be gone already).
-/// A `kill` still running past the budget is killed itself, and reaped if it has ended by then.
-fn kill_group(group: u32, budget: Instant) {
-    #[cfg(unix)]
-    {
-        let target = format!("-{group}");
-        let killer = Command::new("kill")
-            .args(["-s", "KILL", "--", target.as_str()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let Ok(mut killer) = killer {
-            if let Ok(None) = wait_until(&mut killer, budget) {
-                let _ = killer.kill();
-                let _ = killer.try_wait();
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (group, budget);
-    }
-}
-
-/// Poll `child` every [`POLL`] until it exits (its status, and it is reaped) or `until` passes
-/// (`None`, and it is not).
-fn wait_until(child: &mut Child, until: Instant) -> io::Result<Option<ExitStatus>> {
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(Some(status));
-        }
-        let left = until.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Ok(None);
-        }
-        thread::sleep(left.min(POLL));
-    }
 }
 
 #[cfg(test)]

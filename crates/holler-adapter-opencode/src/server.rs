@@ -12,6 +12,10 @@
 //! refuse an unusable default agent at start (a server started with a subagent, a hidden agent
 //! or an unknown key answers healthy), so the running server is asked before any session is
 //! made on it.
+//!
+//! [`agent_list`] is the crate's one reader of `GET /agent`, and [`as_default`] the one
+//! statement of OpenCode's rule for a default agent: `verify_serving` asks both of the pane's
+//! agent, and `agent_view` (#647 part 2, `agents.rs`) of every agent the server lists.
 
 use std::time::Duration;
 
@@ -97,20 +101,24 @@ pub(crate) fn verify_serving(
     if string_at(Some(&config), "default_agent") != Some(key) {
         return Err(unusable(format!("the server's default agent is not {key}")));
     }
+    let (reply, agents) = agent_list(&call)?;
+    usable(&call, &reply, &agents, key)
+}
+
+/// `GET /agent`: the server's agents, the JSON array of a `200`, with the reply, for a step that
+/// finds an agent of the wrong shape to name the route. Any other answer is `unavailable`,
+/// naming the route. The crate's one reader of the route.
+pub(crate) fn agent_list(call: &Call) -> Result<(Reply, Vec<Value>), PaneError> {
     let reply = call.send(GET_AGENT, GET_AGENT.label, None)?;
-    let agents = json_of(&reply);
-    match agents.as_ref().and_then(Value::as_array) {
-        Some(agents) => usable(&call, &reply, agents, key),
-        None => Err(call.unexpected(GET_AGENT, &reply, "a list of agents")),
+    match json_of(&reply) {
+        Some(Value::Array(agents)) => Ok((reply, agents)),
+        _ => Err(call.unexpected(GET_AGENT, &reply, "a list of agents")),
     }
 }
 
 /// Whether the `GET /agent` list `agents` holds `key` as an agent OpenCode takes as a default
-/// agent. That is OpenCode's own rule, which refuses a missing agent, one whose `mode` is
-/// `subagent` and a hidden one, and nothing else: `primary` and `all` (what an agent defined in
-/// a config without a `mode` gets) both pass. `hidden` counts only when it is `true`, since
-/// OpenCode leaves it out otherwise. An element named `key` with no string `mode` is not the
-/// JSON the step needs: `unavailable`.
+/// agent ([`as_default`]); a missing agent is refused too. An element named `key` with no string
+/// `mode` is not the JSON the step needs: `unavailable`.
 fn usable(call: &Call, reply: &Reply, agents: &[Value], key: &str) -> Result<(), PaneError> {
     let Some(agent) = agents
         .iter()
@@ -118,13 +126,25 @@ fn usable(call: &Call, reply: &Reply, agents: &[Value], key: &str) -> Result<(),
     else {
         return Err(unusable(format!("no agent named {key}")));
     };
-    match string_at(Some(agent), "mode") {
+    match as_default(agent) {
         None => Err(call.unexpected(GET_AGENT, reply, "agents with a string mode")),
-        Some("subagent") => Err(unusable(format!("agent {key} is a subagent"))),
-        Some(_) if agent.get("hidden") == Some(&Value::Bool(true)) => {
-            Err(unusable(format!("agent {key} is hidden")))
-        }
-        Some(_) => Ok(()),
+        Some(Err(why)) => Err(unusable(format!("agent {key} is {why}"))),
+        Some(Ok(())) => Ok(()),
+    }
+}
+
+/// OpenCode's own rule for an agent it takes as a default agent, for one element `agent` of the
+/// `GET /agent` list: it refuses one whose `mode` is `subagent` and a hidden one, and nothing
+/// else, so `primary` and `all` (what an agent defined in a config without a `mode` gets) both
+/// pass. `hidden` counts only when it is `true`, since OpenCode leaves it out otherwise.
+/// `Some(Ok(()))` for an agent it takes, `Some(Err(why))` for one it refuses (`why` completes
+/// "agent KEY is ..."), and `None` for an element with no string `mode`, which is not the JSON a
+/// step needs.
+pub(crate) fn as_default(agent: &Value) -> Option<Result<(), &'static str>> {
+    match string_at(Some(agent), "mode")? {
+        "subagent" => Some(Err("a subagent")),
+        _ if agent.get("hidden") == Some(&Value::Bool(true)) => Some(Err("hidden")),
+        _ => Some(Ok(())),
     }
 }
 

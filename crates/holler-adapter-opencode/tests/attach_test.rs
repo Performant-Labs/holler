@@ -388,6 +388,141 @@ fn ac29e_a_switch_answered_by_the_web_app_is_unavailable() {
     );
 }
 
+// ---- #845: a switch to a TUI that is not ready yet is asked for again ----
+
+const SELECT_PATH: &str = "/tui/select-session";
+
+/// Bounds for a test whose success must not race a loaded runner: `settle` is wide, and the
+/// test ends as soon as the title shows the session.
+fn patient() -> Timeouts {
+    Timeouts {
+        call: Duration::from_secs(8),
+        request: Duration::from_secs(2),
+        health: Duration::from_millis(300),
+        settle: Duration::from_secs(5),
+    }
+}
+
+impl Rig {
+    /// When the stub receives its `nth` select request, the fake tmux starts answering the
+    /// pane query with `stdout`. The answer is written beside the data file and renamed onto
+    /// it, so a query in flight reads the old answer whole or the new one whole, never an
+    /// empty file (which would read as no pane).
+    fn on_select(&self, nth: usize, stdout: String) {
+        let data = self.fake.sock().with_file_name("sock.display-message.out");
+        let next = data.with_extension("next");
+        self.stub.on_nth("POST", SELECT_PATH, nth, move || {
+            std::fs::write(&next, stdout).unwrap();
+            std::fs::rename(&next, &data).unwrap();
+        });
+    }
+
+    fn selects(&self) -> usize {
+        self.stub
+            .lines()
+            .iter()
+            .filter(|l| l.starts_with("POST"))
+            .count()
+    }
+}
+
+#[test]
+fn ac29f_a_switch_the_tui_takes_only_on_a_later_request_is_asked_for_again() {
+    // A TUI that is up but not ready answers `true` to a select request and keeps its old
+    // title. The title turns when the third request arrives.
+    let rig = rig_with(patient(), fixture());
+    rig.showing("OC | ses_A");
+    rig.knows("ses_B", "/p");
+    rig.stub.json("POST", SELECT_PATH, 200, "true");
+    rig.on_select(3, live(&attach_line(rig.stub.port), "OC | ses_B"));
+    let result = rig.harness.select_session(&pane(PANE), "ses_B");
+    let posts = rig.selects();
+    assert_eq!(result, Ok(()), "{posts} select requests were sent");
+    // The existence check is made once, before the first request, and a request is never
+    // sent once the title shows the session.
+    let lines = rig.stub.lines();
+    assert_eq!(
+        lines.iter().filter(|l| l.starts_with("GET")).count(),
+        1,
+        "{lines:?}"
+    );
+    assert_eq!(lines[0], "GET /session/ses_B HTTP/1.1", "{lines:?}");
+    assert_eq!(posts, 3, "{lines:?}");
+    for seen in rig
+        .stub
+        .seen()
+        .iter()
+        .filter(|s| s.line.starts_with("POST"))
+    {
+        let body: Value = serde_json::from_slice(&seen.body).expect("a JSON body");
+        assert_eq!(body, json!({ "sessionID": "ses_B" }));
+    }
+}
+
+#[test]
+fn ac29g_a_repeated_switch_answered_404_is_session_not_found() {
+    // The first request is answered `true`; the session is gone by the second.
+    let rig = rig_with(patient(), fixture());
+    rig.showing("OC | ses_A");
+    rig.knows("ses_B", "/p");
+    rig.stub.json("POST", SELECT_PATH, 404, stub::NOT_FOUND);
+    rig.stub.json_once("POST", SELECT_PATH, 200, "true");
+    let result = rig.harness.select_session(&pane(PANE), "ses_B");
+    let posts = rig.selects();
+    assert_eq!(
+        result,
+        Err(PaneError::SessionNotFound {
+            what: "ses_B".to_owned()
+        }),
+        "{posts} select requests were sent"
+    );
+    assert_eq!(posts, 2, "{:?}", rig.stub.lines());
+}
+
+#[test]
+fn ac29h_a_tui_gone_between_two_requests_is_unavailable_and_gets_no_third() {
+    for (why, stdout) in [
+        ("a dead pane", dead(1)),
+        ("no tmux pane", NO_PANE.to_owned()),
+    ] {
+        let rig = rig_with(patient(), fixture());
+        rig.showing("OC | ses_A");
+        rig.knows("ses_B", "/p");
+        rig.stub.json("POST", SELECT_PATH, 200, "true");
+        rig.on_select(2, stdout);
+        let result = rig.harness.select_session(&pane(PANE), "ses_B");
+        let posts = rig.selects();
+        let message = match result {
+            Err(PaneError::Unavailable { what }) => what,
+            other => panic!("{why}: expected unavailable, got {other:?} after {posts} requests"),
+        };
+        assert!(message.starts_with("no TUI in pane"), "{why}: {message:?}");
+        assert!(message.contains(PANE), "{why}: {message:?}");
+        echoes_nothing_it_did_not_author(&message, why);
+        assert_eq!(posts, 2, "{why}: no request after the TUI is gone");
+    }
+}
+
+#[test]
+fn ac29i_a_select_request_the_tui_never_answers_times_out_within_the_request_bound() {
+    // A request that hangs is cut by `request`, not repeated: the bound of a hung request
+    // is not changed by the repeat (the brief's risk 2).
+    let rig = rig();
+    rig.showing("OC | ses_A");
+    rig.knows("ses_B", "/p");
+    rig.stub.hang("POST", SELECT_PATH);
+    let start = Instant::now();
+    assert_eq!(
+        rig.harness.select_session(&pane(PANE), "ses_B"),
+        Err(PaneError::Timeout {
+            op: HarnessOp::SelectSession.as_str().to_owned()
+        })
+    );
+    let took = start.elapsed();
+    assert!(took < quick().request + SLACK, "took {took:?}");
+    assert_eq!(rig.selects(), 1, "{:?}", rig.stub.lines());
+}
+
 // ---- AC 30: attach_tui ----
 
 /// The stub knows `ses_A` in a directory that needs both escapes.

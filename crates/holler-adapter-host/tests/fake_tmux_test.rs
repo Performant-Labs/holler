@@ -22,12 +22,13 @@ use holler_pane_testkit::host::HostOp;
 
 const C1: &str = "demo-c1r1";
 
-const METHODS: [HostOp; 5] = [
+const METHODS: [HostOp; 6] = [
     HostOp::EnsureSession,
     HostOp::Run,
     HostOp::StopOwned,
     HostOp::Ps,
     HostOp::ForegroundCommands,
+    HostOp::AttachedClients,
 ];
 
 /// The missing-session answers of Decision 8: `pane-not-found` for `run` and `ps`,
@@ -73,6 +74,7 @@ fn call(host: &dyn HostPort, op: HostOp, cwd: &str) -> Result<(), PaneError> {
         HostOp::StopOwned => host.stop_owned(&n),
         HostOp::Ps => host.ps(&n).map(|_| ()),
         HostOp::ForegroundCommands => host.foreground_commands(&n).map(|_| ()),
+        HostOp::AttachedClients => host.attached_clients(&n).map(|_| ()),
     }
 }
 
