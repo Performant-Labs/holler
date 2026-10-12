@@ -920,3 +920,71 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - "cannot drive", "until that story lands" and their variants in the PR's added lines (W1);
     - personal names in the added lines: none.
   - **Sizes:** `wc -l` of every `.rs` file in the PR's diff: the largest is `ports.rs`, at 621.
+
+## S, spec audit (cycle 4, after F cycle 5, the merge of `origin/main` after #857): 2026-10-12T05:40-06:00 (MDT)
+
+- **Decided:** REWORK (production), one item (`docs/handoffs/835/handoff-S.md`, which replaces cycle 3's at `dc64e11`).
+  `archChanged: false`.
+  - **Cycle 3's work list is done.** I checked items 1a to 1e and 2a to 2i on the merged tree:
+    - one constant and one predicate;
+    - decisions 1 to 31, each once;
+    - one "Deferred" adoption entry;
+    - the 10 conflicts as tabled;
+    - no "until the Claude Code harness";
+    - every limits statement unchanged from `f1d1bd0`.
+
+    F's three extra places and design decisions 1 to 5 are accepted. All 20 acceptance criteria have proving tests.
+  - **The item: `holler-pane/src/import/assess.rs:104-105`.** The `harness-claude-code` message says "Claude Code, which
+    Holler cannot drive yet".
+    - Since #857, Holler drives Claude Code. `main` says so in the #831 CHANGELOG entry, in `unmanaged.rs:68-71`, in
+      ADR-0021 section 14 and in the guide's section 1.
+    - It is round 5's claim, in this story's runtime output, and the operator reads it in the cutover's dry run.
+    - A-dup's W1 found it. My cycle-3 list and F's `lands` grep missed it.
+    - The fix is one string. No test or doc pins it.
+  - **F's Known issue 1 is ruled not required in this PR:**
+    - ADR-0021 section 15 item 17's "until this harness exists" is #831's section, outside the brief's ADR sections, and
+      #831's adoption step rewrites it;
+    - #831's CHANGELOG "waits for #835" is not this PR's to rewrite, because this repo keeps `[Unreleased]` forward
+      references as written (five "#649 wires the adapter(s) in" remain after #649's own entry).
+  - **Privacy, in my role's own file.** Cycle 3's `handoff-S.md:32` cited a Tier-1 log by an absolute home-directory path
+    that names the local machine account. This rewrite removes it from the tree. Five unpushed commits keep it in
+    history, which is for the operator before the first push (Advisory 1).
+- **Assumed:**
+  - T-green's GREEN on `59d8d59` holds for `ecb04db`, which changes handoffs only. I re-ran no build or test, as the role
+    says.
+  - `origin/main` stays `b76f4d2` until the next phase.
+- **Hedged:**
+  - **Why REWORK for one message, and not PASS with an advisory.**
+    - No behaviour is wrong, but the PR would ship a user-facing statement that `main`'s own contract contradicts
+      (`unmanaged.rs` says the "Holler cannot drive" case "has no case").
+    - Cycles 2 and 3 set the standard: a false statement in the contract or the guide is REWORK. Runtime output is held
+      to the same standard.
+    - The list is final. The handoff says that the next S passes once the item is done and nothing else has changed.
+  - **S cycle 3 (`dc64e11`) wrote no entry in this journal.** Its verdict and work list are in that commit's
+    `handoff-S.md` and in brief round 5.
+- **Evidence:**
+  - Live:
+    - `git fetch` at 05:23 MDT (`origin/main` `b76f4d2`, an ancestor of `HEAD`; `merge-tree` exits 0);
+    - `gh issue view 835` (the body equals the brief's issue section; the "Parked again" comment of 03:49 MDT);
+    - `gh issue view 831` (open; the adoption is still listed);
+    - `gh pr list --head issue-835-implementation` (none).
+  - Read:
+    - the brief (round 5);
+    - every handoff (T-red cycle 1 from `36b0de8`);
+    - this journal and `evidence.md`;
+    - the whole PR diff;
+    - the merged `import/observe.rs` and `import/assess.rs`, the CLI `pane/import.rs`, `pane.rs:225-246`, `ports.rs`,
+      `wiring/bind.rs` and case 10;
+    - ADR-0021 sections 2, 9, 13, 14, 15 (items 2 and 17), "Deferred" and the decisions;
+    - the guide's sections 1, 3, 10 and 12;
+    - `CHANGELOG.md:1-30` and `:128-146`;
+    - `CONTRIBUTING.md`, `.github/workflows/ci.yml` and `scripts/lint.sh`;
+    - the release's `coding-pipeline-logic.mjs` (`shouldEscalate`) and the PR title the script sets ("Implements #N").
+  - Greps:
+    - "cannot drive" and its variants, `lands` with `831`, "harness exists", and #835 described as pending, over the
+      merged tree;
+    - `CLAUDE_CODE_COMMAND`, `is_claude_code_command` and `"claude"` in `src`;
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added lines;
+    - private names, IPs, home paths, e-mail addresses and keys in the 3,154 added lines;
+    - Conventional subjects and trailers on all 26 branch commits;
+    - `wc -l` of every touched file.
