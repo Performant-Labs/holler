@@ -15,17 +15,53 @@ behind the choices below.
 truth.** Every member crate inherits it via `version.workspace = true` (see ADR 0003's comment
 in `Cargo.toml`). Nothing else derives it independently:
 
-- `holler --version` / `-V` reads it at compile time via clap's `#[command(version)]`
-  (`crates/holler-cli/src/cli.rs`), which pulls Cargo's own `CARGO_PKG_VERSION` build-time env
-  var — this is why bumping the workspace `Cargo.toml` is the *only* step needed for the binary
-  itself to report the new version.
-- `query/status`'s JSON document (both roles) also carries this version — see
-  `holler_proto::Status`'s `version` field, populated from the same `CARGO_PKG_VERSION`.
+- `holler --version` / `-V` prints it, followed by the commit the binary was built from:
+  `X.Y.Z (COMMIT)` after the word `holler` (issue #851; see "The commit in the version" below).
+  The version part is Cargo's own `CARGO_PKG_VERSION` build-time env var, read at compile time
+  by `holler_cli::VERSION` (`crates/holler-cli/src/lib.rs`), which clap's
+  `#[command(version = ...)]` (`crates/holler-cli/src/cli.rs`) prints — this is why bumping the
+  workspace `Cargo.toml` is the *only* step needed for the binary itself to report the new
+  version.
+- `query/status`'s JSON document (both roles) and the hub's `control/status` (`hub status`) carry
+  the same string in their `version` field — see `holler_proto::Status`'s `version` field. `main`
+  installs `holler_cli::VERSION` into `holler_proto::build_info` before any command runs, and the
+  hub and the body read it from there.
 - The git tag (`vX.Y.Z`), the `CHANGELOG.md` heading, and a GitHub Release's title must all match
   what's in `Cargo.toml` at the commit being released — they're representations of the same
   fact, not independent decisions.
 
 Format: standard SemVer, starting at `0.1.0`.
+
+### The commit in the version
+
+`crates/holler-cli/build.rs` works out `COMMIT` when the binary is built. Its logic is in
+`crates/holler-cli/build_version.rs`, which `crates/holler-cli/tests/build_version_test.rs` pins.
+
+- **A git checkout** (a clone or a linked worktree): the 7-character hash of `HEAD`
+  (`git rev-parse --short=7 HEAD`), followed by `-dirty` when a tracked file differs from `HEAD`,
+  staged or not, as in `0.4.0 (bda1069-dirty)`. Untracked files do not count.
+- **No checkout** (a source archive, which has no `.git`, including one unpacked inside some other
+  repository): the build-time variable `HOLLER_GIT_SHA` (its first word) when it is set and not
+  empty, else `unknown`. Whoever builds from an archive sets it to the commit the archive was made
+  from.
+
+A release needs nothing more: step 11 below builds from a checkout of the tag, so the binary names
+the tag's commit, and the Homebrew formula installs that binary rather than building from source.
+The commit never fails a build: when git is missing or fails, it is `HOLLER_GIT_SHA` or `unknown`.
+
+**When the commit is worked out again.** Cargo re-runs the build script only when
+`HOLLER_GIT_SHA` changes or one of the paths the script names changes:
+
+- git's `HEAD`, `logs/HEAD`, the branch `HEAD` names, `packed-refs` (or `reftable`) and the index,
+  as git names them for the checkout (a linked worktree's own `HEAD`, log and index): a commit, a
+  checkout, a pull, a reset, a staged change, or a `git status` that refreshes the index;
+- the `src/` directory and `Cargo.toml` of every crate under `crates/`, and the workspace's
+  `Cargo.toml` and `Cargo.lock`: an edit to the code that goes into the binary, so a build from an
+  edited tree says `-dirty` without waiting for the index to change.
+
+Editing any other tracked file (a doc, a test) does not re-run it, and the binary, which that file
+is not part of, keeps naming the tree it was built from. Each re-run recompiles `holler-cli`, the
+leaf crate, and nothing else; that cost is why the script does not watch every tracked file.
 
 ## Were the tests run? What proves it?
 
@@ -244,8 +280,8 @@ several PRs.
 11. `scripts/release-build.sh` on each target platform (see the platform table above); it wraps
     `cargo build --release` with path remapping so the binary does not embed the builder's home
     directory, and runs `scripts/check-binary-paths.sh` on the result. Verify
-    `./target/release/holler --version` actually reports `X.Y.Z` before attaching anything, then
-    rename each to `holler-<os>` for attaching.
+    `./target/release/holler --version` actually reports `X.Y.Z` and the tag's commit, without
+    `-dirty`, before attaching anything, then rename each to `holler-<os>` for attaching.
 12. Extract `CHANGELOG.md`'s `## [X.Y.Z]` section (already complete, including Known Issues) into
     a standalone file — that's the release notes, no new content to write.
 13. **Publish** — this is a public, outward-facing artifact, and creating the GitHub Release from

@@ -63,3 +63,51 @@ Run handoff directory `docs/handoffs/851` · branch `issue-851-implementation` �
   - Ran the cargo test, clippy and `scripts/lint.sh` results quoted in handoff-T-red.md, at HEAD `3a9151e` with
     git 2.53.0.
   - Seeded `target/` with `scripts/seed-target-dir.sh ../dryrun-import/target`.
+
+## F, implement: 2026-10-11T19:21-06:00
+
+- **Decided:** implemented against T's RED (see handoff-F.md).
+  - `crates/holler-cli/build.rs` is the only build script. It sets `HOLLER_BUILD_COMMIT`.
+  - The format is written once, in `holler_cli::VERSION` (`src/lib.rs`): `concat!` of the version and the
+    commit. clap prints it, and `main` installs it first thing into the new `holler_proto::build_info`.
+  - `holler_proto::build_info` is a `OnceLock` with a `CARGO_PKG_VERSION` default, A's finding 1, shaped like
+    `log`. The three producers read it.
+  - Dirty means `git status --porcelain --untracked-files=no`, run with `GIT_OPTIONAL_LOCKS=0` so the build
+    never writes or locks the index. When status fails after the hash was read, the tree counts as dirty.
+  - A checkout counts only when git tracks a file in the crate's directory (`ls-files --error-unmatch -- .`).
+    An archive unpacked inside another repository prints `HOLLER_GIT_SHA` or `unknown`, never that
+    repository's hash.
+  - Only the first word of `HOLLER_GIT_SHA` is used.
+  - The script re-runs on `HOLLER_GIT_SHA` and on these paths, printed only when they exist:
+    - when in a checkout, the git files git names (`HEAD`, `logs/HEAD`, the branch ref, `packed-refs`,
+      `reftable`, `index`);
+    - always, each `crates/*/src` and `crates/*/Cargo.toml`, and the workspace `Cargo.toml` and `Cargo.lock`.
+  - Docs:
+    - ADR 0003: the row, plus a Clarified-by line;
+    - v2.md: the row, plus a §5.1 paragraph;
+    - `docs/releasing.md`: a section on the commit;
+    - checklist step 17;
+    - the cutover runbook, one paragraph before step 1 (the brief's Pipeline note);
+    - CHANGELOG.
+- **Assumed:**
+  - Workspace members that are compiled into the binary all live under `crates/`. The plugin under `plugins/`
+    is not part of the binary.
+  - Reflogs are on (git's default), so `logs/HEAD` moves with every commit. Without reflogs, the index and the
+    loose branch ref still catch a commit, because `git commit` rewrites the index. I checked that.
+- **Hedged:**
+  - The dirty flag is as of the script's last run. An edit outside the watched paths (a doc, a test) re-runs
+    nothing, and does not rebuild the binary either. Recorded in `docs/releasing.md` and handoff-F's Known
+    issues.
+  - A `git status` that refreshes the index costs one `holler-cli` recompile (about 10 s here, for every test
+    target).
+  - Cargo's re-run behaviour has no automated test. I checked it by hand on a fixture workspace, with the
+    results tabled in handoff-F decision 6.
+  - The `reftable` ref backend was not exercised.
+- **Evidence:**
+  - Ran T's four targets: 8, 14, 36 and 29 passed.
+  - Ran the verify command, `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`:
+    exit 0, with 2382 passed, 0 failed and 32 ignored.
+  - Ran the docs tests, `holler-proto`, workspace clippy with `-D warnings`, `scripts/lint.sh` and
+    `cargo machete`, all clean. Full output is in handoff-F.md.
+  - `evidence.md` has nine F entries.
+  - The fixture-workspace probe ran in the session scratchpad and was not committed.

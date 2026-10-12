@@ -8,6 +8,15 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- `holler --version` (and `-V`) names the commit the binary was built from, after the version: `holler 0.4.0 (bda1069)`
+  ([#851](https://github.com/Performant-Labs/holler/issues/851)). Until now every build since a release printed the same
+  `holler 0.4.0`, so a person could not tell which code they were running. The first two words are unchanged. The commit
+  is the 7-character hash of the checkout's `HEAD`, followed by `-dirty` when a tracked file had changed; a build with no
+  git checkout (a source archive) uses the build-time variable `HOLLER_GIT_SHA`, and otherwise prints `unknown`. The
+  `version` field that `hub status`, `hub query status`, `body query status` and `caps` print carries the same string, so
+  `hub status` begins `hub 0.4.0 (bda1069) (protocol 3)`; no field is added. A release binary is built from a checkout of
+  its tag, so it names the tag's commit, and the Homebrew formula, which installs that binary, needs no change.
+  `docs/releasing.md` says when the build works the commit out again.
 - Pane control, the operator guide (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): [`docs/pane-control.md`](docs/pane-control.md) documents every `holler pane` and `holler profile` verb ([#652](https://github.com/Performant-Labs/holler/issues/652)).
   It states the rule that only pane verbs change a registry (OpenCode) pane and that a Claude Code pane stays outside
   the registry, how to read `pane list` and `pane doctor`, the `profile apply` reference, grid notation, the JSON

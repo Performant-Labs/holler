@@ -679,6 +679,10 @@ old launcher's files to the registry. This is its procedure; where it differs fr
 `pane list` and `doctor`, not from the roster, and the first pane is watched through a full overnight, not a day), this
 guide is the standing text.
 
+Before step 1, confirm the binary: `holler --version` prints the version and then the commit the binary was built from,
+such as `0.4.0 (bda1069)` (issue [#851](https://github.com/Performant-Labs/holler/issues/851)). It must name the commit
+of `main` the cutover runs, without `-dirty`; a version number alone does not tell two builds apart.
+
 One fact about the live fleet comes first; it is a fact, not a step:
 
 - **Some Claude Code panes look like OpenCode panes to the import.** Their old files say `harness = "opencode"` and
