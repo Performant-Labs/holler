@@ -67,3 +67,37 @@
   - **Compiled** a model of the doubly nested `#[path]` include, with a child module of `scratch/`, in the scratchpad (rustc 1.98.1). Both targets build and pass.
   - **In flight:** `git fetch`; `git worktree list`; per-branch `git diff --name-only <merge-base> <branch>` over `pane_integration/`, `profile_apply_scenario/` and `Cargo.toml`. No branch touches the files #667 edits.
   - **Precedent:** `docs/handoffs/652/decisions.md:120-124` (F wrote the guide and its CHANGELOG entry).
+
+## T (Phase 4, author and RED): 2026-10-11T20:06-06:00 (MDT)
+- **Decided:** RED is valid; F may start. F's part is documentation only. The detail is in `handoff-T-red.md`.
+  - **All test code is T's (W-1):**
+    - decision 3's moves (`pane_integration/out.rs`, and `scratch/verbs.rs` as a second `impl Scratch`, per W-6);
+    - the `--herdr-session` argument guard, in both spellings (W-2);
+    - the pure `launch_args` (W-5);
+    - the new target's `plan.rs` (the strict `Applied` reader over production's `Action`/`Outcome`, per W-7; `Still`; the plan-against-show comparison);
+    - `pins.rs`;
+    - test A as step functions and test B as phase functions (W-3).
+  - **The valid RED** is each pin failing on its own assertion against the broken variant the Acceptance names:
+    - A12: one `#[ignore]` removed;
+    - A13: a guard that ignores the flag, and one blind to the `=` spelling;
+    - A14: `launch_args` without the `--herdr-session` pair, a reader that takes a missing key as null, and a reader that takes an unknown action as the first.
+    - Each file was restored afterwards.
+  - **Four step-table changes:**
+    - Test B's (ii) and (iii) pass `--herdr-session`, because `Y` has no record until (iii) (E32).
+    - The checks use `--check-json`.
+    - `Still` reads `pane list`'s `panes` rows, not the unmanaged table, whose `idle_seconds` moves with the clock.
+    - `delete_strays` was not moved: #667 never needed it.
+- **Assumed:**
+  - F's CHANGELOG entry and the deletion of the guide's bullet change no test result. T-green runs the docs tests.
+  - One opted-in run of each target is enough for RED. A1's two consecutive runs and A16's M1 and M3 to M7 are T-green's.
+- **Hedged:**
+  - **`scenario.rs` is 551 lines**, against the brief's "about 450". It is under lint's warning at 600.
+  - **The A12 source pin parses attribute lines above a top-level `fn`.** A scratch test written another way would escape it, for instance through a helper that calls `Scratch::start` for it. Its companion test proves the pin finds a test with no `#[ignore]`.
+  - **The step 5 generation +2 is asserted exactly.** It held, so the brief's relaxation was not used.
+- **Evidence:**
+  - **Baseline before the moves:** `cargo test -p holler-cli --test pane_integration` gave 66 passed and 4 ignored.
+  - **After the moves:** 68 passed (66 plus the 2 new guard pins) and 4 ignored. #649's opted-in run passed 4 of 4 in 54.74 s.
+  - **The new target:** 5 passed and 2 ignored. Opted in, 2 passed in 43.13 s, leaving no scratch process or directory behind.
+  - **Liveness:** mutant M2 in `tx_launch.rs` failed test B at `probe.rs:142` with `(Create, Created)` against `(Create, Refused)`. The file was restored, and `git diff -- crates/holler-pane/` was empty afterwards.
+  - **Lint:** `cargo clippy -p holler-cli --all-targets -- -D warnings` was clean, and `bash scripts/lint.sh` exited 0.
+  - **Tools:** herdr 0.9.1-preview, tmux 3.7c, OpenCode 1.19.0, `/usr/bin/curl`.
