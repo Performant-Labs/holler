@@ -11,15 +11,23 @@
 //!    exists: none is `unattached`, #647 part 2), `harness.health`, `harness.list_sessions`,
 //!    `harness.shown_session` and `harness.agent_view` (a server pane whose record names no
 //!    agent and whose healthy server lists the session of record: `agent-cannot-dispatch`,
-//!    #647 part 2); and once per pass `herdr.version` and `herdr.snapshot`. A healthy server's
-//!    list is trusted. An unhealthy server's list only tells a wedged server (the list times
-//!    out) from a down one. A rule that needs a value that was not observed is skipped, and
-//!    the call that failed is an `observe-failed` finding: nothing is guessed.
+//!    #647 part 2); and once per pass `herdr.version` and `herdr.snapshot`, and (#839)
+//!    `hub.advertised`, the hub's live attach bodies, when a pane in scope has a server.
+//!    A healthy server's list is trusted. An unhealthy server's list only tells a wedged
+//!    server (the list times out) from a down one. A rule that needs a value that was not
+//!    observed is skipped, and the call that failed is an `observe-failed` finding: nothing
+//!    is guessed.
 //! 2. **Compare** (each [`FindingKind`] says when it is reported). Stray sessions are judged
 //!    against every record, not only the scope, so another profile's session of record is
 //!    never a stray; unregistered Herdr panes are reported by whole-fleet passes only. A pane
 //!    that differs from its profile's spec is `profile-drift` (#665, `drift.rs`), for which
 //!    the pass reads `profile_store.list` once, and only when a pane in scope names a profile.
+//!    Each pane's body is found by `driven::driver_of` (#839), over the server list the chain
+//!    observed and the records as the pass read them (never the DRIVEN values it writes), and
+//!    `shown-driven-mismatch` is also reported for a body that drives a session that is
+//!    neither SHOWN nor the session of record (a body that is behind: `not-fixable`, with the
+//!    switch back to the session of record as the finding's own remedy) and for a body that
+//!    cannot be told to be the pane's (ambiguous or unproven: no remedy).
 //! 3. **Repair**, with `--fix`, one thing: a shown/driven mismatch, by selecting the session
 //!    of record when the pane's healthy server has it, then observing the TUI again (I3). It
 //!    never creates, starts, attaches, aborts or deletes anything, never types into a pane
@@ -53,9 +61,12 @@
 //!   leaves it as stored.
 //! - `last_observed.shown` is the session the TUI showed (after a fix, the one it showed
 //!   then). `None` with `at > 0` is an observed home screen, or a pane with no TUI.
-//! - `last_observed.driven` is left as stored. No port observes DRIVEN before #649, so the
-//!   mismatch compares SHOWN with `session_of_record` ([`shown_differs`]), which I2 makes
-//!   the session the hub drives.
+//! - `last_observed.driven` is the harness session the pane's body advertises, as
+//!   `driven::driver_of` found it (#839), in the same write as `shown`; `None` when no body
+//!   drives the pane, or when none can be told to be its own. A failed `hub.advertised`
+//!   leaves it as stored, and so does a single-process pane, which no body drives until
+//!   #850. The TUI's mismatch still compares SHOWN with `session_of_record`
+//!   ([`shown_differs`]), and `--fix` repairs only that side.
 //! - A record is written only when one of those values changed, or on its first
 //!   observation (`at == 0`): the hub's rule for a periodic writer (`panes/mod.rs`). So
 //!   `at` is when the current values were first observed, not a freshness stamp. A write
@@ -74,18 +85,21 @@ use std::thread::{self, ScopedJoinHandle};
 use serde::{Serialize, Serializer};
 
 use crate::findings::{embedded, quoted, Finding, FindingKind};
+use crate::hub::Advertised;
 use crate::pane::{Health, Shape};
 use crate::ports::LoginStatus;
 use crate::unmanaged;
 use crate::{GridPos, HerdrSnapshot, Pane, PaneError, PaneId, PaneName, Ports, ProfileName};
 
-use observe::Checked;
+use observe::{Bodies, Checked};
 
 /// The Herdr calls of a pass, named as `<port>.<method>` in an `observe-failed` message.
 const HERDR_VERSION: &str = "herdr.version";
 const HERDR_SNAPSHOT: &str = "herdr.snapshot";
 /// The login call of a pass that holds a single-process pane (#831).
 const HARNESS_LOGIN_STATUS: &str = "harness.login_status";
+/// The hub call of a pass that holds a server pane (#839).
+const HUB_ADVERTISED: &str = "hub.advertised";
 
 /// How a pass relaunches a single-process pane on its session of record, for `--fix` (#831,
 /// plan review W2): given the record the pass read, it relaunches the pane as recorded and
@@ -238,10 +252,19 @@ pub fn reconcile_with(
     relaunch: Option<Relaunch<'_>>,
 ) -> Result<Report, PaneError> {
     let (scope, records) = resolve(ports, request)?;
-    let (herdr, login, checked) = observe_all(ports, request, relaunch, &scope);
+    let advertised = read_bodies(ports, &scope);
+    let bodies = Bodies {
+        advertised: advertised.as_ref().and_then(|read| read.as_deref().ok()),
+        records: &records,
+    };
+    let (herdr, login, checked) = observe_all(ports, request, relaunch, &scope, bodies);
     let whole_fleet = request.profile.is_none() && request.pane.is_none();
     let mut findings = herdr_findings(herdr.as_ref(), &scope, &records, whole_fleet);
     findings.extend(login.and_then(login_finding));
+    if let Some(Err(error)) = &advertised {
+        let message = failed_message(HUB_ADVERTISED, error);
+        findings.push(Finding::new(FindingKind::ObserveFailed, message));
+    }
     findings.extend(strays(&scope, &checked, &records));
     findings.extend(drift::findings(ports.profile_store, &scope));
     if let (true, Some(after), Some(Ok(snapshot))) = (
@@ -302,6 +325,16 @@ fn resolve(
     Ok((scope, ports.pane_store.list()?))
 }
 
+/// The hub's live attach bodies, read once per pass (#839) and only when a pane in scope has a
+/// server: a single process has no body until #850, so a pass of single processes alone asks
+/// the hub nothing. `None` when nothing was asked.
+fn read_bodies(ports: Ports<'_>, scope: &[Pane]) -> Option<Result<Vec<Advertised>, PaneError>> {
+    scope
+        .iter()
+        .any(|pane| pane.harness.kind.shape() == Shape::ServerAndTui)
+        .then(|| ports.hub.advertised())
+}
+
 /// What the pass saw of Herdr itself.
 struct HerdrSeen {
     version: Result<String, PaneError>,
@@ -321,6 +354,7 @@ fn observe_all(
     request: &ReconcileRequest<'_>,
     relaunch: Option<Relaunch<'_>>,
     scope: &[Pane],
+    bodies: Bodies<'_>,
 ) -> (Option<HerdrSeen>, LoginSeen, Vec<Checked>) {
     let asks_login = scope
         .iter()
@@ -337,7 +371,7 @@ fn observe_all(
             .iter()
             .map(|pane| {
                 thread::Builder::new().spawn_scoped(threads, move || {
-                    observe::check_pane(ports, request, relaunch, pane)
+                    observe::check_pane(ports, request, relaunch, bodies, pane)
                 })
             })
             .collect();

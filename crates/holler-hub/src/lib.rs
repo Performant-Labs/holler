@@ -8,6 +8,8 @@
 pub mod circuit;
 pub mod control;
 pub mod control_hold;
+pub mod control_rebind;
+pub mod control_say;
 pub mod control_server;
 pub mod control_status;
 pub mod holds;

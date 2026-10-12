@@ -23,6 +23,7 @@ mod target_flags;
 
 mod close;
 mod doctor;
+mod driven;
 mod get;
 mod import;
 mod launch;
@@ -81,6 +82,23 @@ fn unwired_ports_answer_not_implemented() {
             .map(drop),
     ];
     for answer in amended {
+        let code = answer.err().map(|e| e.code().to_string());
+        assert_eq!(code.as_deref(), Some("not-implemented"));
+    }
+    // #839: the hub port is unwired too; a default would answer silently for a wrapper.
+    let body = holler_pane::hub::Advertised {
+        token: "tok_1".to_owned(),
+        name: "kiwi/oc".to_owned(),
+        harness_session_id: "ses_00000000000000000000000001".to_owned(),
+        state: holler_pane::ports::Activity::Idle,
+    };
+    let check = holler_pane::hub::PromptMode::Check;
+    let hub = [
+        ports.hub.advertised().map(drop),
+        ports.hub.rebind(&body, "ses_00000000000000000000000002").map(drop),
+        ports.hub.prompt("ses_00000000000000000000000001", "hi", check),
+    ];
+    for answer in hub {
         let code = answer.err().map(|e| e.code().to_string());
         assert_eq!(code.as_deref(), Some("not-implemented"));
     }

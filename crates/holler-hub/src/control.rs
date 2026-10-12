@@ -139,7 +139,39 @@ impl ControlCall {
             timeout: CLIENT_TIMEOUT,
         }
     }
+    /// `control/rebind` (#839): ask the body bound to `token_id` to re-point its session
+    /// `session` to `harness_session_id`. The 10 s wait is above the hub's own 8 s bound on the
+    /// rebind (`control_rebind::REBIND_FORWARD`), so the CLI always sees the hub's answer.
+    pub fn rebind(token_id: &str, session: &str, harness_session_id: &str) -> Self {
+        Self {
+            method: "control/rebind",
+            params: Some(serde_json::json!({
+                "token_id": token_id,
+                "session": session,
+                "harness_session_id": harness_session_id,
+            })),
+            timeout: REBIND_CALL,
+        }
+    }
+    /// `control/say` with `check_only` (#839): ask whether the hub's prompt path would admit
+    /// `text` to `session`, sending nothing. Queued (`queue: true`), as the first message it
+    /// asks about is, so only a held question refuses it for the session's state.
+    pub fn say_check(session: &str, text: &str) -> Self {
+        Self {
+            method: "control/say",
+            params: Some(serde_json::json!({
+                "session": session,
+                "text": text,
+                "queue": true,
+                "check_only": true,
+            })),
+            timeout: CLIENT_TIMEOUT,
+        }
+    }
 }
+
+/// How long the CLI waits for `control/rebind` (#839).
+const REBIND_CALL: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Resolve the control socket path for the current state dir.
 pub fn sock_path() -> PathBuf {

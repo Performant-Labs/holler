@@ -16,7 +16,6 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
 use holler_pane::{AgentKey, GridPos, HarnessEndpoint, HarnessPort, HostPort, PaneName, ServeSpec};
 use holler_pane_testkit::envelope::check_envelope;
@@ -138,20 +137,25 @@ fn the_scenario_runs_in_order_on_scratch_instances() {
     scratch.assert_no_credential_leaked();
 }
 
-/// Step 3: a reset of C2 with a first message, through `send_prompt` (#642 part 3). The
-/// dead-end provider is retried until the turn is aborted, so the session reads `Busy`, as D12
-/// expects; no model is reached.
+/// Step 3 (#839, D9): a reset of C2 with a first message. The scenario starts a hub and no
+/// body, so no body drives C2 and `reset --first` is refused `pane-not-driven` in the plan,
+/// before anything moves: no session is created and the record is byte-for-byte unchanged.
+/// Then `reset C2` without `--first` makes the fresh session the later steps use. That a first
+/// message reaches a real session (it reads `Busy`) is the default-run end-to-end test's
+/// (`driven_e2e_test.rs`), which has a real body.
 fn reset_with_a_first_message(scratch: &Scratch, p2: u16) {
-    let before = scratch.session_of_record(C2);
-    scratch.json(&["pane", "reset", C2, "--first", "hlr649 first message"], 0);
+    let before = scratch.record(C2);
+    let listed = scratch.harness().list_sessions(&HarnessEndpoint::Port(p2)).expect("list_sessions");
+    let refused = scratch.json(&["pane", "reset", C2, "--first", "hlr649 first message"], 3);
+    assert_eq!(refused.error_code().as_deref(), Some("pane-not-driven"), "{refused:?}");
+    assert_eq!(scratch.record(C2), before, "the record is unchanged, its generation included");
+    let after = scratch.harness().list_sessions(&HarnessEndpoint::Port(p2)).expect("list_sessions");
+    assert_eq!(after, listed, "no session was created");
+    scratch.json(&["pane", "reset", C2], 0);
     let after = scratch.record(C2);
     let fresh = after["session_of_record"].as_str().unwrap().to_owned();
-    assert_ne!(fresh, before, "a fresh session");
+    assert_ne!(Some(fresh.as_str()), before["session_of_record"].as_str(), "a fresh session");
     assert_eq!(after["last_observed"]["shown"], fresh.as_str(), "SHOWN follows");
-    let busy = wait_for(Duration::from_secs(15), || {
-        (scratch.harness().session_activity(&HarnessEndpoint::Port(p2), &fresh) == Ok(Activity::Busy)).then_some(())
-    });
-    assert!(busy.is_some(), "the first message reached the server: its session reads Busy");
     no_model_can_be_reached(p2);
 }
 

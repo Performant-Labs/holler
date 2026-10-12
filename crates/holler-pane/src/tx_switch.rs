@@ -4,7 +4,7 @@
 //! already has ([`Target::Existing`]); `holler pane reset` starts it on one the run creates
 //! ([`Target::Fresh`]). One engine runs both (ADR-0021 section 8, "Switch and reset as built").
 //!
-//! A run is plan, act, observe, record (I3), in this order:
+//! A run is plan, act, observe, drive, record (I3), and then the first message, in this order:
 //!
 //! 1. **Plan**, with no write and no live change, so a refusal changes nothing. Re-check an
 //!    existing target's id ([`parse_session_id`]). Read the record, through the profile's
@@ -20,20 +20,38 @@
 //!    (`session-not-found`) and that no other record names it as its session of record
 //!    ([`SESSION_OF_OTHER_PANE`]). That last check is a read, not the authority: the
 //!    registry's compare-and-swap does not enforce it, so two concurrent switches of two panes
-//!    to one session can both pass it.
+//!    to one session can both pass it. Then find the pane's body (#839): `hub.advertised`, and
+//!    when a body is advertised the server's list and the other records (a switch has read
+//!    both already), joined by `driven::driver_of`, which takes a body to be the pane's only
+//!    on evidence. A driver that is ambiguous or unproven is refused `pane-not-driven`, naming
+//!    the bodies and the two steps that pair the pane by hand; a switch whose target another
+//!    live body advertises is refused [`SESSION_DRIVEN_ELSEWHERE`]; and a driver that runs a
+//!    turn, holds a question or waits on a permission is refused as above
+//!    ([`activity_refusal`]). For `reset --first`, a pane whose body does not advertise its
+//!    session of record (or that no body drives) is refused `pane-not-driven`, and the hub's
+//!    prompt path is asked, without sending, whether it would admit the message
+//!    (`HubPort::prompt` with `Check`): a parked, held or unhealthy pane, or one whose SHOWN
+//!    and DRIVEN differ, is refused before anything moves.
 //! 2. **Act**: for a reset, `create_session` on the pane's server; then `select_session` in
 //!    the pane's TUI.
 //! 3. **Observe**: `shown_session`. A TUI that does not show the target is the closed failure
 //!    `unavailable` (exit 1; an open code would be a refusal), and nothing is recorded.
-//! 4. **Record**: the record read in step 1 with exactly four fields set (the target as
-//!    `session_of_record` and `last_observed.shown`, the request's clock as
+//! 4. **Drive** (#839): `hub.rebind` asks the pane's body to drive the target; the id it
+//!    acknowledges must be the target, else `unavailable`. A body already on the target is not
+//!    asked (its advertised id is the acknowledgement), and a pane no body drives skips the
+//!    step. It comes after the observation, so a failed `select_session` leaves the body where
+//!    it was; a failure here is after the act.
+//! 5. **Record**: the record read in step 1 with exactly five fields set (the target as
+//!    `session_of_record` and `last_observed.shown`, the acknowledged id as
+//!    `last_observed.driven`, or `None` when no body drives the pane, the request's clock as
 //!    `last_observed.at`, and `harness.health` healthy, which step 1 observed), in one
-//!    compare-and-swap at the generation step 1 read, never retried. `last_observed.driven`
-//!    is left as stored (no port observes DRIVEN before #649), and every other field is the
-//!    read record's, so a field this file does not know is kept.
-//! 5. **Prompt**, only when the request carries a first message (`pane reset --first`):
-//!    `send_prompt` queues it to the target, now the session of record, through the harness
-//!    API, at the endpoint of the record the run stored.
+//!    compare-and-swap at the generation step 1 read, never retried. DRIVEN is what the body
+//!    acknowledged or advertised, observed and never inferred, so a stale stored value goes.
+//!    Every other field is the read record's, so a field this file does not know is kept.
+//! 6. **First message**, only when the request carries one (`pane reset --first`):
+//!    `HubPort::prompt` with `Send` queues it to the target, now the session of record, through
+//!    the hub's one prompt path (`send_prompt`), accepted and returned. A refusal here (a race:
+//!    the pane was parked or held since the check) is the `unprompted` failure.
 //!
 //! **A single process (#831, ADR-0021 section 15 item 6).** A pane whose harness's shape is
 //! `SingleProcess` (Claude Code) has no server to create a session on and no TUI to switch, so
@@ -41,9 +59,11 @@
 //! refuses a pane that is not idle (a relaunch drops the turn in flight) and does not ask for a
 //! session list: whether the target has a conversation is the relaunch plan's
 //! (`process_command` with a resume-only choice: `session-not-found`, before anything is
-//! stopped; plan review W1). Steps 2 to 4 are then `tx_launch::relaunch_recorded`: the pane's
-//! processes stopped, its process run on the target (switch) or on a fresh session (reset),
-//! located, seen holding it and recorded with its new pid. Step 5 sends to the new process.
+//! stopped; plan review W1). It asks the hub nothing: no body drives such a pane until #850, so
+//! its `reset --first` is refused `pane-not-driven` in the plan. Steps 2 to 5 are then
+//! `tx_launch::relaunch_recorded`: the pane's processes stopped, its process run on the target
+//! (switch) or on a fresh session (reset), located, seen holding it and recorded with its new
+//! pid, its stored DRIVEN kept.
 //!
 //! No step of an in-place run calls Herdr or the host, so nothing is ever typed into a TUI
 //! (I4), and no step serves, attaches, aborts or deletes anything; a relaunch calls them as
@@ -56,18 +76,27 @@
 //! names it. A failed prompt comes after the record: the TUI and the record agree on the
 //! target, so its message has no step, and says that the session was created, shown and
 //! recorded but the first message did not land. After a successful reset the previous session
-//! stays on the server too: no port deletes a session, so doctor reports it as a stray.
+//! stays on the server too: no port deletes a session, so doctor reports it as a stray. If the
+//! record's write fails after a rebind, the body is ahead of the record: doctor reports it, and
+//! `holler pane switch` to the session of record re-points it; nothing is compensated.
 //!
-//! An in-place run makes at most eight port calls, each bounded by I5, so it needs no budget of
-//! its own; a relaunch runs under `tx_launch`'s budget.
+//! An in-place run makes at most thirteen port calls, each bounded by I5, so it needs no budget
+//! of its own; a relaunch runs under `tx_launch`'s budget.
+
+mod plan;
 
 use crate::error::RefusalCode;
-use crate::findings::{doctor_command, quoted, FindingKind, FixState};
-use crate::pane::{Health, PaneRole, Shape};
+use crate::findings::{doctor_command, quoted};
+use crate::hub::{Advertised, PromptMode};
+use crate::pane::{Health, Shape};
 use crate::ports::Activity;
 use crate::reconcile::shown_differs;
 use crate::tx_launch::{self, ProcessSession, TxFailure, TxOptions};
 use crate::{HarnessEndpoint, Pane, PaneError, PaneName, Ports, ProfileName};
+
+use plan::{plan, Plan};
+
+pub use crate::findings::{parse_session_id, SESSION_ID_MAX};
 
 /// `orchestrator-pane`: the pane's role is `orchestrator` and the caller did not pass
 /// `--as-operator`. Refusal, exit 3.
@@ -88,27 +117,27 @@ pub const SESSION_HOLDS_QUESTION: RefusalCode = RefusalCode::from_static("sessio
 /// switch, which relaunches it, would drop it. Refusal, exit 3.
 pub const SESSION_HOLDS_PERMISSION: RefusalCode =
     RefusalCode::from_static("session-holds-permission");
-/// The longest session id [`parse_session_id`] accepts. It is the length `findings::quoted`
-/// cuts at. `quoted` counts characters and [`parse_session_id`] counts bytes, which agree
-/// because an accepted id is ASCII, so a typed id is never cut short in a message.
-pub const SESSION_ID_MAX: usize = 64;
+/// `session-driven-elsewhere`: a live body other than the pane's own already advertises the
+/// switch's target (#839, P6), so the switch would put two bodies on one harness session.
+/// Refusal, exit 3.
+pub const SESSION_DRIVEN_ELSEWHERE: RefusalCode =
+    RefusalCode::from_static("session-driven-elsewhere");
 
-/// A harness session id typed by a person: 1 to [`SESSION_ID_MAX`] ASCII letters, digits,
-/// `_` or `-` (OpenCode's ids are `ses_` and 26 letters and digits). Anything else is
-/// `usage`, and the message quotes the text with [`quoted`], so no whitespace, control
-/// character or shell metacharacter reaches a port or a message.
-pub fn parse_session_id(text: &str) -> Result<String, PaneError> {
-    let allowed = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
-    if (1..=SESSION_ID_MAX).contains(&text.len()) && text.bytes().all(allowed) {
-        return Ok(text.to_owned());
+/// The one mapping of what a session is doing to its refusal (#839): the code, and the words
+/// that finish "session S of P ...". `check_idle` (the harness's answer) and the plan's check
+/// of the pane's body (the hub's advertisement) both call it. `None` for an idle session.
+pub fn activity_refusal(activity: Activity) -> Option<(RefusalCode, &'static str)> {
+    match activity {
+        Activity::Idle => None,
+        Activity::Busy => Some((SESSION_BUSY, "is running a turn; try again once it ends")),
+        Activity::HoldingQuestion => {
+            Some((SESSION_HOLDS_QUESTION, "holds a question; answer it first"))
+        }
+        Activity::WaitingPermission => Some((
+            SESSION_HOLDS_PERMISSION,
+            "waits on a permission prompt; answer it in the pane first",
+        )),
     }
-    Err(PaneError::Usage {
-        message: format!(
-            "invalid session id {}: a session id is 1 to {SESSION_ID_MAX} ASCII letters, \
-             digits, '_' or '-'",
-            quoted(text)
-        ),
-    })
 }
 
 /// The session a run moves the pane to.
@@ -152,9 +181,9 @@ pub struct SwitchFailure {
     pub acted: bool,
     /// The session `reset` created and did not record (it stays on the server).
     pub created: Option<String>,
-    /// The session the run created, showed and recorded, whose first message
-    /// (`send_prompt`) then failed. The record is correct, so such a failure is never
-    /// `acted` and never `created`.
+    /// The session the run created, showed and recorded, whose first message (`HubPort::prompt`
+    /// with `Send`) then failed or was refused. The record is correct, so such a failure is
+    /// never `acted` and never `created`.
     pub unprompted: Option<String>,
 }
 
@@ -200,27 +229,28 @@ impl SwitchFailure {
 /// Run one switch or reset over `ports` (see the module docs). `Ok` once the target was seen
 /// shown (by the TUI, or held by the relaunched process) and the record names it.
 pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, SwitchFailure> {
-    let record = plan(ports, request)?;
-    let pane = match record.harness.kind.shape() {
-        Shape::ServerAndTui => switch_in_place(ports, request, &record)?,
-        Shape::SingleProcess => relaunched(ports, request, &record)?,
+    let plan = plan(ports, request)?;
+    let pane = match plan.record.harness.kind.shape() {
+        Shape::ServerAndTui => switch_in_place(ports, request, &plan)?,
+        Shape::SingleProcess => relaunched(ports, request, &plan.record)?,
     };
     if let Some(text) = &request.first {
         prompt(ports, &pane, text)?;
     }
     Ok(Switched {
         pane,
-        previous: record.session_of_record,
+        previous: plan.record.session_of_record,
     })
 }
 
-/// Steps 2 to 4 for a server and its TUI: a reset's `create_session`, `select_session`, the
-/// observation and the record. Returns the record as stored.
+/// Steps 2 to 5 for a server and its TUI: a reset's `create_session`, `select_session`, the
+/// observation, the rebind of the pane's body and the record. Returns the record as stored.
 fn switch_in_place(
     ports: Ports<'_>,
     request: &SwitchRequest,
-    record: &Pane,
+    plan: &Plan,
 ) -> Result<Pane, SwitchFailure> {
+    let record = &plan.record;
     let at = record.harness.endpoint(&record.name)?;
     let (target, created) = match &request.target {
         Target::Existing(id) => (id.clone(), None),
@@ -244,11 +274,40 @@ fn switch_in_place(
         .select_session(&record.herdr.pane_id, &target)
         .map_err(acted)?;
     observe(ports, record, &at, &target).map_err(acted)?;
-    let next = recorded(record, &target, request.now_ms);
+    let driven = drive(ports, plan.driver.as_ref(), &target).map_err(acted)?;
+    let next = recorded(record, &target, request.now_ms, driven);
     ports
         .pane_store
         .cas_put(&next, record.generation)
         .map_err(acted)
+}
+
+/// Step 4: re-point the pane's body to `target` (#839). Answers the DRIVEN the record gets:
+/// the id the body acknowledged, or `None` when no body drives the pane. A body that already
+/// advertises the target is not asked, and an acknowledgement of another id is `unavailable`.
+fn drive(
+    ports: Ports<'_>,
+    driver: Option<&Advertised>,
+    target: &str,
+) -> Result<Option<String>, PaneError> {
+    let Some(body) = driver else {
+        return Ok(None);
+    };
+    if body.harness_session_id == target {
+        return Ok(Some(target.to_owned()));
+    }
+    let acknowledged = ports.hub.rebind(body, target)?;
+    if acknowledged != target {
+        return Err(PaneError::Unavailable {
+            what: format!(
+                "the body {} acknowledged session {}, not {}",
+                quoted(&body.name),
+                quoted(&acknowledged),
+                quoted(target)
+            ),
+        });
+    }
+    Ok(Some(acknowledged))
 }
 
 /// Steps 2 to 4 for a single process (#831): a relaunch of the pane as recorded, on the target
@@ -277,169 +336,21 @@ fn relaunched(
     Ok(stored)
 }
 
-/// Step 5: queue `text` to the session of record of `pane`, the record the run stored, at its
-/// endpoint: the process a relaunch started, never the stopped one (plan review W4). The prompt
-/// goes only to the session just recorded (I2), so a failure here leaves the TUI and the record
-/// in agreement: no reconcile step, nothing unrecorded.
+/// Step 6: queue `text` to the session of record of `pane`, the record the run stored, through
+/// the hub's one prompt path (#839: `HubPort::prompt` with `Send`, accepted and returned). The
+/// prompt goes only to the session just recorded (I2), so a failure here, a refusal in a race
+/// included, leaves the TUI and the record in agreement: no reconcile step, nothing unrecorded.
 fn prompt(ports: Ports<'_>, pane: &Pane, text: &str) -> Result<(), SwitchFailure> {
     let target = pane.session_of_record.clone().unwrap_or_default();
-    let unprompted = |error| SwitchFailure {
-        error,
-        acted: false,
-        created: None,
-        unprompted: Some(target.clone()),
-    };
-    let at = pane.harness.endpoint(&pane.name).map_err(unprompted)?;
     ports
-        .harness
-        .send_prompt(&at, &target, text)
-        .map_err(unprompted)
-}
-
-/// The plan: every refusal, before any write or live change. Returns the record the run
-/// starts from, whose generation the record write names.
-fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
-    let existing = match &request.target {
-        Target::Existing(id) => Some(parse_session_id(id)?),
-        Target::Fresh => None,
-    };
-    let record = read(ports, request)?;
-    refuse_orchestrator(&record, request.as_operator)?;
-    let at = record.harness.endpoint(&record.name)?;
-    check_health(ports, &record, &at)?;
-    let single = record.harness.kind.shape() == Shape::SingleProcess;
-    match &existing {
-        Some(target) if single => {
-            check_idle(ports, &record, &at)?;
-            check_unclaimed(ports, &record.name, target)?;
-        }
-        Some(target) => {
-            check_listed(ports, &at, target)?;
-            check_unclaimed(ports, &record.name, target)?;
-        }
-        None => check_idle(ports, &record, &at)?,
-    }
-    Ok(record)
-}
-
-/// The record of the request's pane: through the profile's scope when the request names a
-/// profile (`profile-not-found`, `pane-not-in-profile`), else from the pane store. No
-/// record is `pane-not-found`, and so is a scope that answers with another pane. The
-/// scope's answer is searched by the pane's name, as `pane get` does, not taken as its
-/// first pane. While `resolve` keeps its contract (a named pane is answered alone) the two
-/// are the same, and a scope that breaks it cannot make the run act on another pane.
-fn read(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
-    let record = match &request.profile {
-        Some(profile) => ports
-            .scope
-            .resolve(profile, Some(&request.pane))?
-            .panes
-            .into_iter()
-            .find(|pane| pane.name == request.pane),
-        None => ports.pane_store.get(&request.pane)?,
-    };
-    record.ok_or_else(|| crate::unmanaged::missing(ports, request.pane.as_str()))
-}
-
-/// The orchestrator's pane changes only as the operator's deliberate act (`--as-operator`).
-fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError> {
-    if record.role == PaneRole::Orchestrator && !as_operator {
-        return Err(PaneError::Refused {
-            code: ORCHESTRATOR_PANE,
-            message: format!(
-                "{} is the orchestrator's pane; pass --as-operator to change it",
-                record.name
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// The pane's harness answers its health check now (I6), at the record's endpoint. One that
-/// does not is refused with the remedy doctor gives a down server, taken from the one remedy
-/// table, which has one for every named pane; were it ever `None`, the pane doctor command
-/// line stands in. A check that fails is passed on as it is.
-fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
-    if ports.harness.health(at)? {
-        return Ok(());
-    }
-    let pane = Some(&record.name);
-    let remedy = match FindingKind::ServerDown.remedy(pane, FixState::NotFixable) {
-        Some(remedy) => remedy,
-        None => doctor_command(pane, false),
-    };
-    let state = match at {
-        HarnessEndpoint::Port(port) => {
-            format!(
-                "the harness server of {} on port {port} does not answer",
-                record.name
-            )
-        }
-        HarnessEndpoint::Process { pid, .. } => {
-            format!("the harness process {pid} of {} does not run", record.name)
-        }
-    };
-    Err(PaneError::Refused {
-        code: SERVER_UNHEALTHY,
-        message: format!("{state}; run {remedy}"),
-    })
-}
-
-/// A reset, and a single process's switch (a relaunch), does not drop a conversation that is
-/// mid-turn or waiting on an answer: the pane's session of record must be idle. A pane with no
-/// session of record has no conversation to drop, and is not asked. A query that fails is
-/// passed on as it is.
-fn check_idle(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
-    let Some(session) = &record.session_of_record else {
-        return Ok(());
-    };
-    let activity = ports.harness.session_activity(at, session)?;
-    let (code, doing) = match activity {
-        Activity::Idle => return Ok(()),
-        Activity::Busy => (SESSION_BUSY, "is running a turn; try again once it ends"),
-        Activity::HoldingQuestion => (SESSION_HOLDS_QUESTION, "holds a question; answer it first"),
-        Activity::WaitingPermission => (
-            SESSION_HOLDS_PERMISSION,
-            "waits on a permission prompt; answer it in the pane first",
-        ),
-    };
-    Err(PaneError::Refused {
-        code,
-        message: format!("session {} of {} {doing}", quoted(session), record.name),
-    })
-}
-
-/// A switch's target is listed by the pane's own server, so a deleted session, or one the
-/// server leaves out (a child session), is refused before anything moves.
-fn check_listed(ports: Ports<'_>, at: &HarnessEndpoint, target: &str) -> Result<(), PaneError> {
-    let sessions = ports.harness.list_sessions(at)?;
-    if sessions.iter().any(|id| id == target) {
-        return Ok(());
-    }
-    Err(PaneError::SessionNotFound {
-        what: quoted(target),
-    })
-}
-
-/// A switch's target is no other pane's session of record. Servers that share a data
-/// directory list every pane's sessions, so the server's list alone would let a switch show
-/// one pane another's conversation. The first such record in list order is named.
-fn check_unclaimed(ports: Ports<'_>, pane: &PaneName, target: &str) -> Result<(), PaneError> {
-    let records = ports.pane_store.list()?;
-    let claimed = records
-        .iter()
-        .find(|other| other.name != *pane && other.session_of_record.as_deref() == Some(target));
-    match claimed {
-        Some(other) => Err(PaneError::Refused {
-            code: SESSION_OF_OTHER_PANE,
-            message: format!(
-                "{} is the session of record of {}",
-                quoted(target),
-                other.name
-            ),
-        }),
-        None => Ok(()),
-    }
+        .hub
+        .prompt(&target, text, PromptMode::Send)
+        .map_err(|error| SwitchFailure {
+            error,
+            acted: false,
+            created: None,
+            unprompted: Some(target.clone()),
+        })
 }
 
 /// The observation, once `target` has been selected: what the pane's TUI shows. Anything
@@ -475,12 +386,13 @@ fn screen_text(shown: Option<&str>) -> String {
 }
 
 /// The record a run writes: `record` with `target` as its session of record and as what
-/// its TUI was seen showing at `now_ms`, and its server healthy. Every other field, and
-/// `last_observed.driven`, is `record`'s.
-fn recorded(record: &Pane, target: &str, now_ms: i64) -> Pane {
+/// its TUI was seen showing at `now_ms`, `driven` as what its body acknowledged (`None`: no
+/// body drives it), and its server healthy. Every other field is `record`'s.
+fn recorded(record: &Pane, target: &str, now_ms: i64, driven: Option<String>) -> Pane {
     let mut next = record.clone();
     next.session_of_record = Some(target.to_owned());
     next.last_observed.shown = Some(target.to_owned());
+    next.last_observed.driven = driven;
     next.last_observed.at = now_ms;
     next.harness.health = Health::Healthy;
     next

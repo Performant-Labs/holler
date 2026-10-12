@@ -10,8 +10,13 @@
 //!
 //! - **Routing** ([`route_target`], [`resolve_pane_target`]): `--pane NAME` addresses
 //!   the pane's session of record, refused (exit 3) when the record says the pane is
-//!   parked, unhealthy or shows a session other than the one it drives. `--profile P`
-//!   scopes `--pane` and needs it. `prompt_target::route` stays as #670 froze it. A Claude
+//!   parked, unhealthy or shows a session other than the one it drives
+//!   (`holler_pane::gate::prompt_refusal`, the one predicate the hub's gate calls too).
+//!   `--profile P` scopes `--pane` and needs it. A typed SESSION is a name: one that is not
+//!   (a bare `ses_…` id, #839) is `unknown session`, exit 1, before any hub is contacted; only
+//!   `--pane` sends an id, which the hub resolves to the body that advertises it, and its
+//!   refusal that no live body does is `pane-not-driven` ([`pane_not_driven`]).
+//!   `prompt_target::route` stays as #670 froze it. A Claude
 //!   Code pane (#831) has no body for the hub to reach until #850: its `interrupt` is a
 //!   relaunch on its session of record (`interrupt_cmd::interrupt_pane`), its `interrupt` with
 //!   text is [`INTERRUPT_TEXT_UNSUPPORTED`] and its `answer` [`ANSWER_UNSUPPORTED`], each after
@@ -30,12 +35,16 @@ use std::time::Duration;
 use holler_hub::control::ControlError;
 use holler_pane::error::{class_of, ErrorClass, RefusalCode};
 use holler_pane::findings::{doctor_command, quoted};
+use holler_pane::gate::{prompt_refusal, PromptRefusal};
+use holler_pane::hub::PANE_NOT_DRIVEN;
 use holler_pane::pane::{Health, Hold};
 use holler_pane::{Pane, PaneError, PaneName, Ports, ProfileName};
+use holler_proto::RoutableName;
 use serde::Serialize;
 
 use crate::cli::Usage;
 use crate::pane::args::ProfileOpt;
+use crate::pane::hub_refusal::{classify, HubRefusal};
 use crate::pane::wiring::Wiring;
 use crate::prompt_target::{PromptArgs, PromptTarget, Routed, Stop};
 use crate::Say;
@@ -147,7 +156,7 @@ fn fmt_age(ms: u64) -> String {
 /// accepted ([`QUEUE_ACCEPT_WAIT`]); the bare `say --queue SESSION` still waits for
 /// the reply (#190).
 pub fn run(say: &Say, json: bool) -> SayResult {
-    let Routed { session, arg } = match route_target(say.resolve(), &say.profile) {
+    let Routed { session, arg, pane } = match route_target(say.resolve(), &say.profile) {
         Ok(routed) => routed,
         Err(stop) => return err(stop.message, stop.exit_code),
     };
@@ -177,15 +186,20 @@ pub fn run(say: &Say, json: bool) -> SayResult {
         Err(holler_hub::control::ControlError::NoLiveHub) => {
             err(format!("no live holler hub reachable at {}", state_root.display()), 1)
         }
-        Err(e) => control_refusal(&session, e, json),
+        Err(e) => control_refusal(&session, pane.as_deref(), e, json),
     }
 }
 
-/// A control call that did not answer with a reply, as `say` prints it.
-fn control_refusal(session: &str, e: ControlError, json: bool) -> SayResult {
+/// A control call that did not answer with a reply, as `say` prints it. `pane` is the `--pane`
+/// name the session was routed from (#839), `None` for a SESSION.
+fn control_refusal(session: &str, pane: Option<&str>, e: ControlError, json: bool) -> SayResult {
     match e {
         ControlError::RemotePolicyRefused(msg) => err(msg, 3),
         ControlError::Refused(e) => {
+            // #839: for `--pane`, no live body for the pane's id is `pane-not-driven`, first.
+            if let Some(stop) = pane_not_driven(pane, session, &e) {
+                return err(stop.message, stop.exit_code);
+            }
             // The pane arm comes first (story #646): a pane-state refusal is
             // `session_held` on the wire but no hold to release.
             if let Some(result) = pane_hold_refusal(session, &e, json) {
@@ -218,15 +232,11 @@ fn control_refusal(session: &str, e: ControlError, json: bool) -> SayResult {
 
 // --- routing by pane (story #646, part 3) ----------------------------------------
 
-/// A pane that is parked (`holler pane park`): its prompts are refused until it is
-/// unparked. The three open codes of the routed verbs are declared here, the file
-/// that owns the routing (ADR-0021 section 9); each is a refusal, exit 3.
-pub const PANE_PARKED: RefusalCode = RefusalCode::from_static("pane-parked");
-/// A pane whose record says its harness server is unhealthy.
-pub const PANE_UNHEALTHY: RefusalCode = RefusalCode::from_static("pane-unhealthy");
-/// A pane whose record says it shows one session while the hub drives another.
-pub const PANE_SHOWN_DRIVEN_MISMATCH: RefusalCode =
-    RefusalCode::from_static("pane-shown-driven-mismatch");
+/// The three open codes of the routed verbs' pane refusals (parked, unhealthy, SHOWN and
+/// DRIVEN differing), each a refusal, exit 3. Declared once, in `holler_pane::gate` beside the
+/// one predicate the hub's gate and these verbs share (#839), and re-exported here, the file
+/// that owns the routing.
+pub use holler_pane::gate::{PANE_PARKED, PANE_SHOWN_DRIVEN_MISMATCH, PANE_UNHEALTHY};
 /// `interrupt --pane` with replacement text on a pane whose interrupt is a relaunch (a Claude
 /// Code pane, #831): the relaunch drops the turn in flight, and no body exists to run the text
 /// after it until #850. Refusal, exit 3.
@@ -243,10 +253,12 @@ const PROFILE_NEEDS_PANE: &str =
 
 /// Clear a resolved prompt verb to run, or say why it stops; `say`, `interrupt` and
 /// `answer` all call it. A malformed tail is `usage` (exit 2), as before. A SESSION is
-/// sent to as it is, and a SESSION with `--profile` is `usage`, naming `--pane`. A
-/// `--pane` target is resolved by [`resolve_pane_target`] over the run's wiring, before
-/// any hub is contacted: its error prints with the exit of its code's class, a refusal
-/// (exit 3) naming its stable code.
+/// sent to as it is when it is a valid name, and a SESSION with `--profile` is `usage`,
+/// naming `--pane`. A SESSION that is not a valid name (a bare harness session id, #839) is
+/// the hub's own `unknown session`, exit 1, before any hub is contacted: an id is an address
+/// for `--pane` only. A `--pane` target is resolved by [`resolve_pane_target`] over the run's
+/// wiring, before any hub is contacted: its error prints with the exit of its code's class, a
+/// refusal (exit 3) naming its stable code.
 pub fn route_target(
     resolved: Result<PromptArgs, Usage>,
     profile: &ProfileOpt,
@@ -265,22 +277,59 @@ pub(crate) fn route_target_by(
         message: usage.to_string(),
         exit_code: ErrorClass::Usage.exit_code(),
     })?;
-    let session = match (args.target, profile.profile.as_deref()) {
-        (PromptTarget::Session(session), None) => session,
+    let (session, pane) = match (args.target, profile.profile.as_deref()) {
+        (PromptTarget::Session(session), None) => {
+            if RoutableName::parse(&session).is_err() {
+                return Err(Stop {
+                    message: format!("unknown session: {session}"),
+                    exit_code: ErrorClass::Failure.exit_code(),
+                });
+            }
+            (session, None)
+        }
         (PromptTarget::Session(_), Some(_)) => {
             return Err(Stop {
                 message: PROFILE_NEEDS_PANE.to_owned(),
                 exit_code: ErrorClass::Usage.exit_code(),
             })
         }
-        (PromptTarget::Pane(pane), profile) => Wiring::connect()
-            .and_then(|wiring| resolve(wiring.ports(), &pane, profile))
-            .map_err(|error| routing_stop(&error))?,
+        (PromptTarget::Pane(pane), profile) => {
+            let session = Wiring::connect()
+                .and_then(|wiring| resolve(wiring.ports(), &pane, profile))
+                .map_err(|error| routing_stop(&error))?;
+            (session, Some(pane))
+        }
     };
     Ok(Routed {
         session,
         arg: args.arg,
+        pane,
     })
+}
+
+/// The `--pane` arm of a hub refusal (#839, D5, P5): a refusal that the one classification
+/// (`pane::hub_refusal`) calls `NotDriven`, for a target routed from `--pane` (`pane` is
+/// `Some`), is `pane-not-driven`, exit 3: the hub knows no live body for the pane's session of
+/// record, or only an offline one. `None` for a SESSION and for every other refusal, which the
+/// verb's own arms then print as before (a hold still exits 4; a turn that outlived its wait,
+/// a bare `-32004`, still exits 1 with the hub's text).
+pub(crate) fn pane_not_driven(
+    pane: Option<&str>,
+    session: &str,
+    refusal: &holler_proto::WireError,
+) -> Option<Stop> {
+    let pane = pane?;
+    let HubRefusal::NotDriven(text) = classify(refusal) else {
+        return None;
+    };
+    let message = format!(
+        "no live body drives {pane}'s session of record {} ({text})",
+        quoted(session)
+    );
+    Some(routing_stop(&PaneError::Refused {
+        code: PANE_NOT_DRIVEN,
+        message,
+    }))
 }
 
 /// A routing error as the prompt verbs print it (they have no envelope): its message,
@@ -318,10 +367,9 @@ fn coded(code: &str, text: String) -> String {
 /// or SHOWN and DRIVEN both observed and differing ([`PANE_SHOWN_DRIVEN_MISMATCH`]).
 /// The record is the source; nothing live is probed.
 ///
-/// The pane-state predicate has a twin at the hub's `send_prompt` gate
-/// (`holler-hub/src/circuit/dispatch.rs`, `pane_state_refusal`), which also refuses a
-/// bare `say` to the session; it exists twice only because `holler-pane` is frozen and
-/// the hub cannot depend on this crate. Keep the two equal.
+/// The pane-state predicate is `holler_pane::gate::prompt_refusal` (#839), the one the hub's
+/// `send_prompt` gate calls too (`holler-hub/src/panes/gate.rs`), which also refuses a bare
+/// `say` to the body session that drives the pane; this file keeps only its own messages.
 pub fn resolve_pane_target(
     ports: Ports<'_>,
     pane: &str,
@@ -379,35 +427,39 @@ fn routed_record(
     })
 }
 
-/// What the record says against prompting the pane, in the order parked, unhealthy,
-/// SHOWN differing from DRIVEN (one side absent is not a mismatch); each message names
-/// the pane, the code and the remedy on one line (stored text is `quoted`).
+/// What the record says against prompting the pane, by the one predicate
+/// (`holler_pane::gate::prompt_refusal`: parked, unhealthy, SHOWN differing from DRIVEN, one
+/// side absent no mismatch); each message names the pane, the code and the remedy on one line
+/// (stored text is `quoted`).
 fn pane_state_refusal(record: &Pane) -> Option<PaneError> {
-    let name = &record.name;
+    let refusal = prompt_refusal(record)?;
+    let (name, code) = (&record.name, refusal.code());
     let doctor = doctor_command(Some(name), false);
-    let (code, message) = if let Hold::Parked { reason, .. } = &record.hold {
-        let reason = quoted(reason);
-        let message = format!("{name} is parked ({PANE_PARKED}, reason {reason}); run holler pane unpark {name} first");
-        (PANE_PARKED, message)
-    } else if let Health::Unhealthy(reason) = &record.harness.health {
-        let reason = quoted(reason);
-        (
-            PANE_UNHEALTHY,
-            format!("{name} is unhealthy ({PANE_UNHEALTHY}): {reason}; run {doctor}"),
-        )
-    } else {
-        let seen = &record.last_observed;
-        let (Some(shown), Some(driven)) = (seen.shown.as_deref(), seen.driven.as_deref()) else {
-            return None;
-        };
-        if shown == driven {
-            return None;
+    let seen = &record.last_observed;
+    let text = |value: Option<&str>| quoted(value.unwrap_or_default());
+    let message = match refusal {
+        PromptRefusal::Parked => {
+            let reason = match &record.hold {
+                Hold::Parked { reason, .. } => quoted(reason),
+                Hold::None | Hold::Drained => String::new(),
+            };
+            format!(
+                "{name} is parked ({code}, reason {reason}); run holler pane unpark {name} first"
+            )
         }
-        let (shown, driven) = (quoted(shown), quoted(driven));
-        let message = format!(
-            "{name} shows session {shown} but the hub drives {driven} ({PANE_SHOWN_DRIVEN_MISMATCH}); run {doctor}"
-        );
-        (PANE_SHOWN_DRIVEN_MISMATCH, message)
+        PromptRefusal::Unhealthy => {
+            let reason = match &record.harness.health {
+                Health::Unhealthy(reason) => quoted(reason),
+                Health::Healthy | Health::Unknown => String::new(),
+            };
+            format!("{name} is unhealthy ({code}): {reason}; run {doctor}")
+        }
+        PromptRefusal::ShownDrivenMismatch => {
+            let (shown, driven) = (text(seen.shown.as_deref()), text(seen.driven.as_deref()));
+            format!(
+                "{name} shows session {shown} but its body drives {driven} ({code}); run {doctor}"
+            )
+        }
     };
     Some(PaneError::Refused { code, message })
 }
@@ -442,8 +494,9 @@ fn returns_on_acceptance(say: &Say) -> bool {
 /// The control call's result as a [`QueueWait`]: a reply, or, when the call waited
 /// only [`QUEUE_ACCEPT_WAIT`] (`returns_on_acceptance`), its read deadline expiring
 /// with no answer, which means the hub accepted the prompt. Any other error is passed
-/// on to be printed as a refusal.
-fn wait_ended(
+/// on to be printed as a refusal. The one accept rule: the hub port's `Send` of `pane reset
+/// --first` (#839, `pane/wiring/hub.rs`) reads its reply through it too.
+pub(crate) fn wait_ended(
     reply: Result<serde_json::Value, ControlError>,
     returns_on_acceptance: bool,
 ) -> Result<QueueWait, ControlError> {

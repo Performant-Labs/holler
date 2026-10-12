@@ -42,11 +42,18 @@
 //!   other failure (a dropped connection, a driver that could not be
 //!   reached) → `-32004 not_connected`, the same fallback `session/cancel`
 //!   uses just above.
+//! - **`session/rebind` (issue #839)** re-points an attach-mode session to
+//!   another harness session on the same endpoint, bounded by I5: the session
+//!   task gets a deadline [`REBIND_DEADLINE`] away and never swaps after it,
+//!   and this handler waits [`REBIND_REPLY_WAIT`] (the deadline plus 1 s), so
+//!   the task's own answer, refusal or `-32004` "endpoint did not answer",
+//!   always reaches the hub before the hub's 8 s forward gives up.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
+use holler_proto::rebind::{Rebind, RebindResult};
 use holler_proto::{
     Answer, AnswerResult, Cancel, CancelResult, Code, CorrelationId, Envelope, Message, Part,
     Prompt, PromptResult, Role, SessionName, WireError,
@@ -193,6 +200,57 @@ pub async fn handle_answer(
         }
         Err(SessionManagerError::Gone) => {
             send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+        }
+    }
+}
+
+/// How long the session task has to re-point a session (`session/rebind`,
+/// issue #839): it attaches the new id only before this deadline.
+pub const REBIND_DEADLINE: Duration = Duration::from_secs(5);
+/// How long [`handle_rebind`] waits for the session task's answer: the
+/// deadline plus 1 s, so the task's own answer arrives first.
+pub const REBIND_REPLY_WAIT: Duration = Duration::from_secs(6);
+
+/// Handle one inbound `session/rebind` request (issue #839): re-point the
+/// attach-mode session `params.session` to `params.harness_session_id` and
+/// answer `{session, harness_session_id}` once the driver targets the new id
+/// and presence advertises it. Every refusal keeps the old binding: an
+/// unknown name `-32003`; the session task's own refusals as it answers them
+/// (a spawn session or an id the endpoint does not have `-32602`, a busy
+/// session `-32009`, a deadline that passed `-32004`); and, should the task
+/// not answer within [`REBIND_REPLY_WAIT`], `-32004` "endpoint did not
+/// answer", since a command the task takes after its deadline changes nothing.
+pub async fn handle_rebind(
+    session_manager: Arc<SessionManager>,
+    id: String,
+    params: Rebind,
+    outbound: mpsc::UnboundedSender<WsMessage>,
+) {
+    let Ok(cid) = CorrelationId::parse(&id) else { return };
+    let name = match SessionName::parse(&params.session) {
+        Ok(n) => n,
+        Err(e) => {
+            send_error(&outbound, &cid, Code::UnknownSession, &format!("bad session name: {e}"));
+            return;
+        }
+    };
+    let deadline = tokio::time::Instant::now() + REBIND_DEADLINE;
+    let call = session_manager.rebind(&name, params.harness_session_id, deadline);
+    match tokio::time::timeout(REBIND_REPLY_WAIT, call).await {
+        Ok(Ok(Ok(harness_session_id))) => {
+            send_response(&outbound, &cid, &RebindResult { session: params.session, harness_session_id });
+        }
+        Ok(Ok(Err(refusal))) => send_error_frame(&outbound, &cid, &refusal),
+        Ok(Err(SessionManagerError::UnknownSession)) => {
+            send_error(&outbound, &cid, Code::UnknownSession, &format!("no such session: {}", params.session));
+        }
+        Ok(Err(SessionManagerError::Gone)) => {
+            send_error(&outbound, &cid, Code::NotConnected, "the session task is gone");
+        }
+        Err(_elapsed) => {
+            let message = format!("{} did not re-point within {REBIND_REPLY_WAIT:?}", params.session);
+            let refusal = WireError::new(Code::NotConnected, message, Some("endpoint did not answer"));
+            send_error_frame(&outbound, &cid, &refusal);
         }
     }
 }

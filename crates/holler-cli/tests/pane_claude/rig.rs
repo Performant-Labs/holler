@@ -30,6 +30,7 @@ use holler_pane_testkit::harness::{FakeHarness, HarnessOp};
 use holler_pane_testkit::harnesses::FakeHarnesses;
 use holler_pane_testkit::herdr::{FakeHerdr, HerdrOp, PROTOCOL_22_VERSION};
 use holler_pane_testkit::host::{FakeHost, HostOp};
+use holler_pane_testkit::hub::{FakeHub, HubOp};
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
 use holler_pane_testkit::prober::FakeProber;
 use holler_pane_testkit::profile_scope::FakeProfileScope;
@@ -127,6 +128,7 @@ pub struct Calls {
     pub host: Vec<HostOp>,
     pub opencode: Vec<HarnessOp>,
     pub claude: Vec<ClaudeOp>,
+    pub hub: Vec<HubOp>,
 }
 
 impl Calls {
@@ -159,6 +161,8 @@ pub struct Rig {
     pub host: FakeHost,
     pub harnesses: FakeHarnesses,
     pub prober: FakeProber,
+    /// The hub's live attach bodies (#839): none, since no body drives a Claude Code pane until #850.
+    pub hub: FakeHub,
 }
 
 impl Rig {
@@ -174,6 +178,7 @@ impl Rig {
             panes.clone(),
             Actor::parse("holler pane").unwrap(),
         );
+        let hub = FakeHub::new(panes.clone());
         Self {
             panes,
             profiles,
@@ -184,6 +189,7 @@ impl Rig {
             host: FakeHost::new(),
             harnesses: FakeHarnesses::new(),
             prober: FakeProber::new(),
+            hub,
         }
     }
 
@@ -206,6 +212,7 @@ impl Rig {
             harness: &self.harnesses,
             scope: &self.scope,
             prober: &self.prober,
+            hub: &self.hub,
         })
     }
 
@@ -229,6 +236,7 @@ impl Rig {
             host: self.host.faults().calls(),
             opencode: self.opencode().faults().calls(),
             claude: self.claude().faults().calls(),
+            hub: self.hub.faults().calls(),
         }
     }
 
@@ -241,6 +249,7 @@ impl Rig {
             host: now.host[mark.host.len()..].to_vec(),
             opencode: now.opencode[mark.opencode.len()..].to_vec(),
             claude: now.claude[mark.claude.len()..].to_vec(),
+            hub: now.hub[mark.hub.len()..].to_vec(),
         }
     }
 

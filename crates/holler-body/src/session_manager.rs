@@ -69,7 +69,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
-use holler_proto::{Mode, Presence, SessionAd, SessionName, SessionState};
+use holler_proto::{Mode, Presence, SessionAd, SessionName, SessionState, WireError};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -126,6 +126,16 @@ pub enum SessionCommand {
         /// caller with no streaming consumer (the pre-#191 unit tests).
         updates: Option<mpsc::UnboundedSender<String>>,
     },
+    /// Re-point this attach-mode session to another harness session on the
+    /// same endpoint (`session/rebind`, issue #839). The task attaches the new
+    /// id first and swaps it in only once that has succeeded, and only before
+    /// `deadline`: a command dequeued after it, or an attach still running at
+    /// it, changes nothing. Replies the id now driven, or the refusal.
+    Rebind {
+        harness_session_id: String,
+        deadline: tokio::time::Instant,
+        reply_tx: oneshot::Sender<Result<String, WireError>>,
+    },
     /// End this session's task: gracefully shut down its driver (if any) and
     /// return. Queued prompts are dropped without a reply (their `reply_tx`
     /// is simply never fired) — a shutting-down body has nowhere to deliver
@@ -180,7 +190,8 @@ impl std::error::Error for SessionManagerError {}
 
 /// One registered session's manager-side handle: its (immutable) config, the
 /// mailbox to its task, and the read-only presence snapshot that task keeps
-/// current.
+/// current. `config` stays the as-started configuration: the id an attach
+/// session drives now is its task's, mirrored in `presence` (issue #839).
 struct ManagedSession {
     config: SessionConfig,
     tx: mpsc::Sender<SessionCommand>,
@@ -207,7 +218,13 @@ impl SessionManager {
         let (presence_tx, _first_rx) = broadcast::channel(64);
         let mut sessions = BTreeMap::new();
         for (name, entry) in registry.iter() {
-            let presence = Arc::new(Mutex::new(SessionPresence::default()));
+            // The id mirror starts as the configured id (issue #839), so an
+            // attach row advertises it from the first moment, before the task
+            // has run; after this the task alone writes it.
+            let presence = Arc::new(Mutex::new(SessionPresence {
+                harness_session_id: entry.config.session_id.clone(),
+                ..SessionPresence::default()
+            }));
             let (tx, rx) = mpsc::channel(MAILBOX_CAP);
             let inner = task::Inner::new(
                 entry.config.clone(),
@@ -313,6 +330,37 @@ impl SessionManager {
         reply_rx.await.map_err(|_| SessionManagerError::Gone)
     }
 
+    /// Re-point the attach-mode session `name` to `harness_session_id`
+    /// (`session/rebind`, issue #839): the session task attaches the new id
+    /// and swaps it in only if that finishes before `deadline`, and answers
+    /// every refusal itself (a spawn session, a busy one, an id the endpoint
+    /// does not have, a deadline that passed). Only the HTTP attach driver
+    /// re-points.
+    pub async fn rebind(
+        &self,
+        name: &SessionName,
+        harness_session_id: impl Into<String>,
+        deadline: tokio::time::Instant,
+    ) -> Result<Result<String, WireError>, SessionManagerError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let harness_session_id = harness_session_id.into();
+        self.send(name, SessionCommand::Rebind { harness_session_id, deadline, reply_tx }).await?;
+        reply_rx.await.map_err(|_| SessionManagerError::Gone)
+    }
+
+    /// The configurations `configs` (the as-started ones) with each attach
+    /// session's `session_id` read from its task's live mirror (issue #839):
+    /// what `query/support`'s live probe must dial after a `session/rebind`.
+    pub fn live_configs(&self, configs: &[SessionConfig]) -> Vec<SessionConfig> {
+        let live = |config: &SessionConfig| {
+            let managed = self.sessions.get(&config.name).filter(|_| config.mode == SessionMode::Attach);
+            let Some(managed) = managed else { return config.clone() };
+            let presence = managed.presence.lock().unwrap_or_else(PoisonError::into_inner);
+            SessionConfig { session_id: presence.harness_session_id.clone(), ..config.clone() }
+        };
+        configs.iter().map(live).collect()
+    }
+
     async fn send(&self, name: &SessionName, cmd: SessionCommand) -> Result<(), SessionManagerError> {
         let session = self.sessions.get(name).ok_or(SessionManagerError::UnknownSession)?;
         let kind = match &cmd {
@@ -320,6 +368,7 @@ impl SessionManager {
             SessionCommand::Cancel { .. } => "cancel",
             SessionCommand::Answer { .. } => "answer",
             SessionCommand::Replace { .. } => "replace",
+            SessionCommand::Rebind { .. } => "rebind",
             SessionCommand::Shutdown => "shutdown",
         };
         holler_proto::log::emit(&LogEvent {
@@ -347,6 +396,9 @@ impl SessionManager {
     /// #195's own spec: "presence omits the session until it attaches on a
     /// 30s retry") — never advertised as a fabricated `idle` row for a
     /// harness session this body cannot actually reach yet.
+    ///
+    /// `harness_session_id` is the task's live mirror, never the as-started
+    /// configuration (issue #839): a `session/rebind` changes it.
     pub fn presence_doc(&self, hostname: String) -> Presence {
         let sessions = self
             .sessions
@@ -364,7 +416,7 @@ impl SessionManager {
                         SessionMode::Spawn => Mode::Spawn,
                         SessionMode::Attach => Mode::Attach,
                     },
-                    harness_session_id: managed.config.session_id.clone(),
+                    harness_session_id: p.harness_session_id.clone(),
                     turn_started_at: p.turn_started_at.clone(),
                     last_update_at: p.last_update_at.clone(),
                     pending: p.pending.clone(),

@@ -637,3 +637,74 @@ fn section_5_rows_of_part_2_name_their_exact_commands() {
     }
     assert_none("docs/pane-control.md section 5, #647 part 2's rows", missing);
 }
+
+/// `text` as one line of words: each line's comment or quote marker (`//!`, `///`, `//`, `>`)
+/// dropped, then every run of whitespace one space, so a sentence wrapped across lines is found.
+fn normalised(text: &str) -> String {
+    let lines = text.lines().map(|line| {
+        let line = line.trim_start();
+        ["//!", "///", "//", ">"].iter().fold(line, |l, marker| l.strip_prefix(marker).unwrap_or(l))
+    });
+    lines.collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// #839 Acceptance 17: the ADR, the guide, the CHANGELOG and the module docs carry none of the
+/// sentences DRIVEN as built replaced (whitespace normalised; the guide's forms case-insensitive),
+/// section 9 of the guide names the three new open codes, and the CHANGELOG has the entry linking
+/// #839 and #828.
+#[test]
+fn the_sentences_driven_replaced_are_gone_and_the_entry_is_written() {
+    let files = [
+        "docs/adr/ADR-0021.md",
+        "docs/pane-control.md",
+        "CHANGELOG.md",
+        "crates/holler-pane/src/tx_switch.rs",
+        "crates/holler-pane/src/reconcile.rs",
+        "crates/holler-pane/src/ports.rs",
+        "crates/holler-cli/src/pane/reset.rs",
+        "crates/holler-cli/src/say_cmd.rs",
+        "crates/holler-cli/src/roster_cmd.rs",
+        "crates/holler-adapter-opencode/src/prompt.rs",
+        "crates/holler-proto/src/methods.rs",
+    ];
+    let exact = [
+        "not use `reset --first` on a parked or held pane",
+        "whether it moves to the hub's one prompt path is #828's",
+        "until the cutover wires DRIVEN",
+        "the closed 22-row catalog",
+    ];
+    let folded = [
+        "not use `--first` on a parked or held pane",
+        "port observes DRIVEN before #649",
+        "`reset --first` is not used on a parked or held pane",
+    ];
+    let mut found = Vec::new();
+    for file in files {
+        let text = normalised(&read(file));
+        assert!(!text.is_empty(), "{file} is read");
+        let lower = text.to_lowercase();
+        found.extend(exact.iter().filter(|s| text.contains(*s)).map(|s| format!("{file}: {s}")));
+        let hits = folded.iter().filter(|s| lower.contains(&s.to_lowercase()));
+        found.extend(hits.map(|s| format!("{file}: {s}")));
+    }
+    if normalised(&read("docs/adr/ADR-0021.md")).contains("stays in force, unchanged") {
+        found.push("docs/adr/ADR-0021.md: stays in force, unchanged".to_owned());
+    }
+    assert_none("old sentences that #839 replaced", found);
+
+    let errors = section(&guide(), 9);
+    let missing = ["pane-not-driven", "session-held", "session-driven-elsewhere"]
+        .into_iter()
+        .filter(|code| !errors.contains(&ticked(code)))
+        .map(str::to_owned)
+        .collect();
+    assert_none("section 9 lacks the open codes of #839", missing);
+
+    let changelog = read("CHANGELOG.md");
+    let unreleased = from_heading(&changelog, "## [Unreleased]");
+    let unreleased = unreleased.split("\n## [").next().unwrap_or_default();
+    assert!(
+        unreleased.lines().any(|l| l.contains("/issues/839") && l.contains("/issues/828")),
+        "CHANGELOG.md's [Unreleased] has no entry linking /issues/839 and /issues/828"
+    );
+}

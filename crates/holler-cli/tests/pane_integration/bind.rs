@@ -705,6 +705,7 @@ fn launch_resolves_attach_tuis_pane_from_the_bindings_before_the_record_exists()
         harness: &resolving,
         scope: &scope,
         prober: &prober,
+        hub: &holler_cli::pane::wiring::Unwired,
     };
     let out = run_verb_with(LAUNCH, Format::Json, ports);
     assert_eq!(out.code, 0, "the launch succeeds: {out:?}");

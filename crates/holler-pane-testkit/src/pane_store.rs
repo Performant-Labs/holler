@@ -124,6 +124,13 @@ impl FakePaneStore {
         self.remove(name, Writer::Other)
     }
 
+    /// Every record, sorted by name, read as another reader of the registry reads it:
+    /// bypassing the faults and the call log. `FakeHub` reads it as the hub reads its own
+    /// registry (#839), so a verb test's call log shows the verb's calls alone.
+    pub(crate) fn records(&self) -> Vec<Pane> {
+        self.feed.read(|log| log.records().cloned().collect())
+    }
+
     /// The one write path of a put (`cas_put`, `seeded`, `concurrent_put`): the
     /// stored record is `pane` with only its generation replaced.
     fn put(&self, pane: &Pane, writer: Writer) -> Result<Pane, PaneError> {

@@ -29,6 +29,7 @@ pub struct RecordedRequest {
     pub body: String,
 }
 
+#[allow(clippy::struct_excessive_bools)] // #839: the stall mode is a fourth switch of the fake
 pub struct FakeState {
     pub exists_v1: bool,
     pub exists_v2: bool,
@@ -37,6 +38,10 @@ pub struct FakeState {
     pub child_sessions: Vec<Value>,
     pub requests: Vec<RecordedRequest>,
     pub session_new_called: bool,
+    /// The stall mode (#839): while set, an existence check (`GET /session/{id}` or
+    /// `GET /api/session/{id}`) is held unanswered until it is cleared (and recorded when it then
+    /// answers), so an attach that hangs on the same endpoint can be timed out and finish late.
+    pub stall_exists: bool,
     event_tx: broadcast::Sender<String>,
     /// Bumped by `force_disconnect` — every live `/event` handler compares
     /// its own captured generation against the current one each loop tick
@@ -55,6 +60,7 @@ impl FakeState {
             child_sessions: Vec::new(),
             requests: Vec::new(),
             session_new_called: false,
+            stall_exists: false,
             event_tx,
             generation: Arc::new(AtomicU64::new(0)),
         }
@@ -121,6 +127,13 @@ impl FakeServer {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .permissions = permissions;
+    }
+
+    /// Turn the stall mode on or off (see [`FakeState::stall_exists`]). Clearing it lets every
+    /// held existence check answer, as it would have.
+    #[allow(dead_code)] // #839: only `rebind_test.rs` of the files that include this one stalls
+    pub fn set_stall_exists(&self, on: bool) {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).stall_exists = on;
     }
 
     pub fn set_child_sessions(&self, sessions: Vec<Value>) {
@@ -226,6 +239,9 @@ async fn handle_connection(
     if path == "/event" {
         return serve_sse(&mut write_half, &state).await;
     }
+    if method == "GET" && is_existence_check(&path) {
+        hold_while_stalled(&state).await;
+    }
 
     let response = route(&method, &path, &body, &state);
     write_half.write_all(response.as_bytes()).await?;
@@ -269,6 +285,19 @@ async fn serve_sse(
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
             Err(_timeout) => continue,
         }
+    }
+}
+
+/// `GET /session/{id}` or `GET /api/session/{id}`: the attach driver's existence check.
+fn is_existence_check(path: &str) -> bool {
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    matches!(segments.as_slice(), ["session", id] | ["api", "session", id] if !id.is_empty())
+}
+
+/// While the stall mode is on, wait (polling the flag, never answering).
+async fn hold_while_stalled(state: &Arc<Mutex<FakeState>>) {
+    while state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).stall_exists {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
 

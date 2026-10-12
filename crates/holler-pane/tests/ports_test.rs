@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use common::{pane, pane_name, profile, profile_name, spec, MemPaneStore};
 use holler_pane::error::{class_of, ErrorClass};
+use holler_pane::hub::{Advertised, HubPort, PromptMode};
 use holler_pane::ports::AGENT_UNSUPPORTED;
 use holler_pane::{
     next_generation, run_probe, Actor, AgentKey, AgentView, Argv, Cursor, HarnessEndpoint,
@@ -283,6 +284,21 @@ impl HarnessPort for TestHarness {
 /// Reports every expected string as missing: a probe that never passes.
 struct FailingProber;
 
+/// A hub port that drives no body (#839): it advertises nothing and is asked nothing else here.
+struct TestHub;
+
+impl HubPort for TestHub {
+    fn advertised(&self) -> Result<Vec<Advertised>, PaneError> {
+        Ok(Vec::new())
+    }
+    fn rebind(&self, _driver: &Advertised, _harness_session_id: &str) -> Result<String, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+    fn prompt(&self, _harness_session_id: &str, _text: &str, _mode: PromptMode) -> Result<(), PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+}
+
 impl Prober for FailingProber {
     fn run_probe(&self, _argv: &Argv, expect: &[String], _timeout: Duration) -> ProbeResult {
         if expect.is_empty() {
@@ -512,7 +528,7 @@ fn ports_bundle_drives_a_verb_shaped_function() {
         panes: vec![pane()],
     };
     let (up, down) = (TestHerdr { up: true }, TestHerdr { up: false });
-    let (host, harness, prober) = (TestHost, TestHarness, FailingProber);
+    let (host, harness, prober, hub) = (TestHost, TestHarness, FailingProber, TestHub);
 
     let ports = Ports {
         pane_store: &pane_store,
@@ -522,6 +538,7 @@ fn ports_bundle_drives_a_verb_shaped_function() {
         harness: &harness,
         scope: &scope,
         prober: &prober,
+        hub: &hub,
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
     verb_shaped(&ports, &mut out, &mut err).unwrap();

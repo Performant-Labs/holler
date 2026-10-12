@@ -15,6 +15,7 @@ pub mod args;
 pub mod close;
 pub mod doctor;
 pub mod get;
+pub mod hub_refusal;
 pub mod import;
 pub mod launch;
 pub mod list;
