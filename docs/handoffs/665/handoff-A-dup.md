@@ -1,3 +1,63 @@
+# Handoff-A-dup (re-run after the rework): Phase 7 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)  (anti-duplication gate)
+
+**Date:** 2026-10-11 (23:32 MDT)
+**Branch:** `issue-665-implementation`
+**Diff base:** `fa1677c` (the head the last pass reviewed; the whole story is `bda1069..c63908e`)   **Diff head:** `c63908e`
+**Reuse map:** no `survey.md`. "Reuse expectations for Phase 7" in `docs/handoffs/665/handoff-A.md` stands in for it.
+**Verdict:** PASS
+
+The earlier pass (22:02 MDT, on `fa1677c`) follows this section, unchanged.
+
+## Summary
+
+**PASS. There are no block findings and three warns: one new and two carried over.** The rework cycle covered F rework 1 and 2, T-green rework 1 and 2, and T's test-only round. It changed 10 code and docs files. Every change extends an object that already existed, and the cycle built no parallel path:
+
+- **The spec count now goes through `super::list::count`**, the profile verbs' shared helper, in both `render` functions (`export.rs:41,302` and `import.rs:37,126`). This closes the last pass's warn 2.
+- **The redaction extends `spec_refused`.** That is the one place that already mapped a refused spec, and it gains two arms (`export.rs:193-209`). `Document::specs` now sends the position step through it too (`:147-149`), so there is one redaction path, not two. The member's path comes from `SpecField::Grid.as_str()`, the same path `profile show` and the drift finding use, not from a string literal.
+- **The tests reuse existing helpers:**
+  - `BARE_DOCUMENT` was made `pub(crate)`, not copied (`tests/profile_verbs/export.rs:140`).
+  - `assert_message_contains`, `assert_never_printed`, `refused`, `with_spec`, `write_document` and `stored` all existed before this cycle.
+  - Conformance case 23 reads the log through the suite's own `entries` (`conformance/profile_store.rs:499`).
+  - H1 waits on `holler_proto::clock::now_millis`, the clock the hub stamps with (`profile/store.rs:62,518`).
+- **Nothing else moved.**
+  - `profile/store.rs` changed only by a doc rewrap.
+  - `panes/store.rs` (with `Locked` and the twins), `drift.rs`, the fake, the ADRs and `grid.rs` are byte-identical to the last pass.
+  - D6 still holds: `git diff --stat bda1069..HEAD` is empty for `bind.rs`, `ports.rs`, `lib.rs`, `cli.rs`, `docs/protocol/v2.md` and `docs/orchestrating.md`.
+- **Phase 3's reuse expectation 8 still holds in the two rewritten verbs:**
+  - `insert_profile` (`import.rs:93`), `taken` (`:87`) and `profile_from_panes` (`:89-92`);
+  - `decode_params` (`export.rs:153`), `GridPos::parse` (`:180`), `write_atomic` (`:279`) and `show::text` (`:301`);
+  - `emit` in both `run` functions.
+
+The new warn is that **`GRID_FORMS` and `GRID_BOUNDS` copy holler-pane's private `FORMS` and `BOUNDS`, and no test ties the copies to the originals.**
+
+## Findings
+
+| # | Severity | File:line | Finding | Suggested fix |
+|---|---|---|---|---|
+| 1 | warn | `crates/holler-cli/src/profile/export.rs:54-60`, used at `:197-202`; the originals are at `crates/holler-pane/src/grid.rs:23-27` | **The import's grid hint copies holler-pane's text, and nothing pins the two together.** `GRID_FORMS` and `GRID_BOUNDS` match `grid.rs`'s private `FORMS` and `BOUNDS` character for character.<br><br>**Why this is not a block:**<ul><li>It is message text, not a parallel path. Positions still parse through `GridPos::parse` (expectation 8), and the codes are still holler-pane's.</li><li>The copy is deliberate and recorded, in `decisions.md` (F rework 1) and in the doc comment at `:54-56`. S's REWORK 2(b) asked for "the accepted forms or bounds" in the message, and making the originals public would edit `grid.rs`, which is outside the Blast radius.</li><li>Cutting the hint out of `GridPos`'s own message is not safe: the `pos`-label message has no hint, and an excerpt can contain `" ("`.</li><li>The CLI already restates the forms in user-facing text (`pane/args.rs:48`, the `--grid` help).</li></ul>**The risk:** `grid.rs` says the grid type is "defined here once". If holler-pane changes the accepted forms or the bounds, `holler profile import` keeps printing the old hint and every test stays green. `a_refused_position_is_named_by_its_spec_number_not_quoted` (`tests/profile_verbs/import/refusals.rs:107-122`) checks only for `herdr.grid of spec 2`. | **Preferred** (a follow-up, or at the rebase if the main session admits `grid.rs` to the Blast radius):<ul><li>make the two constants public in holler-pane, for example as `GridPos::FORMS` and `GridPos::BOUNDS`, with `parse`, `from_cells` and the deserializer using them;</li><li>then delete the CLI's two copies.</li></ul>**In scope now** (test-only, for T): pin the copy. For a text position and for `r0c1`, assert that the hint in the import refusal's message equals the hint in `GridPos::parse`'s message for the same input, taking the text after the last `" ("` in each. The CLI tests already import `GridPos`. |
+| 2 | warn (carried over, test-only) | `crates/holler-hub/tests/pane_support/mod.rs:205-231`; `crates/holler-hub/tests/profile_handlers_test.rs:30,57-88`; `crates/holler-hub/tests/pane_handlers_test.rs:24,48-71` | **The last pass's warn 1 is unchanged.** `pane_support::request` is still a near-copy of `profile_handlers_test.rs`'s private `line`, and `REPLY_WITHIN` is still declared three times. The rework did not touch these files, and S's advisory 6 lists this as optional. | As before: delete `line` and `REPLY_WITHIN` from `profile_handlers_test.rs` and call `pane_support::request`. Optionally, fold `pane_handlers_test.rs`'s `call` in the same way. |
+| 3 | warn (carried over, low) | `crates/holler-hub/src/panes/store.rs:375-457`; `crates/holler-hub/src/panes/mod.rs:71,140` | **The last pass's warn 3 is unchanged.** `Locked`'s `save` and `apply` accept any `PaneEvent`s, not only the moves that `Locked::moves` built. The one caller passes exactly the moves, so the code is correct today. F's handoff (rework 1, "Known issues") leaves it as a follow-up. | Optional follow-up: an opaque `Moves` newtype that only `Locked::moves` can construct, taken by `save`, `restore` and `apply`. |
+
+**No duplication in production code; the extension is clean.**
+
+**Checked, and not a finding:**
+- **`spec_refused`'s `other => other` arm** existed before this cycle and was reviewed in the last pass. It matches its neighbours (`profile/create.rs:217`, `profile/delete.rs:183`). F records, as a known issue, that it relies on holler-pane's guards keeping their no-echo rule. If the operator wants the redaction enforced by the compiler, `pane/profile_scope.rs::with_context` (`:274-309`) is the repository's precedent for an exhaustive match with no catch-all. This is not drift.
+- **H1's wait** (`crates/holler-hub/tests/profile_rename_test.rs:138-142`) is a condition wait on the hub's own clock. There is no holler-hub test helper it could reuse: a grep for `fn wait*` and `fn until*` under `crates/holler-hub/tests` finds nothing. holler-cli's `wait_for` lives in another crate's test support. So the wait is not a near-copy.
+- **The new import test** (`tests/profile_verbs/import.rs:184-206`) does not duplicate `export_leaves_out_absent_optional_members` (`tests/profile_verbs/export.rs:229-233`).
+  - The export test starts from a spec in memory. The import test starts from a file that leaves out `env` and `expect`.
+  - Both use the one `BARE_DOCUMENT`.
+- **The ADRs stay true.** The rework changes refusal messages only. ADR-0021's "Profile files as built" (`:301-312`) and its section 9 rows name codes, not messages. "Every message ... never echoes a secret" (`:776`) is what the rework enforces.
+- **No touched file is near the 900-line lint failure.** The largest are `profile/store.rs` (562 lines), `profile_rename_test.rs` (478) and `tests/profile_verbs/export.rs` (364). `src/profile/export.rs` is 306.
+- **No personal infrastructure names** appear in the added lines or in the commit metadata. The only matches are the rule sentences in the brief and in S's handoff.
+
+## Notes for F
+
+None is required, since the verdict is PASS.
+- **Warn 1:** the in-scope half is a test, so it belongs to T. The preferred half is a follow-up for the main session.
+- **Warns 2 and 3** remain optional, as S's advisory 6 says.
+
+---
+
 # Handoff-A-dup: Phase 7 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)  (anti-duplication gate)
 
 **Date:** 2026-10-11 (22:02 MDT)

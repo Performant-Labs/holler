@@ -271,3 +271,32 @@
   - The workspace: 154 targets, 2,436 passed, 0 failed, 32 ignored, 23:19 to 23:25 MDT. That is 2,435 plus the new test.
   - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean. `rustfmt --check` passes on both touched files.
   - `evidence.md`: 14 entries, 0 excerpt mismatches, 11,799 bytes (under 12,000).
+
+## A (Phase 7, anti-duplication gate, re-run after the rework): 2026-10-11 23:32 MDT
+- **Decided:** PASS, with 0 block and 3 warn findings (`docs/handoffs/665/handoff-A-dup.md`, top section).
+  - **The cycle's diff (`fa1677c..c63908e`) extends existing objects only:**
+    - `super::list::count` in both `render` functions, which closes the last pass's warn 2;
+    - two new arms on `spec_refused`, with the position step routed through it (one redaction path);
+    - `SpecField::Grid.as_str()` for the member's path;
+    - `BARE_DOCUMENT` shared, not copied;
+    - the suite's `entries` in case 23, and the hub's `now_millis` in H1.
+  - **Warn 1 (new).** `GRID_FORMS` and `GRID_BOUNDS` (`export.rs:54-60`) copy holler-pane's private `FORMS` and `BOUNDS` (`grid.rs:23-27`).
+    - The copy is deliberate and recorded, and it is not a parallel path. But nothing pins it to the originals.
+    - The fix is to expose the originals from holler-pane as a follow-up, or to have T pin the copy against `GridPos::parse`'s message.
+  - **Warns 2 and 3** are the last pass's warns 1 and 3, unchanged and optional.
+- **Assumed:**
+  - "The diff produced this cycle" means `fa1677c..c63908e`, the code changed since the last A-dup pass. I re-checked the Phase 3 expectations only where that diff touches them (`export.rs`, `import.rs`).
+  - Message text copied across a crate boundary because of the Blast radius is a warn, not a parallel path, under the Phase 7 verdict rule.
+- **Hedged:**
+  - I ran no test. T's last GREEN (the workspace on these sources: 2,436 passed, 0 failed) covers behavior.
+  - `spec_refused`'s `other => other` arm is noted, not raised. It predates the cycle and matches its neighbours in `create.rs` and `delete.rs`. `with_context` is the precedent if the operator wants the redaction enforced by the compiler.
+- **Evidence:**
+  - **Read:** `git diff fa1677c..c63908e` (10 code and docs files); `src/profile/export.rs` and `import.rs` in full; every changed test; `grid.rs`; `error.rs` (`from_decode`, `from_closed`, `deserialize_parsed`); `pane/profile_scope.rs::with_context`; the gate's round 4 result (PASS, no duplication finding).
+  - **Greps:**
+    - the hint text across crates and docs;
+    - `fn wait*` and spin-waits on the clock in the hub tests;
+    - `fn count` and the users of `list::count`;
+    - where `assert_message_contains` and the conformance `entries` were defined;
+    - `REPLY_WITHIN` and the request helpers;
+    - personal infrastructure names in the added lines and the commit metadata.
+  - **Untouched files:** `git diff --stat bda1069..HEAD` is empty for `grid.rs`, `bind.rs`, `ports.rs`, `lib.rs`, `cli.rs`, `docs/protocol/v2.md` and `docs/orchestrating.md`.
