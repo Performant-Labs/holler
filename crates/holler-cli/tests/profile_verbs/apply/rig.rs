@@ -28,9 +28,9 @@ use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_apply::{self, Applied, ApplyRequest, Outcome as StepOutcome, Step};
 use holler_pane::tx_launch::TxOptions;
 use holler_pane::{
-    Actor, Argv, Cursor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
-    PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, Profile, ProfileName, ProfileSpec,
-    ProfileStore, ServeSpec,
+    Actor, Argv, Cursor, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec,
+    HostPort, Pane, PaneError, PaneEvent, PaneId, PaneName, PaneStore, Ports, Profile, ProfileName,
+    ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -292,9 +292,12 @@ impl Rig {
         let herdr = self.place_herdr_pane(seed.grid);
         self.host.ensure_session(&pane, "/srv/demo").unwrap();
         let pid = serve_server(&self.harness, &pane, seed.port);
-        let sid = self.harness.create_session(seed.port).unwrap();
+        let sid = self
+            .harness
+            .create_session(&HarnessEndpoint::Port(seed.port))
+            .unwrap();
         self.harness
-            .attach_tui(&herdr.pane_id, seed.port, &sid)
+            .attach_tui(&herdr.pane_id, &HarnessEndpoint::Port(seed.port), &sid)
             .unwrap();
         let sample = sample_pane(seed.pane).unwrap();
         let record = Pane {
@@ -304,7 +307,7 @@ impl Rig {
                 ..sample.host.clone()
             },
             harness: HarnessInfo {
-                port: seed.port,
+                port: Some(seed.port),
                 pid: Some(pid),
                 health: Health::Healthy,
                 ..sample.harness.clone()
@@ -364,7 +367,7 @@ impl Rig {
 
     /// Kill the harness server of `record` (it no longer answers: the pane is not healthy).
     pub fn kill(&self, record: &Pane) {
-        self.harness.kill(record.harness.port).unwrap();
+        self.harness.kill(record.harness.port.unwrap()).unwrap();
     }
 
     /// The pane store's head: hand it to [`Rig::writes_since`] after a run.
@@ -713,38 +716,43 @@ impl HarnessPort for HookedHarness<'_> {
         answer
     }
 
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        let answer = self.rig.harness.verify_serving(port, spec);
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        let answer = self.rig.harness.verify_serving(at, spec);
         self.fire(HarnessOp::VerifyServing);
         answer
     }
 
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        let answer = self.rig.harness.health(port);
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        let answer = self.rig.harness.health(at);
         self.fire(HarnessOp::Health);
         answer
     }
 
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        let answer = self.rig.harness.create_session(port);
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        let answer = self.rig.harness.create_session(at);
         self.fire(HarnessOp::CreateSession);
         answer
     }
 
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        let answer = self.rig.harness.list_sessions(port);
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        let answer = self.rig.harness.list_sessions(at);
         self.fire(HarnessOp::ListSessions);
         answer
     }
 
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        let answer = self.rig.harness.abort(port, session);
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        let answer = self.rig.harness.abort(at, session);
         self.fire(HarnessOp::Abort);
         answer
     }
 
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        let answer = self.rig.harness.attach_tui(pane, port, session);
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        let answer = self.rig.harness.attach_tui(pane, at, session);
         self.fire(HarnessOp::AttachTui);
         answer
     }
@@ -755,8 +763,12 @@ impl HarnessPort for HookedHarness<'_> {
         answer
     }
 
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        let answer = self.rig.harness.shown_session(pane);
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        let answer = self.rig.harness.shown_session(pane, at);
         self.fire(HarnessOp::ShownSession);
         answer
     }

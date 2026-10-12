@@ -10,11 +10,12 @@
 //!    existing target's id ([`parse_session_id`]). Read the record, through the profile's
 //!    scope when the request names one (`pane-not-found`, `profile-not-found`,
 //!    `pane-not-in-profile`). Refuse the orchestrator's pane unless the caller acts as the
-//!    operator ([`ORCHESTRATOR_PANE`]). Check the pane's harness server live (I6), never from
-//!    the stored `harness.health` ([`SERVER_UNHEALTHY`]). For a reset of a pane that has a
-//!    session of record, ask the server what that session is doing (`session_activity`) and
-//!    refuse one that is running a turn ([`SESSION_BUSY`]) or holds a question
-//!    ([`SESSION_HOLDS_QUESTION`]); a pane with none is not asked, since reset is doctor's
+//!    operator ([`ORCHESTRATOR_PANE`]). Check the pane's harness live (I6), never from the
+//!    stored `harness.health` ([`SERVER_UNHEALTHY`]). For a reset of a pane that has a
+//!    session of record, ask the harness what that session is doing (`session_activity`) and
+//!    refuse one that is running a turn ([`SESSION_BUSY`]), holds a question
+//!    ([`SESSION_HOLDS_QUESTION`]) or waits on a permission prompt
+//!    ([`SESSION_HOLDS_PERMISSION`]); a pane with none is not asked, since reset is doctor's
 //!    remedy for it. For a switch, check that the server lists the target
 //!    (`session-not-found`) and that no other record names it as its session of record
 //!    ([`SESSION_OF_OTHER_PANE`]). That last check is a read, not the authority: the
@@ -32,29 +33,41 @@
 //!    read record's, so a field this file does not know is kept.
 //! 5. **Prompt**, only when the request carries a first message (`pane reset --first`):
 //!    `send_prompt` queues it to the target, now the session of record, through the harness
-//!    API.
+//!    API, at the endpoint of the record the run stored.
 //!
-//! No step calls Herdr or the host, so nothing is ever typed into a TUI (I4), and no step
-//! serves, attaches, aborts or deletes anything. A failure once `select_session` has been
-//! called is not compensated: the record still names the previous session, and
-//! [`SwitchFailure::message`] ends with the reconcile step (the pane doctor command line for
-//! the pane, with `--fix`), which selects that session again. A failure before that, a
-//! reset's `create_session` included, moved neither the TUI nor the record, and its message
-//! has no step. A session a reset created and did not record stays on the server, and the
-//! message names it. A failed prompt comes after the record: the TUI and the record agree on
-//! the target, so its message has no step, and says that the session was created, shown and
-//! recorded but the first message did not land. After a successful reset the previous
-//! session stays on the server too: no port deletes a session, so doctor reports it as a
-//! stray.
+//! **A single process (#831, ADR-0021 section 15 item 6).** A pane whose harness's shape is
+//! `SingleProcess` (Claude Code) has no server to create a session on and no TUI to switch, so
+//! its switch and its reset are relaunches. The plan refuses as above, except that a switch also
+//! refuses a pane that is not idle (a relaunch drops the turn in flight) and does not ask for a
+//! session list: whether the target has a conversation is the relaunch plan's
+//! (`process_command` with a resume-only choice: `session-not-found`, before anything is
+//! stopped; plan review W1). Steps 2 to 4 are then `tx_launch::relaunch_recorded`: the pane's
+//! processes stopped, its process run on the target (switch) or on a fresh session (reset),
+//! located, seen holding it and recorded with its new pid. Step 5 sends to the new process.
 //!
-//! A run makes at most eight port calls, each bounded by I5, so it needs no budget of its own.
+//! No step of an in-place run calls Herdr or the host, so nothing is ever typed into a TUI
+//! (I4), and no step serves, attaches, aborts or deletes anything; a relaunch calls them as
+//! `tx_launch` does, and types nothing either. A failure once `select_session` has been
+//! called (or once a relaunch entered its act) is not compensated: the record still names the
+//! previous session, and [`SwitchFailure::message`] ends with the reconcile step (the pane
+//! doctor command line for the pane, with `--fix`). A failure before that, a reset's
+//! `create_session` included, moved neither the TUI nor the record, and its message has no
+//! step. A session a reset created and did not record stays on the server, and the message
+//! names it. A failed prompt comes after the record: the TUI and the record agree on the
+//! target, so its message has no step, and says that the session was created, shown and
+//! recorded but the first message did not land. After a successful reset the previous session
+//! stays on the server too: no port deletes a session, so doctor reports it as a stray.
+//!
+//! An in-place run makes at most eight port calls, each bounded by I5, so it needs no budget of
+//! its own; a relaunch runs under `tx_launch`'s budget.
 
 use crate::error::RefusalCode;
 use crate::findings::{doctor_command, quoted, FindingKind, FixState};
-use crate::pane::{Health, PaneRole};
+use crate::pane::{Health, PaneRole, Shape};
 use crate::ports::Activity;
 use crate::reconcile::shown_differs;
-use crate::{Pane, PaneError, PaneName, Ports, ProfileName};
+use crate::tx_launch::{self, ProcessSession, TxFailure, TxOptions};
+use crate::{HarnessEndpoint, Pane, PaneError, PaneName, Ports, ProfileName};
 
 /// `orchestrator-pane`: the pane's role is `orchestrator` and the caller did not pass
 /// `--as-operator`. Refusal, exit 3.
@@ -70,6 +83,11 @@ pub const SESSION_BUSY: RefusalCode = RefusalCode::from_static("session-busy");
 /// `session-holds-question`: a reset's pane has a session of record waiting for an answer
 /// to a question it asked. Refusal, exit 3.
 pub const SESSION_HOLDS_QUESTION: RefusalCode = RefusalCode::from_static("session-holds-question");
+/// `session-holds-permission`: the pane's session of record waits for a person to answer a
+/// permission prompt (#831, `Activity::WaitingPermission`), so a reset, or a single process's
+/// switch, which relaunches it, would drop it. Refusal, exit 3.
+pub const SESSION_HOLDS_PERMISSION: RefusalCode =
+    RefusalCode::from_static("session-holds-permission");
 /// The longest session id [`parse_session_id`] accepts. It is the length `findings::quoted`
 /// cuts at. `quoted` counts characters and [`parse_session_id`] counts bytes, which agree
 /// because an accepted id is ASCII, so a typed id is never cut short in a message.
@@ -179,14 +197,35 @@ impl SwitchFailure {
     }
 }
 
-/// Run one switch or reset over `ports` (see the module docs). `Ok` once the TUI was seen
-/// showing the target and the record names it.
+/// Run one switch or reset over `ports` (see the module docs). `Ok` once the target was seen
+/// shown (by the TUI, or held by the relaunched process) and the record names it.
 pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, SwitchFailure> {
     let record = plan(ports, request)?;
+    let pane = match record.harness.kind.shape() {
+        Shape::ServerAndTui => switch_in_place(ports, request, &record)?,
+        Shape::SingleProcess => relaunched(ports, request, &record)?,
+    };
+    if let Some(text) = &request.first {
+        prompt(ports, &pane, text)?;
+    }
+    Ok(Switched {
+        pane,
+        previous: record.session_of_record,
+    })
+}
+
+/// Steps 2 to 4 for a server and its TUI: a reset's `create_session`, `select_session`, the
+/// observation and the record. Returns the record as stored.
+fn switch_in_place(
+    ports: Ports<'_>,
+    request: &SwitchRequest,
+    record: &Pane,
+) -> Result<Pane, SwitchFailure> {
+    let at = record.harness.endpoint(&record.name)?;
     let (target, created) = match &request.target {
         Target::Existing(id) => (id.clone(), None),
         Target::Fresh => {
-            let id = ports.harness.create_session(record.harness.port)?;
+            let id = ports.harness.create_session(&at)?;
             (id.clone(), Some(id))
         }
     };
@@ -204,29 +243,57 @@ pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, Swi
         .harness
         .select_session(&record.herdr.pane_id, &target)
         .map_err(acted)?;
-    observe(ports, &record, &target).map_err(acted)?;
-    let next = recorded(&record, &target, request.now_ms);
-    let pane = ports
+    observe(ports, record, &at, &target).map_err(acted)?;
+    let next = recorded(record, &target, request.now_ms);
+    ports
         .pane_store
         .cas_put(&next, record.generation)
-        .map_err(acted)?;
-    // The prompt goes only to the session just recorded (I2), so a failure here leaves the
-    // TUI and the record in agreement: no reconcile step, nothing unrecorded.
-    if let Some(text) = &request.first {
-        ports
-            .harness
-            .send_prompt(record.harness.port, &target, text)
-            .map_err(|error| SwitchFailure {
-                error,
-                acted: false,
-                created: None,
-                unprompted: Some(target.clone()),
-            })?;
-    }
-    Ok(Switched {
-        pane,
-        previous: record.session_of_record,
-    })
+        .map_err(acted)
+}
+
+/// Steps 2 to 4 for a single process (#831): a relaunch of the pane as recorded, on the target
+/// (switch, which must have a conversation) or on a fresh session (reset), through
+/// `tx_launch::relaunch_recorded`, the one stop, run, wait, locate and record sequence. Returns
+/// the record the relaunch stored.
+fn relaunched(
+    ports: Ports<'_>,
+    request: &SwitchRequest,
+    record: &Pane,
+) -> Result<Pane, SwitchFailure> {
+    let session = match &request.target {
+        Target::Existing(id) => ProcessSession::Resume(id.clone()),
+        Target::Fresh => ProcessSession::Fresh,
+    };
+    let launched = tx_launch::relaunch_recorded(ports, record, &session, &TxOptions::default())
+        .map_err(|TxFailure { error, acted }| SwitchFailure {
+            error,
+            acted,
+            created: None,
+            unprompted: None,
+        })?;
+    let stored = launched.pane.ok_or_else(|| PaneError::Unavailable {
+        what: format!("the relaunch of {} stored no record", record.name),
+    })?;
+    Ok(stored)
+}
+
+/// Step 5: queue `text` to the session of record of `pane`, the record the run stored, at its
+/// endpoint: the process a relaunch started, never the stopped one (plan review W4). The prompt
+/// goes only to the session just recorded (I2), so a failure here leaves the TUI and the record
+/// in agreement: no reconcile step, nothing unrecorded.
+fn prompt(ports: Ports<'_>, pane: &Pane, text: &str) -> Result<(), SwitchFailure> {
+    let target = pane.session_of_record.clone().unwrap_or_default();
+    let unprompted = |error| SwitchFailure {
+        error,
+        acted: false,
+        created: None,
+        unprompted: Some(target.clone()),
+    };
+    let at = pane.harness.endpoint(&pane.name).map_err(unprompted)?;
+    ports
+        .harness
+        .send_prompt(&at, &target, text)
+        .map_err(unprompted)
 }
 
 /// The plan: every refusal, before any write or live change. Returns the record the run
@@ -238,13 +305,19 @@ fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Pane, PaneError> {
     };
     let record = read(ports, request)?;
     refuse_orchestrator(&record, request.as_operator)?;
-    check_health(ports, &record)?;
+    let at = record.harness.endpoint(&record.name)?;
+    check_health(ports, &record, &at)?;
+    let single = record.harness.kind.shape() == Shape::SingleProcess;
     match &existing {
-        Some(target) => {
-            check_listed(ports, &record, target)?;
+        Some(target) if single => {
+            check_idle(ports, &record, &at)?;
             check_unclaimed(ports, &record.name, target)?;
         }
-        None => check_idle(ports, &record)?,
+        Some(target) => {
+            check_listed(ports, &at, target)?;
+            check_unclaimed(ports, &record.name, target)?;
+        }
+        None => check_idle(ports, &record, &at)?,
     }
     Ok(record)
 }
@@ -282,13 +355,12 @@ fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError
     Ok(())
 }
 
-/// The pane's harness server answers its health check now (I6). One that does not is
-/// refused with the remedy doctor gives a down server, taken from the one remedy table,
-/// which has one for every named pane; were it ever `None`, the pane doctor command line
-/// stands in. A check that fails is passed on as it is.
-fn check_health(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
-    let port = record.harness.port;
-    if ports.harness.health(port)? {
+/// The pane's harness answers its health check now (I6), at the record's endpoint. One that
+/// does not is refused with the remedy doctor gives a down server, taken from the one remedy
+/// table, which has one for every named pane; were it ever `None`, the pane doctor command
+/// line stands in. A check that fails is passed on as it is.
+fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+    if ports.harness.health(at)? {
         return Ok(());
     }
     let pane = Some(&record.name);
@@ -296,29 +368,40 @@ fn check_health(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
         Some(remedy) => remedy,
         None => doctor_command(pane, false),
     };
+    let state = match at {
+        HarnessEndpoint::Port(port) => {
+            format!(
+                "the harness server of {} on port {port} does not answer",
+                record.name
+            )
+        }
+        HarnessEndpoint::Process { pid, .. } => {
+            format!("the harness process {pid} of {} does not run", record.name)
+        }
+    };
     Err(PaneError::Refused {
         code: SERVER_UNHEALTHY,
-        message: format!(
-            "the harness server of {} on port {port} does not answer; run {remedy}",
-            record.name
-        ),
+        message: format!("{state}; run {remedy}"),
     })
 }
 
-/// A reset does not drop a conversation that is mid-turn or waiting on an answer: the
-/// pane's session of record must be idle. A pane with no session of record has no
-/// conversation to drop, and is not asked. A query that fails is passed on as it is.
-fn check_idle(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
+/// A reset, and a single process's switch (a relaunch), does not drop a conversation that is
+/// mid-turn or waiting on an answer: the pane's session of record must be idle. A pane with no
+/// session of record has no conversation to drop, and is not asked. A query that fails is
+/// passed on as it is.
+fn check_idle(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
     let Some(session) = &record.session_of_record else {
         return Ok(());
     };
-    let activity = ports
-        .harness
-        .session_activity(record.harness.port, session)?;
+    let activity = ports.harness.session_activity(at, session)?;
     let (code, doing) = match activity {
         Activity::Idle => return Ok(()),
-        Activity::Busy => (SESSION_BUSY, "is running a turn; reset it once it ends"),
+        Activity::Busy => (SESSION_BUSY, "is running a turn; try again once it ends"),
         Activity::HoldingQuestion => (SESSION_HOLDS_QUESTION, "holds a question; answer it first"),
+        Activity::WaitingPermission => (
+            SESSION_HOLDS_PERMISSION,
+            "waits on a permission prompt; answer it in the pane first",
+        ),
     };
     Err(PaneError::Refused {
         code,
@@ -328,8 +411,8 @@ fn check_idle(ports: Ports<'_>, record: &Pane) -> Result<(), PaneError> {
 
 /// A switch's target is listed by the pane's own server, so a deleted session, or one the
 /// server leaves out (a child session), is refused before anything moves.
-fn check_listed(ports: Ports<'_>, record: &Pane, target: &str) -> Result<(), PaneError> {
-    let sessions = ports.harness.list_sessions(record.harness.port)?;
+fn check_listed(ports: Ports<'_>, at: &HarnessEndpoint, target: &str) -> Result<(), PaneError> {
+    let sessions = ports.harness.list_sessions(at)?;
     if sessions.iter().any(|id| id == target) {
         return Ok(());
     }
@@ -361,8 +444,13 @@ fn check_unclaimed(ports: Ports<'_>, pane: &PaneName, target: &str) -> Result<()
 
 /// The observation, once `target` has been selected: what the pane's TUI shows. Anything
 /// but `target`, its home screen included, is `unavailable` (I3).
-fn observe(ports: Ports<'_>, record: &Pane, target: &str) -> Result<(), PaneError> {
-    let shown = ports.harness.shown_session(&record.herdr.pane_id)?;
+fn observe(
+    ports: Ports<'_>,
+    record: &Pane,
+    at: &HarnessEndpoint,
+    target: &str,
+) -> Result<(), PaneError> {
+    let shown = ports.harness.shown_session(&record.herdr.pane_id, at)?;
     if !shown_differs(Some(target), shown.as_deref()) {
         return Ok(());
     }

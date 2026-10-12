@@ -782,3 +782,65 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     journal; ADR-0021 `:950-989`, `:1082-1111`, `:1168-1175`; the guide `:697-708`, `:809-821`; `pane.rs:140-159`;
     `ports.rs:1-31`, `:293-349`; `pane/import.rs:55-120`; `CHANGELOG.md:76-91`; `scripts/pane-restart:74-88`.
   - Sizes: the guide 821 (unchanged), ADR-0021 1180, `pane.rs` 304, `ports.rs` 497.
+
+## F, implement S's cycle-3 REWORK (cycle 5): merge `origin/main` after #857: 2026-10-12T05:04-06:00 (MDT)
+
+- **Decided:** S's work list (`handoff-S.md` cycle 3, items 1a to 1e and 2a to 2i), as brief round 5 says
+  (`docs/handoffs/835/handoff-F.md`, which replaces cycle 4's at `f1d1bd0`). `archChanged: false`.
+  - **Merged `origin/main` `b76f4d2`** with `--no-commit --no-ff`. The 10 conflicts S listed are resolved per S's table and
+    staged by path. `unmanaged.rs`, `wired.rs`, `ports_test.rs` and `claude_code_rule_test.rs` now equal `main`'s.
+    `docs_pane_control_test.rs` keeps both sides' functions.
+  - **The silent defects:**
+    - 1a: one `CLAUDE_CODE_COMMAND` and one `is_claude_code_command`, at `main`'s place, with `main`'s use sentence and the
+      branch's three-limit paragraph;
+    - 1b: the branch's ADR decisions 22 and 23 are now 30 and 31, after `main`'s 29;
+    - 1c: one "Deferred" adoption entry, the branch's, rewritten.
+  - **Item 2:** every sentence of this story that tied the switch or the adoption to the Claude Code harness now names
+    #831's adoption step (ADR-0021 section 15, item 17; decision 23), and none names a route. This covers S's places, plus
+    three more with the same claim that S's line list and grep miss (`pane/import.rs`'s module doc and
+    `CLAUDE_CODE_STORY`'s doc, `ImportFinding::HarnessClaudeCode`'s doc, ADR section 13's "The rule").
+  - **The other item-2 edits:**
+    - the guide's section 1, 10 and 12 resolutions follow S's 2c to 2e;
+    - the CHANGELOG no longer calls `foreground_commands` new;
+    - the limits statements are untouched.
+- **Assumed:**
+  - The script's phase commit concludes the in-progress merge as a two-parent commit, as it did for `526bbd3` and
+    `e6d5fa0`.
+  - `origin/main` stays `b76f4d2` until then (fetched at 04:43 MDT).
+  - T-green reviews the four merged test files, as the brief says.
+- **Hedged:**
+  - **`unmanaged.rs` drops the branch's optional sentence.** S allowed it if it agrees with `main`'s section 14. It does,
+    but `main`'s own paragraph says the same two lines below. The branch's hunk also says "and so does #831", which is
+    false on the merged tree: the only callers are `unregistered` and `reconcile.rs:446`.
+  - **The guide's section 1 says "will be a re-run"** where `main` said "is". With "which waits for #835 and is not built"
+    dropped, the present tense would describe an adoption that section 12 lists as not available.
+  - **Two of `main`'s sentences go stale when this PR merges, and are left alone** because they are not on S's list and
+    are #831's records: ADR-0021 section 15 item 17's "until this harness exists", and the #831 CHANGELOG entry's "waits
+    for #835". They are handoff-F Known issue 1, for S or #831's adoption step.
+  - **The three places beyond S's line list** are the brief's rule ("Prose that says the adoption waits for the Claude
+    Code harness must say it waits for #831's adoption step"), applied to this story's own sentences. They are not new
+    scope.
+- **Evidence:**
+  - Commands on the merged tree (the staged index):
+    - `cargo build --workspace --all-targets`: exit 0;
+    - `lint.sh`: exit 0; `changelog-check`: ok; clippy `-D warnings`: exit 0;
+    - CI's workspace step: exit 0, 167 groups, 2600 passed, 0 failed, 36 ignored. This includes
+      `docs_pane_control_test` (19), `docs_cli_test` (3), `pane_verbs` (347) and the `holler-pane` doctests (7, both
+      `compile_fail,E0046`);
+    - rustdoc `-D warnings -p holler-pane`: exit 0; `cargo machete`: clean;
+    - `git diff --check` and `git diff --check origin/main`: clean;
+    - `git merge-tree --write-tree` of a throwaway two-parent object of the staged tree against `origin/main`: exit 0.
+  - Git:
+    - `git diff origin/main` of every resolved file: only this story's content is left;
+    - `git diff --stat origin/main`: 21 files outside the handoffs;
+    - `git grep` for decisions cited by number (none of 22 or 23 is cited);
+    - S's `lands`/`831` grep: every hit names the adoption step, except `main`'s own ADR:1145, which is accurate.
+  - Read:
+    - the brief;
+    - `handoff-S.md` (cycle 3);
+    - handoff-F (cycle 4);
+    - this journal;
+    - `main`'s ADR-0021 sections 2, 9, 13, 14 and 15 (items 2 and 17), "Deferred" and decisions 21 to 29;
+    - `docs_pane_control_test.rs`;
+    - `.github/workflows/ci.yml`.
+  - `evidence.md`, section "F, cycle 5": four quotes of `main`'s text, each checked line by line against its source.

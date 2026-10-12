@@ -69,8 +69,8 @@ pub enum ImportFinding {
     HarnessNotOpencode,
     /// Its tmux session runs Claude Code (#835): the pane is left alone, with no record and no
     /// other finding, and blocks nothing. Its level is `info`, not `skipped` as
-    /// `harness-not-opencode`'s is: a switch adopts these panes once Claude Code can be driven
-    /// (#831), while nothing adopts a pane that is not OpenCode.
+    /// `harness-not-opencode`'s is: a switch adopts these panes once #831's adoption step lands,
+    /// while nothing adopts a pane that is not OpenCode.
     HarnessClaudeCode,
     /// What the pane's tmux session runs could not be read (#835): a read failed, or the
     /// pane's check did not finish. The pane is never recorded as OpenCode on a guess.

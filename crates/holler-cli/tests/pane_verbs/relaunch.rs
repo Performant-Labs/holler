@@ -7,7 +7,7 @@ use holler_cli::output::Format;
 use holler_pane::pane::PaneRole;
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::tx_launch::{self, LaunchRequest, RelaunchRequest, TxFailure, TxOptions};
-use holler_pane::{GridPos, HarnessPort, Pane, PaneError, ProfileSpec};
+use holler_pane::{GridPos, HarnessEndpoint, HarnessPort, Pane, PaneError, ProfileSpec};
 use holler_pane_testkit::fixture::sample_profile;
 use holler_pane_testkit::harness::{HarnessOp, ServerState};
 use holler_pane_testkit::herdr::HerdrOp;
@@ -442,7 +442,10 @@ fn relaunch_keeps_the_session_of_record() {
         run.calls
     );
     assert_eq!(
-        rig.fakes.harness.list_sessions(PORT).unwrap(),
+        rig.fakes
+            .harness
+            .list_sessions(&HarnessEndpoint::Port(PORT))
+            .unwrap(),
         std::slice::from_ref(&sid)
     );
     assert_session_is(&rig, &sid);

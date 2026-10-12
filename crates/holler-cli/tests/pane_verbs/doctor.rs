@@ -4,8 +4,10 @@
 //! The engine is called directly (`holler_pane::reconcile::reconcile`, with a fixed clock)
 //! where a test pins what it found or wrote; the verb is run through the in-process harness
 //! where a test pins exit codes or output. The rig is `doctor/rig.rs`; scope, output and
-//! remedy cases are `doctor/surface.rs`; the read-only pass is `doctor/read_only.rs`.
+//! remedy cases are `doctor/surface.rs`; the read-only pass is `doctor/read_only.rs`;
+//! `profile-drift` (#665) is `doctor/drift.rs`.
 
+mod drift;
 mod read_only;
 pub(crate) mod rig;
 mod surface;

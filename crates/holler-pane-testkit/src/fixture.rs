@@ -62,7 +62,7 @@ pub fn sample_pane(name: &str) -> Result<Pane, PaneError> {
         },
         harness: HarnessInfo {
             kind: HarnessKind::Opencode,
-            port: SAMPLE_PORT,
+            port: Some(SAMPLE_PORT),
             pid: None,
             health: Health::Unknown,
         },

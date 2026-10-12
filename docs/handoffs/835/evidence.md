@@ -205,3 +205,55 @@ Line numbers are at `526bbd3` (the branch with `origin/main` `bda1069` merged in
   >             );
   >             Finding::new(FindingKind::UnregisteredHerdrPane, message).with_herdr_pane(herdr)
   > ```
+
+## F, cycle 5 (the merge of `origin/main` `b76f4d2`, #857), 2026-10-12
+
+Line numbers are at the merged worktree (`cea1c17` with `origin/main` `b76f4d2` merged in, staged and uncommitted). Each
+quoted line is `main`'s text, which this PR does not change; the prose of this cycle points to it.
+
+- **Fact:** #857 (part of #831) decided how the two stories' copies of the rule and the port method are reconciled: the
+  story that lands second keeps the other's API and code, and keeps the doc-comment words that name both stories' uses.
+  This is how `pane.rs` (one constant and one predicate, at `main`'s place) and `ports.rs` were resolved.
+  **Source:** `docs/adr/ADR-0021.md:1155-1158`
+  **Verbatim excerpt:**
+  >    `process-in-use`, and the constant sits after `impl HarnessKind`, which this story adds. So whichever of the two lands
+  >    second keeps the other's API and code, and resolves a conflict in those doc comments of `pane.rs` and `ports.rs`, keeping
+  >    the words that name both stories' uses. `HerdrPort::observe_pane`'s loss of its default, also on #835's branch, is #835's
+  >    and is not copied.
+
+- **Fact:** The adoption is #831's item 17: a re-run of the import with `--adopt-claude-code` that extends the existing
+  profile, replacing #835's one refusal. So the switch waits for #831's adoption step, not for the Claude Code harness,
+  which `main` already has, and no other route (such as `pane launch --profile fleet`) is open.
+  **Source:** `docs/adr/ADR-0021.md:1359-1368`
+  **Verbatim excerpt:**
+  > 17. **Adopting the fleet's existing Claude Code panes (operator decision, 2026-10-11, recorded on #831).** Decided: **a re-run of
+  >     the import (`holler pane import --from STATE_ROOT --herdr-session NAME`) with `--adopt-claude-code`** adds them, with no
+  >     new verb. #835 makes the flag a refused argument (`usage`, naming #831) until this harness exists, and this story replaces
+  >     that one place. After it:
+  >     - The import classifies a pane by item 2's signal: a pane whose session has a live foreground command named
+  >       `CLAUDE_CODE_COMMAND` (`is_claude_code_command`) is a Claude Code pane; any other answer is OpenCode, as #835 decided.
+  >     - **The write step extends an existing profile.** Where the profile the import names (default `fleet`) exists, the import
+  >       still creates no profile; with `--adopt-claude-code` it adds the adopted panes' specs to it by one compare-and-swap, and
+  >       records their panes. A pane that already has a record is reported `already-registered` (info, skipped) and is never
+  >       touched, so a re-run is safe and idempotent. Without the flag, an existing profile is `profile-exists` as today.
+
+- **Fact:** Decision 23 records that route, so the branch's two decisions follow `main`'s 22 to 29 as 30 and 31.
+  **Source:** `docs/adr/ADR-0021.md:1522-1525`
+  **Verbatim excerpt:**
+  > 23. **Existing Claude Code panes are adopted by a re-run of `pane import --adopt-claude-code` that extends the existing profile**
+  >     (operator, 2026-10-11, #831, section 15, item 17; the choice of mechanism was left to this story and made under the
+  >     operator's standing rules, so the operator may overturn it): the import records and acts on nothing live, and the report
+  >     ends with `holler pane relaunch NAME`.
+
+- **Fact:** `main`'s doc of the unmanaged rule already says the import tells a Claude Code pane by its foreground
+  command and not by this rule, so the `unmanaged.rs` conflict takes `main`'s text and the file equals `main`'s.
+  **Source:** `crates/holler-pane/src/unmanaged.rs:68-73`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// "No record names it" is the only way a pane is undriveable: Holler drives every
+  > /// `HarnessKind` a record can hold, OpenCode and, since #831, Claude Code. The other half of
+  > /// #832's wording, "or whose harness Holler cannot drive", has no case: a pane runs a harness
+  > /// Holler cannot drive only while no record names it (a Claude Code pane set up by hand, which
+  > /// `holler pane relaunch` puts under Holler once a record names it). The import tells such a
+  > /// pane by its foreground command (#835, `pane::is_claude_code_command`), not by this rule.
+  > ```

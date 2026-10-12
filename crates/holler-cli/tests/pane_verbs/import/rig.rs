@@ -307,7 +307,7 @@ impl ImportRig {
             },
             harness: HarnessInfo {
                 kind: HarnessKind::Opencode,
-                port: entry.port,
+                port: Some(entry.port),
                 pid: None,
                 health: Health::Healthy,
             },

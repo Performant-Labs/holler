@@ -251,3 +251,158 @@ fn roster_cli_prefix_filters_by_label() {
     media_body.stop(&media_body_state, Duration::from_secs(10));
     drop(hub);
 }
+
+// --- story #648: the pane columns over the real binary -------------------------------
+
+/// The six columns #648 appends after HOLD (acceptance 12's header).
+const PANE_COLUMNS: [&str; 6] = ["PANE", "POS", "PROFILE", "HEALTH", "SHOWN", "DRIVEN"];
+
+/// The six JSON keys #648 adds to every row.
+const PANE_KEYS: [&str; 6] = ["pane", "pos", "profile", "health", "shown", "driven"];
+
+/// Today's header through HOLD.
+const TODAY_HEADER: &str = "SESSION              HARNESS    MODE     STATE      CONN       HOSTNAME PENDING  LAST TURN            HOLD";
+
+/// The lines of `stderr` other than the log: the banner every run prints (W-12 of #648's A)
+/// and the JSON log lines (`HOLLER_LOG_FORMAT=json`) a `--server` dial writes.
+fn stderr_lines(stderr: &str) -> Vec<&str> {
+    stderr.lines().filter(|l| !l.contains("logging_started") && !l.starts_with('{')).collect()
+}
+
+/// The six trailing cells of a table line.
+fn last_six(line: &str) -> Vec<&str> {
+    let cells: Vec<&str> = line.split_whitespace().collect();
+    cells[cells.len().saturating_sub(6)..].to_vec()
+}
+
+/// Every row of a `--json` document has the six keys, all `null`, beside today's keys.
+fn assert_pane_keys_null(rows: &[Value]) {
+    assert!(!rows.is_empty());
+    for row in rows {
+        for key in ["name", "harness", "mode", "state", "conn_state", "client_id", "hostname", "last_seen"] {
+            assert!(row.get(key).is_some(), "today's `{key}` is kept: {row}");
+        }
+        for key in PANE_KEYS {
+            assert_eq!(row.get(key), Some(&Value::Null), "`{key}` is null: {row}");
+        }
+    }
+}
+
+/// The text table's checks for a roster whose rows join no pane: today's header then the
+/// six columns, `-` in each new cell, no summary line.
+fn assert_unjoined_table(stdout: &str) {
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(lines[0].starts_with(TODAY_HEADER), "line 1 is the header (no summary line):\n{stdout}");
+    assert_eq!(last_six(lines[0]), PANE_COLUMNS, "the new columns after HOLD:\n{stdout}");
+    assert!(lines.len() > 1, "at least one row:\n{stdout}");
+    for line in &lines[1..] {
+        assert_eq!(last_six(line), ["-"; 6], "a row with no pane: {line}");
+    }
+}
+
+/// Acceptance 12 (R2): the binary's roster reads the registry through the real wiring. Over a
+/// live hub whose pane registry is empty, every row has `-` columns and `null` keys, the
+/// envelope's `mismatches` is `[]`, and an unknown `--profile` is the hub registry's
+/// `profile-not-found`, exit 3, in text and `--format=json`.
+#[test]
+fn roster_reads_the_real_registry_of_the_local_hub() {
+    let state = StateDir::new();
+    let hub = Hub::start(&state);
+    let (token_id, secret) = mint_token(&state, "body-1");
+    join(&state, &state, &hub.ws_url(), &token_id, &secret);
+    let config = support::write_sessions_toml(&state, &[("alpha", &[])]);
+    let body = Body::start(&state, &config);
+    wait_for(STARTUP_WAIT, || {
+        let v = roster_json(&state);
+        (v.get("rows").and_then(|r| r.as_array()).map(Vec::len) == Some(1)).then_some(())
+    })
+    .expect("the roster shows alpha");
+
+    let (code, stdout, stderr) = run(&state, &["roster"]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_unjoined_table(&stdout);
+    assert!(!stderr_lines(&stderr).iter().any(|l| l.starts_with("note:")), "no note: {stderr}");
+
+    let (code, stdout, stderr) = run(&state, &["--json", "roster"]);
+    assert_eq!(code, 0, "{stderr}");
+    let v: Value = serde_json::from_str(&stdout).expect("--json parses");
+    assert_pane_keys_null(v["rows"].as_array().expect("rows"));
+
+    let (code, stdout, stderr) = run(&state, &["--format=json", "roster"]);
+    let envelope = holler_pane_testkit::envelope::check_envelope(&stdout, code)
+        .unwrap_or_else(|f| panic!("{f:?}: {stdout} {stderr}"));
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(envelope.data["mismatches"], serde_json::json!([]));
+    assert_pane_keys_null(envelope.data["rows"].as_array().expect("data.rows"));
+
+    let (code, stdout, stderr) = run(&state, &["roster", "--profile", "nosuch"]);
+    assert_eq!((code, stdout.as_str()), (3, ""), "{stderr}");
+    let lines = stderr_lines(&stderr);
+    assert_eq!(lines.len(), 1, "one line: {stderr}");
+    assert!(lines[0].starts_with("error: ") && lines[0].contains("nosuch"), "{stderr}");
+
+    let (code, stdout, stderr) = run(&state, &["--format=json", "roster", "--profile", "nosuch"]);
+    let envelope = holler_pane_testkit::envelope::check_envelope(&stdout, code)
+        .unwrap_or_else(|f| panic!("{f:?}: {stdout} {stderr}"));
+    assert_eq!(code, 3, "{stderr}");
+    assert_eq!(envelope.error.expect("an error").code, "profile-not-found");
+
+    body.stop(&state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// Acceptance 13 (a) (R3): `--profile` with `--server` cannot be answered, so it is a usage
+/// error before any dial: exit 2, the one line, nothing on stdout, in text and
+/// `--format=json`. No hub runs.
+#[test]
+fn roster_profile_with_server_is_a_usage_error() {
+    let state = StateDir::new();
+    for format in [&[][..], &["--format=json"]] {
+        let mut args = vec!["roster", "--profile", "demo", "--server", "ws://127.0.0.1:1"];
+        args.extend_from_slice(format);
+        let (code, stdout, stderr) = run(&state, &args);
+        assert_eq!((code, stdout.as_str()), (2, ""), "{args:?}: {stderr}");
+        assert_eq!(
+            stderr_lines(&stderr),
+            ["error: --profile cannot be combined with --server"],
+            "{args:?}"
+        );
+    }
+}
+
+/// Acceptance 13 (b) (R3): `roster --server URL` reads another hub's rows and never the local
+/// registry (the caller's state dir has no hub at all): exit 0, `-` columns, `null` keys,
+/// and stderr exactly the one note.
+#[test]
+fn roster_server_does_not_read_the_local_registry() {
+    let (_hub_state, body_state, hub, body, _token, ws_url) =
+        support::remote_admin_rig::two_dir_rig(&[("alpha", &[])]);
+    let note = "note: pane registry not read (--server names another hub)";
+
+    let (code, stdout, stderr) = run(&body_state, &["roster", "--server", &ws_url]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_unjoined_table(&stdout);
+    assert_eq!(stderr_lines(&stderr), [note], "{stderr}");
+
+    let (code, stdout, stderr) = run(&body_state, &["--json", "roster", "--server", &ws_url]);
+    assert_eq!(code, 0, "{stderr}");
+    let v: Value = serde_json::from_str(&stdout).expect("--json parses");
+    assert_pane_keys_null(v["rows"].as_array().expect("rows"));
+    assert_eq!(stderr_lines(&stderr), [note], "{stderr}");
+
+    body.stop(&body_state, Duration::from_secs(10));
+    drop(hub);
+}
+
+/// Acceptance 11, the usage class: a command line clap refuses under `roster` is clap's own
+/// text on stderr, nothing on stdout and exit 2, with or without `--format=json` (`roster`'s
+/// usage errors are not enveloped).
+#[test]
+fn roster_usage_errors_are_clap_text_in_every_format() {
+    let state = StateDir::new();
+    for args in [&["roster", "--format=xml"][..], &["--format=json", "roster", "--bogus"]] {
+        let (code, stdout, stderr) = run(&state, args);
+        assert_eq!((code, stdout.as_str()), (2, ""), "{args:?}: {stderr}");
+        assert!(stderr.starts_with("error: "), "{args:?}: clap's text: {stderr}");
+    }
+}

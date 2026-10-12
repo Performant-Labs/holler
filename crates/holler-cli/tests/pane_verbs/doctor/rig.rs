@@ -5,7 +5,9 @@
 //! (`ensure_session`), a harness server on its own port (`serve`, 48100 + index), a
 //! session on it (`create_session`) and a TUI showing that session (`attach_tui`), then
 //! stores a `sample_pane` naming all of them, with that session as its session of record.
-//! A freshly built rig is a healthy fleet: doctor reports nothing about it.
+//! Each profile a seed names is built from its members' records (`profile_from_panes`), so
+//! its specs match them (#665: no `profile-drift`). A freshly built rig is a healthy fleet:
+//! doctor reports nothing about it.
 //!
 //! The setup goes through the ports, so it is in the fakes' call logs: a test that asserts
 //! on the calls doctor made takes a [`Rig::mark`] first and reads [`Rig::calls_since`].
@@ -16,13 +18,14 @@ use std::sync::Arc;
 use holler_cli::output::Format;
 use holler_pane::findings::{Finding, FindingKind};
 use holler_pane::pane::PaneRole;
+use holler_pane::profile_snapshot::profile_from_panes;
 use holler_pane::reconcile::{reconcile, ReconcileRequest, Report};
 use holler_pane::{
-    Actor, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane, PaneId, PaneName,
-    PaneStore, Ports, ProfileName, ServeSpec,
+    Actor, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
+    PaneId, PaneName, PaneStore, Ports, ProfileName, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
-use holler_pane_testkit::fixture::{sample_pane, sample_profile};
+use holler_pane_testkit::fixture::sample_pane;
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp};
 use holler_pane_testkit::herdr::{FakeHerdr, HerdrOp};
 use holler_pane_testkit::host::{FakeHost, HostOp};
@@ -148,7 +151,7 @@ impl Rig {
         let actor = Actor::parse("doctor-test").expect("an actor");
         let panes = Arc::new(FakePaneStore::seeded(records).expect("seed the panes"));
         let profiles = Arc::new(
-            FakeProfileStore::seeded(profiles_of(seeds), &actor).expect("seed the profiles"),
+            FakeProfileStore::seeded(profiles_of(seeds, &live), &actor).expect("seed the profiles"),
         );
         let scope = FakeProfileScope::new(profiles.clone(), panes.clone(), actor);
         Self {
@@ -229,10 +232,14 @@ impl Rig {
         start_server(&self.harness, &bare, FOREIGN_PORT);
         let foreign = self
             .harness
-            .create_session(FOREIGN_PORT)
+            .create_session(&HarnessEndpoint::Port(FOREIGN_PORT))
             .expect("a session");
         self.harness
-            .attach_tui(&self.pane_id(name), FOREIGN_PORT, &foreign)
+            .attach_tui(
+                &self.pane_id(name),
+                &HarnessEndpoint::Port(FOREIGN_PORT),
+                &foreign,
+            )
             .expect("attach the TUI");
         foreign
     }
@@ -384,9 +391,11 @@ fn make_live(
         harness.set_data_dir(port, dir);
     }
     start_server(harness, &name, port);
-    let session = harness.create_session(port).expect("a session");
+    let session = harness
+        .create_session(&HarnessEndpoint::Port(port))
+        .expect("a session");
     harness
-        .attach_tui(&pane.pane_id, port, &session)
+        .attach_tui(&pane.pane_id, &HarnessEndpoint::Port(port), &session)
         .expect("attach the TUI");
     Live {
         name,
@@ -411,7 +420,7 @@ fn start_server(harness: &FakeHarness, name: &PaneName, port: u16) {
 fn record_of(seed: &Seed, live: &Live) -> Pane {
     let mut pane = sample_pane(seed.name).expect("a sample pane");
     pane.herdr = live.herdr.clone();
-    pane.harness.port = live.port;
+    pane.harness.port = Some(live.port);
     pane.session_of_record = Some(live.session.clone());
     pane.role = seed.role;
     pane.profile = seed
@@ -420,15 +429,21 @@ fn record_of(seed: &Seed, live: &Live) -> Pane {
     pane
 }
 
-fn profiles_of(seeds: &[Seed]) -> Vec<holler_pane::Profile> {
-    let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+/// One profile per name the seeds give, whose specs are its seeds' records, in seed order: a
+/// spec equal to its pane on every field `profile_diff` compares (D10 of #665).
+fn profiles_of(seeds: &[Seed], live: &BTreeMap<&'static str, Live>) -> Vec<holler_pane::Profile> {
+    let mut members: BTreeMap<&str, Vec<Pane>> = BTreeMap::new();
     for seed in seeds {
         if let Some(profile) = seed.profile {
-            members.entry(profile).or_default().push(seed.name);
+            let record = record_of(seed, &live[seed.name]);
+            members.entry(profile).or_default().push(record);
         }
     }
     members
         .iter()
-        .map(|(name, panes)| sample_profile(name, panes).expect("a sample profile"))
+        .map(|(name, records)| {
+            let name = ProfileName::parse(name).expect("a profile name");
+            profile_from_panes(&name, records)
+        })
         .collect()
 }

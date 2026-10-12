@@ -9,7 +9,9 @@
 //! and `start_server` is the scenario method that starts a server from such an argv, the
 //! way a host's `run` would. Setup here starts a server with [`serve`], which does both.
 
-use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 use holler_pane_testkit::fault::{Fault, PortOp};
 use holler_pane_testkit::harness::{
     FakeHarness, HarnessOp, Quirk, ServerState, ServerView, TuiView,
@@ -18,6 +20,12 @@ use holler_pane_testkit::harness::{
 const P0: u16 = 48100;
 const P1: u16 = 48101;
 const UNKNOWN: &str = "ses_zzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+/// The endpoint of the server on `port` (#831: the port's calls are keyed by an endpoint). The
+/// fake reads a TUI by its pane, so `shown_session` takes any server's endpoint.
+fn at(port: u16) -> HarnessEndpoint {
+    HarnessEndpoint::Port(port)
+}
 
 fn name(text: &str) -> PaneName {
     PaneName::parse(text).unwrap()
@@ -96,14 +104,14 @@ fn scene() -> (FakeHarness, u32, String, String) {
     let harness = FakeHarness::new();
     let pid = serve(&harness, "demo-c1r1", P0).unwrap();
     serve(&harness, "demo-c2r1", P1).unwrap();
-    let a = harness.create_session(P0).unwrap();
-    let b = harness.create_session(P0).unwrap();
-    harness.attach_tui(&pane0(), P0, &a).unwrap();
+    let a = harness.create_session(&at(P0)).unwrap();
+    let b = harness.create_session(&at(P0)).unwrap();
+    harness.attach_tui(&pane0(), &at(P0), &a).unwrap();
     (harness, pid, a, b)
 }
 
 fn shown(harness: &FakeHarness, pane: &PaneId) -> Option<String> {
-    harness.shown_session(pane).unwrap()
+    harness.shown_session(pane, &at(P0)).unwrap()
 }
 
 fn sorted(mut ids: Vec<String>) -> Vec<String> {
@@ -125,21 +133,21 @@ fn a_wedged_harness_times_out_every_method() {
         Err(timeout("harness.serve_command"))
     );
     assert_eq!(
-        harness.verify_serving(P0, &spec),
+        harness.verify_serving(&at(P0), &spec),
         Err(timeout("harness.verify_serving"))
     );
-    assert_eq!(harness.health(P0), Err(timeout("harness.health")));
+    assert_eq!(harness.health(&at(P0)), Err(timeout("harness.health")));
     assert_eq!(
-        harness.create_session(P0),
+        harness.create_session(&at(P0)),
         Err(timeout("harness.create_session"))
     );
     assert_eq!(
-        harness.list_sessions(P0),
+        harness.list_sessions(&at(P0)),
         Err(timeout("harness.list_sessions"))
     );
-    assert_eq!(harness.abort(P0, &a), Err(timeout("harness.abort")));
+    assert_eq!(harness.abort(&at(P0), &a), Err(timeout("harness.abort")));
     assert_eq!(
-        harness.attach_tui(&pane1(), P0, &a),
+        harness.attach_tui(&pane1(), &at(P0), &a),
         Err(timeout("harness.attach_tui"))
     );
     assert_eq!(
@@ -147,7 +155,7 @@ fn a_wedged_harness_times_out_every_method() {
         Err(timeout("harness.select_session"))
     );
     assert_eq!(
-        harness.shown_session(&pane0()),
+        harness.shown_session(&pane0(), &at(P0)),
         Err(timeout("harness.shown_session"))
     );
 
@@ -158,7 +166,7 @@ fn a_wedged_harness_times_out_every_method() {
         "the wedged attach_tui attached nothing"
     );
     assert_eq!(harness.aborts(), vec![], "the wedged abort aborted nothing");
-    assert_eq!(harness.list_sessions(P0).unwrap().len(), 2);
+    assert_eq!(harness.list_sessions(&at(P0)).unwrap().len(), 2);
     assert_eq!(shown(&harness, &pane0()), Some(a));
 }
 
@@ -184,16 +192,18 @@ fn harness_op_names_are_port_dot_method() {
 fn calls_are_recorded_in_order() {
     let harness = FakeHarness::new();
     serve(&harness, "demo-c1r1", P0).unwrap();
-    harness.health(P0).unwrap();
-    harness.verify_serving(P0, &ServeSpec::default()).unwrap();
-    let a = harness.create_session(P0).unwrap();
-    let b = harness.create_session(P0).unwrap();
-    harness.list_sessions(P0).unwrap();
-    harness.attach_tui(&pane0(), P0, &a).unwrap();
+    harness.health(&at(P0)).unwrap();
+    harness
+        .verify_serving(&at(P0), &ServeSpec::default())
+        .unwrap();
+    let a = harness.create_session(&at(P0)).unwrap();
+    let b = harness.create_session(&at(P0)).unwrap();
+    harness.list_sessions(&at(P0)).unwrap();
+    harness.attach_tui(&pane0(), &at(P0), &a).unwrap();
     harness.select_session(&pane0(), &b).unwrap();
-    harness.shown_session(&pane0()).unwrap();
-    harness.abort(P0, &b).unwrap();
-    harness.abort(P0, UNKNOWN).unwrap_err();
+    harness.shown_session(&pane0(), &at(P0)).unwrap();
+    harness.abort(&at(P0), &b).unwrap();
+    harness.abort(&at(P0), UNKNOWN).unwrap_err();
     let expected = vec![
         HarnessOp::ServeCommand,
         HarnessOp::Health,
@@ -233,9 +243,9 @@ fn session_ids_are_ses_prefixed_and_distinct() {
     serve(&harness, "demo-c1r1", P0).unwrap();
     serve(&harness, "demo-c2r1", P1).unwrap();
     let ids = vec![
-        harness.create_session(P0).unwrap(),
-        harness.create_session(P0).unwrap(),
-        harness.create_session(P1).unwrap(),
+        harness.create_session(&at(P0)).unwrap(),
+        harness.create_session(&at(P0)).unwrap(),
+        harness.create_session(&at(P1)).unwrap(),
         harness.seed_session(P0),
     ];
     for id in &ids {
@@ -258,7 +268,7 @@ fn a_frozen_server_answers_health_false_and_times_out_its_calls() {
         harness.server(P0),
         view("demo-c1r1", pid, ServerState::Frozen)
     );
-    assert_eq!(harness.health(P0), Ok(false));
+    assert_eq!(harness.health(&at(P0)), Ok(false));
     let again = command(&harness, "demo-c1r1", P0, &ServeSpec::default());
     assert!(
         matches!(
@@ -268,20 +278,20 @@ fn a_frozen_server_answers_health_false_and_times_out_its_calls() {
         "a frozen server holds its port"
     );
     assert_eq!(
-        harness.verify_serving(P0, &ServeSpec::default()),
+        harness.verify_serving(&at(P0), &ServeSpec::default()),
         Err(timeout("harness.verify_serving"))
     );
     assert_eq!(
-        harness.create_session(P0),
+        harness.create_session(&at(P0)),
         Err(timeout("harness.create_session"))
     );
     assert_eq!(
-        harness.list_sessions(P0),
+        harness.list_sessions(&at(P0)),
         Err(timeout("harness.list_sessions"))
     );
-    assert_eq!(harness.abort(P0, &a), Err(timeout("harness.abort")));
+    assert_eq!(harness.abort(&at(P0), &a), Err(timeout("harness.abort")));
     assert_eq!(
-        harness.attach_tui(&pane1(), P0, &a),
+        harness.attach_tui(&pane1(), &at(P0), &a),
         Err(timeout("harness.attach_tui"))
     );
     assert_eq!(
@@ -292,8 +302,8 @@ fn a_frozen_server_answers_health_false_and_times_out_its_calls() {
     // The TUI keeps its screen, and the adapter that reads it still answers.
     assert_eq!(shown(&harness, &pane0()), Some(a));
     // A server on another port is unaffected.
-    assert_eq!(harness.health(P1), Ok(true));
-    harness.create_session(P1).unwrap();
+    assert_eq!(harness.health(&at(P1)), Ok(true));
+    harness.create_session(&at(P1)).unwrap();
     assert_eq!(harness.aborts(), vec![], "a frozen server aborted nothing");
 }
 
@@ -312,13 +322,13 @@ fn thaw_brings_a_frozen_server_back() {
         Some(a.clone()),
         "the TUI still shows a"
     );
-    assert_eq!(harness.health(P0), Ok(true));
+    assert_eq!(harness.health(&at(P0)), Ok(true));
     assert_eq!(
-        sorted(harness.list_sessions(P0).unwrap()),
+        sorted(harness.list_sessions(&at(P0)).unwrap()),
         sorted(vec![a.clone(), b.clone()])
     );
-    harness.create_session(P0).unwrap();
-    harness.abort(P0, &a).unwrap();
+    harness.create_session(&at(P0)).unwrap();
+    harness.abort(&at(P0), &a).unwrap();
     harness.select_session(&pane0(), &b).unwrap();
     assert_eq!(shown(&harness, &pane0()), Some(b));
 }
@@ -334,14 +344,17 @@ fn a_killed_server_answers_health_false_and_is_unavailable() {
         harness.server(P0),
         view("demo-c1r1", pid, ServerState::Killed)
     );
-    assert_eq!(harness.health(P0), Ok(false));
-    assert_eq!(harness.create_session(P0), Err(unreachable(P0)));
-    assert_eq!(harness.list_sessions(P0), Err(unreachable(P0)));
-    assert_eq!(harness.abort(P0, &a), Err(unreachable(P0)));
-    assert_eq!(harness.attach_tui(&pane1(), P0, &a), Err(unreachable(P0)));
+    assert_eq!(harness.health(&at(P0)), Ok(false));
+    assert_eq!(harness.create_session(&at(P0)), Err(unreachable(P0)));
+    assert_eq!(harness.list_sessions(&at(P0)), Err(unreachable(P0)));
+    assert_eq!(harness.abort(&at(P0), &a), Err(unreachable(P0)));
+    assert_eq!(
+        harness.attach_tui(&pane1(), &at(P0), &a),
+        Err(unreachable(P0))
+    );
     assert_eq!(harness.select_session(&pane0(), &b), Err(unreachable(P0)));
     assert_eq!(
-        harness.verify_serving(P0, &ServeSpec::default()),
+        harness.verify_serving(&at(P0), &ServeSpec::default()),
         Err(unreachable(P0))
     );
     assert_eq!(
@@ -367,9 +380,9 @@ fn serving_a_killed_port_again_keeps_the_sessions() {
         harness.server(P0),
         view("demo-c1r1", new_pid, ServerState::Running)
     );
-    assert_eq!(harness.health(P0), Ok(true));
+    assert_eq!(harness.health(&at(P0)), Ok(true));
     assert_eq!(
-        sorted(harness.list_sessions(P0).unwrap()),
+        sorted(harness.list_sessions(&at(P0)).unwrap()),
         sorted(vec![a.clone(), b.clone()])
     );
     assert_eq!(shown(&harness, &pane0()), Some(a));
@@ -398,7 +411,7 @@ fn starting_a_server_on_a_running_port() {
         view("demo-c1r1", first, ServerState::Running)
     );
     assert_eq!(
-        harness.list_sessions(P0),
+        harness.list_sessions(&at(P0)),
         Ok(vec![]),
         "a started server creates no session"
     );
@@ -420,8 +433,8 @@ fn controls_of_an_unserved_port_are_unavailable() {
 #[test]
 fn a_session_deleted_under_a_tui_sends_it_home() {
     let (harness, _, a, b) = scene();
-    harness.attach_tui(&pane1(), P1, &a).unwrap();
-    harness.attach_tui(&pane2(), P0, &b).unwrap();
+    harness.attach_tui(&pane1(), &at(P1), &a).unwrap();
+    harness.attach_tui(&pane2(), &at(P0), &b).unwrap();
 
     harness.delete_session(&a).unwrap();
 
@@ -439,7 +452,7 @@ fn a_session_deleted_under_a_tui_sends_it_home() {
             shown: None
         })
     );
-    assert_eq!(harness.list_sessions(P0), Ok(vec![b.clone()]));
+    assert_eq!(harness.list_sessions(&at(P0)), Ok(vec![b.clone()]));
 
     harness.select_session(&pane0(), &b).unwrap();
     assert_eq!(
@@ -485,7 +498,7 @@ fn closing_the_tui_leaves_no_shown_session() {
     harness.close_tui(&pane0()).unwrap();
 
     assert_eq!(harness.tui(&pane0()), None);
-    assert_eq!(harness.shown_session(&pane0()), Ok(None));
+    assert_eq!(harness.shown_session(&pane0(), &at(P0)), Ok(None));
     assert_eq!(harness.select_session(&pane0(), &a), Err(no_tui(&pane0())));
     assert_eq!(harness.close_tui(&pane0()), Err(no_tui(&pane0())));
 }
@@ -493,10 +506,10 @@ fn closing_the_tui_leaves_no_shown_session() {
 #[test]
 fn attaching_again_replaces_the_tui_and_a_refused_attach_leaves_it() {
     let (harness, _, a, _) = scene();
-    let on_p1 = harness.create_session(P1).unwrap();
+    let on_p1 = harness.create_session(&at(P1)).unwrap();
 
     assert_eq!(
-        harness.attach_tui(&pane0(), P0, UNKNOWN),
+        harness.attach_tui(&pane0(), &at(P0), UNKNOWN),
         Err(not_found(UNKNOWN))
     );
     assert_eq!(
@@ -507,7 +520,7 @@ fn attaching_again_replaces_the_tui_and_a_refused_attach_leaves_it() {
         })
     );
 
-    harness.attach_tui(&pane0(), P1, &on_p1).unwrap();
+    harness.attach_tui(&pane0(), &at(P1), &on_p1).unwrap();
     assert_eq!(
         harness.tui(&pane0()),
         Some(TuiView {
@@ -541,13 +554,13 @@ fn select_without_a_tui_is_acked_with_the_quirk() {
 fn abort_of_an_unknown_id_is_acked_with_the_quirk() {
     let (harness, _, a, _) = scene();
     assert_eq!(
-        harness.abort(P0, UNKNOWN),
+        harness.abort(&at(P0), UNKNOWN),
         Err(not_found(UNKNOWN)),
         "off by default"
     );
     assert_eq!(harness.aborts(), vec![], "nothing logged");
 
-    harness.abort(P0, &a).unwrap();
+    harness.abort(&at(P0), &a).unwrap();
     assert_eq!(
         harness.aborts(),
         vec![(P0, a.clone())],
@@ -555,7 +568,7 @@ fn abort_of_an_unknown_id_is_acked_with_the_quirk() {
     );
 
     harness.set_quirk(Quirk::AbortUnknownAcked, true);
-    assert_eq!(harness.abort(P0, UNKNOWN), Ok(()));
+    assert_eq!(harness.abort(&at(P0), UNKNOWN), Ok(()));
     assert_eq!(harness.aborts(), vec![(P0, a), (P0, UNKNOWN.to_owned())]);
 }
 
@@ -567,25 +580,28 @@ fn separate_data_dirs_do_not_share_sessions() {
     let early = {
         serve(&harness, "demo-c1r1", P0).unwrap();
         serve(&harness, "demo-c2r1", P1).unwrap();
-        harness.create_session(P1).unwrap()
+        harness.create_session(&at(P1)).unwrap()
     };
     harness.set_data_dir(P1, "other");
     assert_eq!(
-        harness.list_sessions(P0),
+        harness.list_sessions(&at(P0)),
         Ok(vec![early]),
         "a session made before stays"
     );
-    assert_eq!(harness.list_sessions(P1), Ok(vec![]));
+    assert_eq!(harness.list_sessions(&at(P1)), Ok(vec![]));
 
-    let s = harness.create_session(P1).unwrap();
-    assert_eq!(harness.list_sessions(P1), Ok(vec![s.clone()]));
-    assert!(!harness.list_sessions(P0).unwrap().contains(&s));
-    assert_eq!(harness.abort(P0, &s), Err(not_found(&s)));
-    assert_eq!(harness.attach_tui(&pane0(), P0, &s), Err(not_found(&s)));
-    harness.attach_tui(&pane1(), P1, &s).unwrap();
+    let s = harness.create_session(&at(P1)).unwrap();
+    assert_eq!(harness.list_sessions(&at(P1)), Ok(vec![s.clone()]));
+    assert!(!harness.list_sessions(&at(P0)).unwrap().contains(&s));
+    assert_eq!(harness.abort(&at(P0), &s), Err(not_found(&s)));
+    assert_eq!(
+        harness.attach_tui(&pane0(), &at(P0), &s),
+        Err(not_found(&s))
+    );
+    harness.attach_tui(&pane1(), &at(P1), &s).unwrap();
 
-    let a = harness.create_session(P0).unwrap();
-    harness.attach_tui(&pane0(), P0, &a).unwrap();
+    let a = harness.create_session(&at(P0)).unwrap();
+    harness.attach_tui(&pane0(), &at(P0), &a).unwrap();
     assert_eq!(harness.select_session(&pane0(), &s), Err(not_found(&s)));
     assert_eq!(shown(&harness, &pane0()), Some(a));
 }
@@ -597,13 +613,13 @@ fn a_seeded_session_is_listed_and_bypasses_the_log() {
     serve(&harness, "demo-c1r1", P0).unwrap();
     serve(&harness, "demo-c2r1", P1).unwrap();
 
-    assert_eq!(harness.list_sessions(P0), Ok(vec![seeded.clone()]));
+    assert_eq!(harness.list_sessions(&at(P0)), Ok(vec![seeded.clone()]));
     assert_eq!(
-        harness.list_sessions(P1),
+        harness.list_sessions(&at(P1)),
         Ok(vec![seeded.clone()]),
         "one data dir"
     );
-    let own = harness.create_session(P0).unwrap();
+    let own = harness.create_session(&at(P0)).unwrap();
     assert_ne!(own, seeded);
     assert_eq!(
         harness.faults().calls(),
@@ -629,8 +645,8 @@ fn serve_command_starts_nothing_and_records_its_spec() {
     let built = command(&harness, "demo-c1r1", P0, &spec);
     assert!(!built.as_slice().is_empty(), "an argv with a program");
     assert_eq!(harness.server(P0), None, "no server was started");
-    assert_eq!(harness.health(P0), Ok(false));
-    assert_eq!(harness.list_sessions(P0), Err(unreachable(P0)));
+    assert_eq!(harness.health(&at(P0)), Ok(false));
+    assert_eq!(harness.list_sessions(&at(P0)), Err(unreachable(P0)));
 
     let refusal = PaneError::Unavailable {
         what: "injected".to_owned(),
@@ -735,22 +751,25 @@ fn verify_serving_answers_from_the_running_servers_agent() {
     harness.start_server(&started).unwrap().unwrap();
     serve(&harness, "demo-c2r1", P1).unwrap();
 
-    assert_eq!(harness.verify_serving(P0, &with), Ok(()));
+    assert_eq!(harness.verify_serving(&at(P0), &with), Ok(()));
     for asked in [ServeSpec::default(), other.clone()] {
-        let answer = harness.verify_serving(P0, &asked);
+        let answer = harness.verify_serving(&at(P0), &asked);
         assert!(
             matches!(answer, Err(PaneError::Refused { .. })),
             "{asked:?}: {answer:?}"
         );
     }
-    assert_eq!(harness.verify_serving(P1, &ServeSpec::default()), Ok(()));
-    let answer = harness.verify_serving(P1, &with);
+    assert_eq!(
+        harness.verify_serving(&at(P1), &ServeSpec::default()),
+        Ok(())
+    );
+    let answer = harness.verify_serving(&at(P1), &with);
     assert!(
         matches!(answer, Err(PaneError::Refused { .. })),
         "a server without the agent: {answer:?}"
     );
     assert_eq!(
-        harness.verify_serving(48102, &ServeSpec::default()),
+        harness.verify_serving(&at(48102), &ServeSpec::default()),
         Err(unreachable(48102)),
         "no server on the port"
     );

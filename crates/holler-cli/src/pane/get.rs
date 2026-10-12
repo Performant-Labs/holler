@@ -9,7 +9,7 @@
 //! verbs.
 
 use clap::Args;
-use holler_pane::pane::{HarnessInfo, HarnessKind, Health, HerdrPane, Hold, PaneRole};
+use holler_pane::pane::{HarnessInfo, Health, HerdrPane, Hold, PaneRole};
 use holler_pane::unmanaged::{self, duration_text, UnmanagedPane};
 use holler_pane::{
     EnvVarName, Pane, PaneError, PaneName, Ports, ProbeResult, Profile, ProfileName, ProfileSpec,
@@ -279,15 +279,14 @@ fn herdr_text(herdr: &HerdrPane) -> String {
     )
 }
 
-/// `<kind> port=<port> pid=<pid or ->`.
+/// `<kind> port=<port or -> pid=<pid or ->`: an OpenCode harness has a port, a Claude Code one
+/// (#831) a pid and no port.
 fn harness_text(harness: &HarnessInfo) -> String {
-    let kind = match harness.kind {
-        HarnessKind::Opencode => "opencode",
-    };
-    let pid = harness
-        .pid
-        .map_or_else(|| NO_VALUE.to_owned(), |pid| pid.to_string());
-    format!("{kind} port={} pid={pid}", harness.port)
+    let kind = harness.kind.as_str();
+    let or_none = |value: Option<String>| value.unwrap_or_else(|| NO_VALUE.to_owned());
+    let port = or_none(harness.port.map(|port| port.to_string()));
+    let pid = or_none(harness.pid.map(|pid| pid.to_string()));
+    format!("{kind} port={port} pid={pid}")
 }
 
 /// `healthy`, `unknown`, or `unhealthy <reason>`.

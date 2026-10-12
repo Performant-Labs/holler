@@ -8,7 +8,7 @@
 //! own argument, so there is no `args.rs` here; `--take-over` is `apply`'s own flag.
 //!
 //! The verb modules are named after the verb; their `Args` structs are `Profile<Verb>`.
-//! `rename`, `export` and `import` are proposed (#665) and wait for the operator to confirm them.
+//! `rename`, `export` and `import` are #665's.
 
 pub mod apply;
 pub mod create;

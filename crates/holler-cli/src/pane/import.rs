@@ -6,10 +6,10 @@
 //!
 //! In order:
 //!
-//! 1. **Arguments.** `--adopt-claude-code` is refused until the Claude Code harness (#831)
-//!    lands. `--herdr-session` is required, as on `launch`; STATE_ROOT must be a directory;
-//!    each `--orchestrator` must name a pane directory. Each is `usage` (exit 2), before any
-//!    file is read or any port is called.
+//! 1. **Arguments.** `--adopt-claude-code` is refused until #831's adoption step lands
+//!    (ADR-0021 section 15, item 17). `--herdr-session` is required, as on `launch`; STATE_ROOT
+//!    must be a directory; each `--orchestrator` must name a pane directory. Each is `usage`
+//!    (exit 2), before any file is read or any port is called.
 //! 2. **The files** (`sources`, `pane_env`, `launcher`): read here, so `holler-pane` knows no
 //!    file format (ADR-0021 section 5). The verb never writes them.
 //! 3. **The plan**: `holler_pane::import::plan`, which reads Herdr, the pane store, tmux and the
@@ -45,8 +45,9 @@ use sources::Listing;
 /// The launcher table's file in the state root, when `--launcher` does not name one.
 const LAUNCHER_FILE: &str = "launcher.toml";
 
-/// The story of the Claude Code harness: until it lands, `--adopt-claude-code` is refused, and
-/// it replaces that one refusal in [`Input::read`] (#835).
+/// The story of the Claude Code harness: until its adoption step lands (ADR-0021 section 15,
+/// item 17), `--adopt-claude-code` is refused, and that step replaces this one refusal in
+/// [`Input::read`] (#835).
 const CLAUDE_CODE_STORY: u32 = 831;
 
 /// What separates two fields of a pane's line in the text form.
@@ -76,7 +77,7 @@ const GAP: &str = "  ";
 /// it, or it is suspended) or was started under another name. Read the dry run first. A pane
 /// whose tmux session cannot be read gets the problem harness-unreadable and is never recorded
 /// on a guess. --adopt-claude-code would adopt the Claude Code panes too; it is refused (usage)
-/// until the Claude Code harness (#831) lands.
+/// until #831's adoption step lands.
 ///
 /// The run never starts, stops, types into or moves anything, and changes no file. With
 /// --dry-run it writes nothing and reports what a real run would write. A real run writes the
@@ -113,8 +114,8 @@ pub struct PaneImport {
     /// Report what a real run would write, and write nothing.
     #[arg(long)]
     pub dry_run: bool,
-    /// Also adopt the panes whose tmux session runs Claude Code. Refused (usage) until the
-    /// Claude Code harness (#831) lands.
+    /// Also adopt the panes whose tmux session runs Claude Code. Refused (usage) until #831's
+    /// adoption step lands.
     #[arg(long)]
     pub adopt_claude_code: bool,
 }
