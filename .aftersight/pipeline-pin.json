@@ -11,12 +11,12 @@
   },
   "claude": {
     "pipeline": "claude",
-    "requested": "claude-pipeline-v0.1.7",
-    "tag": "claude-pipeline-v0.1.7",
-    "version": "0.1.7",
-    "commit": "fee1b9745f3833b536a6775b33f44ae5517987d8",
+    "requested": "claude-pipeline-v0.1.8",
+    "tag": "claude-pipeline-v0.1.8",
+    "version": "0.1.8",
+    "commit": "f9d10b48dcd8fb4512046fef0182a194926c39df",
     "repository": "https://github.com/Performant-Labs/aftersight.git",
-    "resolvedAt": "2026-10-11T01:23:44Z",
+    "resolvedAt": "2026-10-12T18:21:05Z",
     "source": "online"
   }
 }
