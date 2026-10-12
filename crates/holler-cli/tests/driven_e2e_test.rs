@@ -7,7 +7,9 @@
 //! - Acceptance 3: `say --pane` reaches the pane's real session of record, and `interrupt --pane`
 //!   and `answer --pane` resolve the same id; a pane no body drives is `pane-not-driven`.
 //! - Acceptance 18: a typed bare id is not a SESSION; a turn that outlives its wait is not
-//!   `pane-not-driven`; `reset --first`'s `Send` is accepted and returns while the turn runs on.
+//!   `pane-not-driven`; `reset --first`'s `Send` is accepted and returns while the turn runs on;
+//!   P5: `pane-not-driven` comes first in all three verbs (no body, two bodies, an offline body),
+//!   an operator or default hold keeps exit 4, and a pane hold prints `PaneHeld`.
 //! - Acceptance 19: the `HubPort` conformance suite against the real client over this hub, and
 //!   the hub's gate refusing a body on a pane's recorded DRIVEN.
 //! - Acceptance 12, 13 and 21 against the real circuit: the hold key across a rebind, the closed
@@ -31,7 +33,7 @@ use fake_server::{message_updated_assistant, part_updated_text, session_idle, Fa
 use holler_cli::pane::wiring::hub::HubClient;
 use holler_cli::pane::wiring::store::HubPaneStore;
 use holler_pane::hub::{HubPort, PromptMode};
-use holler_pane::pane::{Health, LastObserved};
+use holler_pane::pane::{Health, Hold, LastObserved};
 use holler_pane::{Pane, PaneName, PaneStore};
 use holler_pane_testkit::conformance::hub::{run_hub_conformance, HubFixture};
 use holler_pane_testkit::fixture::{sample_pane, session_id};
@@ -352,6 +354,139 @@ async fn a_turn_that_outlives_its_wait_is_not_pane_not_driven() {
     );
     assert!(!stderr(&unconfirmed).contains("pane-not-driven"));
     rig.server.push_event(session_idle(&id));
+}
+
+/// The three `--pane` verbs on `pane`, each expected to stop exit 3 with `pane-not-driven`
+/// (`why` names the case in a failure).
+fn assert_not_driven_in_all_three_verbs(rig: &Rig, pane: &str, why: &str) {
+    for args in [
+        vec!["say", "--pane", pane, "hi"],
+        vec!["interrupt", "--pane", pane],
+        vec!["answer", "--pane", pane, "0"],
+    ] {
+        let out = rig.holler(&args);
+        assert_eq!(
+            out.status.code(),
+            Some(3),
+            "{why} {args:?}: {}",
+            stderr(&out)
+        );
+        assert!(
+            stderr(&out).contains("pane-not-driven"),
+            "{why} {args:?}: {}",
+            stderr(&out)
+        );
+    }
+}
+
+/// P5: `pane-not-driven` in all three verbs, checked first. Q's id no body advertises
+/// (`-32003`); P's id two live sessions advertise (`-32003` `ambiguous`: never the ambiguous
+/// exit 2); and once the body is gone, P's id is one an offline body advertised (`-32004`
+/// `offline`). Each is exit 3 `pane-not-driven` for `say`, `interrupt` and `answer --pane`, and
+/// nothing reaches the session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pane_not_driven_comes_first_in_all_three_verbs() {
+    let _guard = SERIAL.lock().await;
+    let id = session_id(18);
+    let mut rig = Rig::start(&[("oa", &id), ("ob", &id)], &[]).await;
+    rig.seed(&pane(P, &id, Some(&id)));
+    rig.seed(&pane(Q, &session_id(19), None));
+
+    assert_not_driven_in_all_three_verbs(&rig, Q, "no body advertises the id");
+    let ambiguous = rig.control(
+        "control/say",
+        json!({"session": id, "text": "x", "check_only": true}),
+    );
+    assert_eq!(
+        ambiguous.pointer("/error/data/reason"),
+        Some(&json!("ambiguous")),
+        "the hub sees two sessions on the id: {ambiguous}"
+    );
+    assert_not_driven_in_all_three_verbs(&rig, P, "two live sessions advertise the id");
+
+    rig.body
+        .take()
+        .unwrap()
+        .stop(&rig.state, Duration::from_secs(5));
+    let offline = wait_for(STARTUP_WAIT, || {
+        let reply = rig.control(
+            "control/say",
+            json!({"session": id, "text": "x", "check_only": true}),
+        );
+        (reply.pointer("/error/data/reason") == Some(&json!("offline"))).then_some(())
+    });
+    assert!(offline.is_some(), "the hub never marked the id offline");
+    assert_not_driven_in_all_three_verbs(&rig, P, "the body that advertised the id is offline");
+    assert_eq!(rig.prompts_to(&id), 0, "nothing reached the session");
+}
+
+/// P5: the routed verbs keep their holds. Under an operator hold (`holler hold`) and under a
+/// default hold (a hub started with `--join-held`) on the body that drives P, `say --pane P
+/// TEXT` and `interrupt --pane P TEXT` exit 4 with the held refusal of that kind, never
+/// `pane-not-driven` or the pane verbs' `session-held`, and nothing reaches the session.
+/// (`answer` has no held arm, E125.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs() {
+    let _guard = SERIAL.lock().await;
+    let cases: [(u32, &[&str], &str); 2] = [
+        (20, &[], "ask whoever holds it to release it"),
+        (21, &["--join-held", "kiwi/*"], "it joined held"),
+    ];
+    for (n, hub_args, tail) in cases {
+        let id = session_id(n);
+        let rig = Rig::start(&[("oc", &id)], hub_args).await;
+        if hub_args.is_empty() {
+            let held = rig.holler(&["hold", "kiwi/oc"]);
+            assert!(held.status.success(), "hold: {}", stderr(&held));
+        }
+        rig.seed(&pane(P, &id, Some(&id)));
+        for args in [["say", "--pane", P, "hi"], ["interrupt", "--pane", P, "hi"]] {
+            let out = rig.holler(&args);
+            let text = stderr(&out);
+            assert_eq!(out.status.code(), Some(4), "{hub_args:?} {args:?}: {text}");
+            assert!(
+                text.contains("session_held") && text.contains(tail),
+                "{hub_args:?} {args:?}: {text}"
+            );
+            assert!(
+                !text.contains("pane-not-driven") && !text.contains("session-held"),
+                "{hub_args:?} {args:?}: {text}"
+            );
+        }
+        assert_eq!(
+            rig.prompts_to(&id),
+            0,
+            "{hub_args:?}: nothing reached the session"
+        );
+    }
+}
+
+/// P5: a pane hold reaches a `--pane` verb as `PaneHeld`. P is healthy; Q is parked and its
+/// recorded DRIVEN is P's id, so the hub's gate refuses a prompt to that id for Q. `say --pane
+/// P --json TEXT` prints the `PaneHeld` object on stdout and exits 3 (not the held exit 4), and
+/// nothing reaches the session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pane_hold_on_the_id_prints_pane_held_for_say_pane() {
+    let _guard = SERIAL.lock().await;
+    let id = session_id(22);
+    let rig = Rig::start(&[("oc", &id)], &[]).await;
+    rig.seed(&pane(P, &id, Some(&id)));
+    let mut parked = pane(Q, &session_id(23), Some(&id));
+    parked.hold = Hold::Parked {
+        reason: "disk full".to_owned(),
+        release_when: "later".to_owned(),
+        since: 5,
+    };
+    rig.seed(&parked);
+    let out = rig.holler(&["--json", "say", "--pane", P, "hi"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    let doc: Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("{e}: {:?}", String::from_utf8_lossy(&out.stdout)));
+    assert_eq!(
+        doc,
+        json!({"error": "session_held", "session": id, "reason": "pane-parked", "hold_kind": "pane"})
+    );
+    assert_eq!(rig.prompts_to(&id), 0, "nothing reached the session");
 }
 
 /// (iii) `reset --first`'s `Send` through the real client: accepted and returned within the

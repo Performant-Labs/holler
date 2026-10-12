@@ -265,3 +265,38 @@ Added by F on 2026-10-12 (the S rework round). Every source below is unchanged s
   >     known.dedup();
   >     if known.iter().any(|k| k == name) {
   >         return Resolved::Key(name.to_owned());
+
+## What T's Acceptance 18 pins (T-green, S rework round 1) rely on
+
+Added by T in Phase 7 (S rework round 1), excerpts copied from source by T. All three are in code this story
+does not change.
+
+- **Fact:** a held `say` or `interrupt SESSION TEXT` exits 4, and its text names the hold's kind by its tail:
+  `default` says it joined held, `operator` says to ask whoever holds it.
+  `a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs` asserts both the exit and the tail per kind.
+  **Source:** `crates/holler-cli/src/hold_cmd.rs:19, 156, 163-167`
+  **Verbatim excerpt:**
+  > pub const HELD_EXIT_CODE: i32 = 4;
+  > ...
+  >     let mut msg = format!("session_held: {session} is held");
+  > ...
+  >     msg.push_str(if kind == "default" {
+  >         "; it joined held, so a one-time grant (release --once, then say --grant) or a release lifts it"
+  >     } else {
+  >         "; ask whoever holds it to release it"
+  >     });
+
+- **Fact:** when a body's connection is removed, the hub keeps that body's last presence in `offline`, so an
+  id the body advertised resolves to `NotConnected` (`-32004` `offline`) rather than unknown.
+  `pane_not_driven_comes_first_in_all_three_verbs` stops the body and waits for that answer before it runs
+  the verbs.
+  **Source:** `crates/holler-hub/src/live.rs:579-586`
+  **Verbatim excerpt:**
+  >     async fn snapshot_offline(&self, client_id: &str, removed: Option<LiveHandle>) {
+  >         if let Some(handle) = removed {
+  >             log_registry("remove", client_id, Some(&handle.hostname));
+  >             if let Some(sessions) = handle.presence.lock().await.clone() {
+  >                 self.offline.lock().await.insert(client_id.to_string(), (handle.hostname.clone(), sessions));
+  >             }
+  >         }
+  >     }

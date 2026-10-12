@@ -12,13 +12,14 @@
 //!
 //! Also here: `activity_refusal`, the one mapping of an `Activity` to its refusal that
 //! `check_idle` and the driver check share (Acceptance 8), and `switch_command`, the remedy
-//! builder reconcile uses for a body that is behind (D3).
+//! builder reconcile uses for a body that is behind (D3), and `session_held`, whose
+//! `holler release` is built only from an advertised name that parses as a routable name.
 
 mod common;
 
 use holler_pane::driven::{driver_of, elsewhere, Driver};
 use holler_pane::findings::switch_command;
-use holler_pane::hub::Advertised;
+use holler_pane::hub::{session_held, Advertised};
 use holler_pane::pane::{Health, Hold, LastObserved};
 use holler_pane::ports::Activity;
 use holler_pane::tx_switch::{
@@ -385,4 +386,38 @@ fn the_switch_remedy_is_built_only_for_a_valid_session_id() {
     for bad in ["", "ses x", "ses_1;rm -rf /", "ses_\n1", long.as_str()] {
         assert_eq!(switch_command(&pane, bad), None, "{bad:?}");
     }
+}
+
+/// D3's untrusted-text rule for `session-held`: the advertised name is quoted, and `holler
+/// release NAME` is built only from a name that parses as a routable name; any other name, or
+/// none, names the id (quoted) and spells no name.
+#[test]
+fn the_release_command_is_built_only_from_a_routable_name() {
+    let held = session_held(SOR1, Some("kiwi/oc"), "operator", Some("night"));
+    assert_eq!(held.code().to_string(), "session-held");
+    let text = held.to_string();
+    assert!(
+        text.contains("\"kiwi/oc\" is held (operator hold, reason \"night\")"),
+        "{text}"
+    );
+    assert!(
+        text.contains("run holler release kiwi/oc to lift it"),
+        "{text}"
+    );
+    for bad in [
+        "kiwi/oc; rm -rf ~",
+        "kiwi/a b",
+        "kiwi/oc\n\u{1b}[2J",
+        "kiwi/OC",
+    ] {
+        let text = session_held(SOR1, Some(bad), "default", None).to_string();
+        assert!(!text.contains(bad), "{bad:?}: {text}");
+        assert!(!text.contains("holler release kiwi"), "{bad:?}: {text}");
+        assert!(
+            text.contains(&format!("{SOR1:?} is held (default hold)")),
+            "{bad:?}: {text}"
+        );
+    }
+    let unnamed = session_held(SOR1, None, "operator", None).to_string();
+    assert!(!unnamed.contains("holler release kiwi"), "{unnamed}");
 }

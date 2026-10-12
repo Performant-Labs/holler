@@ -1,101 +1,102 @@
-# Handoff-T-green: Phase 7 - #839 DRIVEN follows each pane's session of record
+# Handoff-T-green: Phase 7 (S rework, round 1) - #839 DRIVEN follows each pane's session of record
 
-**Date:** 2026-10-12 (09:41 MDT)
-**Branch:** `issue-839-implementation` (worktree `.claude/worktrees/0839-driven`, head `d480424`; T's test repairs are in the working tree, uncommitted)
+**Date:** 2026-10-12 (10:45 MDT)
+**Branch:** `issue-839-implementation` (worktree `.claude/worktrees/0839-driven`, head `9eb55d4`; T's new tests are in the
+working tree, uncommitted)
 **Issue:** #839
-**Handoff-F reviewed:** `docs/handoffs/839/handoff-F.md`
+**Handoff-F reviewed:** `docs/handoffs/839/handoff-F.md` (S rework round 1)
 **Handoff-T-red:** `docs/handoffs/839/handoff-T-red.md`
+**Reworks:** `handoff-S.md` (REWORK 1 test-only, REWORK 2 production). The first round's T-green is in git:
+`git show 8d3e7fa:docs/handoffs/839/handoff-T-green.md`.
 
-**VERDICT: GREEN, no blocking issue.** F's six "tests that look wrong" (T-1 to T-6) were each checked against the source and the brief, and each was T's mistake. T repaired all six in the tests alone; no production file was edited. With the repairs the whole workspace passes: 2721 passed, 0 failed, 36 ignored.
+**VERDICT: GREEN, no blocking issue.**
+- **REWORK 2 (F, production) is verified.** The existing `session-held` pins pass, and a new unit test pins the rule.
+- **REWORK 1 (test-only, T's) is written.** Three new process-level tests in `driven_e2e_test.rs` pin every clause S
+  listed.
+- **Whole workspace:** 2725 passed, 0 failed, 36 ignored. That is round 1's 2721 plus the four new tests.
+- **Production code:** none was edited by T.
 
-## Test repairs (T-1 to T-6, test code only)
+## Tests added this round (test code only)
 
-| # | File | What was wrong | Repair |
+| Test | File | Pins | Tier, and why |
 |---|---|---|---|
-| T-1 | `crates/holler-hub/tests/driven_support/mod.rs` | `TestHub::body` never bound the token's label, so roster rows were `oc`, not `kiwi/oc`. The circuit binds it at authentication (`circuit.rs:306-307`). | `roster.set_token` and `roster.set_label` before `advertise`, as the circuit does. |
-| T-2 | `crates/holler-hub/tests/check_only_test.rs` | `error_shape` compared a hold's `data.since` across two hubs, each of which set its own hold. | `error_shape` drops `since` before comparing. |
-| T-3 | `crates/holler-cli/tests/hold_single_path_test.rs` | `sources()` scanned out-of-line test modules whole (no `#[cfg(test)]` line to cut at), so `panes/gate/tests.rs`'s expected values counted as a second definition. | `sources()` skips `tests.rs` and `*_tests.rs` files. The other scans in the file stay green. |
-| T-4 | `crates/holler-cli/tests/driven_e2e_test.rs` | `Rig::start` passed `hub_args` as the hub's whole serve-args list, so its hubs bound the default port (`127.0.0.1:41807`) and collided with any running hub. | `--listen 127.0.0.1:0` is prepended to `hub_args`. |
-| T-5 | `crates/holler-body/tests/rebind_test.rs` | `until_attached` returned when the row was visible, but a row is visible before its task runs and hidden during the first attach, so tests raced the first attach. | `until_attached(sm, server, since, session, id)` waits for the first attach's `GET /session/{id}` after `since`, then for the row. The restart test takes `since` before the second `start`. |
-| T-6 | `crates/holler-cli/tests/cli_invocation_test.rs` | `say_without_live_hub_exits_1` and `interrupt_without_live_hub_exits_1` typed `SESSION`, which is not a name. The brief (P3) makes the CLI refuse a non-name as `unknown session` before any hub, so the `no live holler hub reachable` pin no longer held. | The four `args` arrays type `session`, a valid name. A comment cites #839 P3. |
+| `pane_not_driven_comes_first_in_all_three_verbs` | `crates/holler-cli/tests/driven_e2e_test.rs` | S (c), Acceptance 18 P5. `say`, `interrupt` and `answer --pane` exit 3 `pane-not-driven` in three cases: Q's id no body advertises (`-32003`); P's id that two live sessions advertise (`-32003` `ambiguous`, never exit 2); and P's id after its body went offline (`-32004` `offline`). Nothing reaches the session. | Process. The order of the CLI's arms over the real hub's wire answers is the behaviour, and only a real hub produces the ambiguous and offline answers. One rig serves all three cases. |
+| `a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs` | same | S (a), Acceptance 18 P5 and Acceptance 7's last sentence. Under an operator hold (`holler hold kiwi/oc`) and a default hold (`--join-held kiwi/*`), `say --pane P TEXT` and `interrupt --pane P TEXT` each exit 4. The held text carries that kind's tail and contains neither `pane-not-driven` nor `session-held`. Nothing reaches the session. | Process. These are the real hold paths and the real CLI arms. |
+| `a_pane_hold_on_the_id_prints_pane_held_for_say_pane` | same | S (b). P is healthy. Q is parked and its recorded DRIVEN is P's id. `--json say --pane P TEXT` prints exactly `{"error":"session_held","session":<id>,"reason":"pane-parked","hold_kind":"pane"}` on stdout and exits 3. Nothing reaches the session. | Process. The refusal comes from the hub's pane gate, through another pane's record. |
+| `the_release_command_is_built_only_from_a_routable_name` | `crates/holler-pane/tests/driven_test.rs` | REWORK 2 (F's suggested pin). The code is `session-held`. A routable name is printed quoted, with `run holler release kiwi/oc`. Four names are not routable names: `kiwi/oc; rm -rf ~`, `kiwi/a b`, one with a newline and ESC, and `kiwi/OC`. For each, and for no name, the text contains neither the raw name nor `holler release kiwi`, and it names the id quoted. | Unit. `session_held` is a pure function, and both ports call it. |
+
+The e2e file is 705 lines (lint fails at 900). `driven_test.rs` is 423 lines.
 
 ## GREEN confirmation
 
 ```text
 $ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
-175 test binaries: 2721 passed; 0 failed; 36 ignored            (exit 0)
+175 test binaries: 2725 passed; 0 failed; 36 ignored            (exit 0)
+
+$ cargo test -p holler-cli --test driven_e2e_test     14 passed (16 s); repeated 3 more times: 14 passed each
+$ cargo test -p holler-pane --test driven_test        15 passed
 ```
 
-The repaired targets alone:
+**F's `session-held` pins, re-run:**
+- `pane_verbs`: 381 passed. Both `held` tests pass: `driven::first::reset_first_on_a_held_pane_is_session_held`
+  and `target_flags::every_other_held_error_falls_through_to_the_generic_arm`.
+- `fake_hub_test::a_hold_refuses_prompts_and_not_a_rebind` passes.
+- `driven_e2e_test::the_hold_key_survives_a_rebind_and_release_lets_the_first_message_through` passes.
 
-```text
-$ cargo test -p holler-hub --test check_only_test --test driven_resolve_test --test offline_reason_test
-4 passed; 11 passed; 3 passed
-$ cargo test -p holler-cli --test cli_invocation_test --test driven_e2e_test --test hold_single_path_test
-14 passed; 11 passed (13.2 s); 5 passed
-```
-
-**Repeats (flake check):**
-- `rebind_test` alone, 15 runs: 15 passed, 0 failed. Before the T-5 repair F saw it fail 11 times in 12.
-- `check_only_test`, `driven_resolve_test` and `offline_reason_test` together, 10 runs: 0 failures.
-- `driven_e2e_test`, 3 more runs: 0 failures.
-
-**Spot-checks: each removal of a behaviour fails its test** (a temporary edit of production code, then restored with `git checkout --`; `git status -- crates/*/src` is clean):
+**Spot-checks: each removal of a behaviour fails its test.** These tests were written after the code, so there is no
+RED. Instead, each mutation below was a temporary edit to production code, restored with `git checkout --`.
+Afterwards, `git status` shows only the two test files and the handoff docs.
 
 | Mutation | Fails |
 |---|---|
-| `tx_switch::switch_in_place` records first and rebinds after (order) | `pane_verbs` `driven::order::a_switch_re_points_the_body_between_the_observation_and_the_record`, `a_refused_rebind_is_a_failure_after_the_act_that_records_nothing`, `driven::evidence::a_body_another_pane_records_...` |
-| `gate::first_refusal` keys on the session of record only (recorded-DRIVEN key removed) | `gate_test` 2, hub lib 3 (`hold_tests` 2, `panes::gate::tests` 1), `fake_hub_test` 2 (including the conformance suite), `driven_e2e_test` 2 (including the real client's conformance) |
-| `driver_of` without the exclusion rule | `driven_test` 2 |
-| the body's rebind attach given a deadline 60 s later (late attach) | `rebind_test::a_silent_endpoint_is_refused_in_time_and_a_late_attach_is_never_swapped_in` |
-| `circuit::dispatch::send_prompt` without `pane_gate` | `hold_tests` 3 |
-| `talk::admit` without `pane_gate` | `check_only_test::say_and_the_check_refuse_the_same_cases_alike_before_anything_moves` |
-| `resolve_prompt_target` matching a spawn row by id | `driven_resolve_test::a_name_shaped_id_never_resolves_by_id_and_a_spawn_row_is_never_matched` |
-| the CLI's bare-id refusal in `route_target_by` removed | `driven_e2e_test::a_typed_bare_id_is_unknown_with_no_hub` |
+| `classify` no longer maps `-32004` `offline` to `NotDriven` | `pane_not_driven_comes_first_in_all_three_verbs` (the offline case) |
+| `classify` maps `-32003` `ambiguous` to `Other` | the same test: `say --pane` exits 2 |
+| `interrupt_cmd` without its `pane_not_driven` arm | the same test: `interrupt --pane Q` |
+| `classify` reads an operator or default hold as `NotDriven` | `a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs` |
+| `pane_hold_refusal` always `None` (no `PaneHeld` arm) | `a_pane_hold_on_the_id_prints_pane_held_for_say_pane` |
+| `session_held` spells the raw name, unquoted, in the command | `the_release_command_is_built_only_from_a_routable_name` |
 
 ## Tier 1 results
 
 | Check | Command | Expected | Actual | Result |
 |---|---|---|---|---|
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0, also after the repairs | PASS |
-| Lint | `bash scripts/lint.sh` | exit 0 | exit 0, with size warnings only, none at 900 | PASS |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 | exit 0 | PASS |
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 (size warnings only, none at 900) | PASS |
 | Changelog | `bash scripts/changelog-check.sh origin/main` | ok | `changelog-check: ok` | PASS |
-| Workspace tests | as above | 0 failed | 2721 passed, 0 failed | PASS |
-| Docs | `cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test` | pass | 3 passed; 20 passed | PASS |
-| Canary | `cargo test -p holler-cli --test wire_selftest` | pass | 3 passed | PASS |
+| Workspace tests | as above | 0 failed | 2725 passed, 0 failed | PASS |
+| Docs | `docs_cli_test`, `docs_pane_control_test` (in the workspace run) | pass | 3 passed; 20 passed | PASS |
+| Canary | `wire_selftest` (in the workspace run) | pass | 3 passed | PASS |
 | Unused deps | `cargo machete` | none | none | PASS |
-| Hooks | `bash scripts/test-hooks.sh` | all ok | all ok | PASS |
-| Goldens | `git diff --name-status <merge-base> HEAD -- crates/holler-proto/tests/golden` | three new files, none changed | `A` for `Rebind.json`, `RebindResult.json` and `error.not_connected_offline.json`, and no other file | PASS |
-| Server start | `driven_e2e_test` (a real hub and a real body, ephemeral port, throwaway state dir) | pass | 11 passed | PASS |
+| Hooks | `bash scripts/test-hooks.sh` | exit 0 | exit 0 | PASS |
+| Whitespace | `git diff --check` | clean | clean | PASS |
+| Format (new code) | `rustfmt --check --edition 2021` on the two test files | no diff in the new code | none in the new code (line 1 of `driven_e2e_test.rs` and the `#[path]` modules were already unformatted; CI does not run rustfmt) | PASS |
 
-**Cross-check of F's results:** they agree. F's 18 failures were 15 from T-1 to T-6, the five doc commands (fixed before F's commit), and the #665 inode flake. In T's full run all three groups pass: the T fixes are in, `docs_cli_test` is green, and `profile_rename_faults_test` passed in the full suite (F reports it as a flake that predates #839 and fails alone; T did not re-run it alone).
+**Cross-check of F's results:** they agree. F reported clippy and lint at exit 0, `changelog-check` ok, `pane_verbs`
+at 381 passed, `fake_hub_test` at 13 passed, `driven_e2e_test` at 11 passed (now 14 with T's three), and the
+workspace at 2721 (now 2725).
 
 ## Tier 2 results
 
 | Check | Method | Result |
 |---|---|---|
-| Coverage per acceptance item | The T-red table maps Acceptance 1 to 22 to tests; every target in it is green. The gaps T-red named are unchanged (`admin/query` with `session/rebind` is covered through the shared `hub_query_remote`). | PASS |
-| Test quality | Each repair keeps the test's behaviour and fixes only its setup or comparison. The spot-checks above show the key tests fail when the behaviour goes. No test was found redundant. | PASS |
-| Type safety | Clippy with `-D warnings` across all targets | PASS |
-| Error paths | `offline_reason_test` (offline marked, timeouts bare), the rebind refusals in `rebind_test` and `driven_resolve_test`, `reset --first` refusals in `pane_verbs` `driven::first` | PASS |
-| Data integrity | The record is written in one `cas_put` after the rebind (order mutation fails); a refused rebind records nothing; the body swaps only after a successful attach (deadline mutation fails) | PASS |
-| API contract | Three new goldens; the catalog count of 23; `codec_test` round trip | PASS |
-| Security | `control/rebind` fails closed on its params, the id, the token and the cached session (`driven_resolve_test`); the query allowlist is unchanged, and the source scan (`hold_single_path_test`) pins the one forward | PASS |
-| Concurrency | The one reply slot per connection (`driven_resolve_test`, `driven_e2e_test`), repeated without a failure | PASS |
-| Migrations | None in this story | N/A |
-| Playwright | No browser surface in this repo | N/A |
+| Coverage per acceptance item | Round 1's table, plus this round's tests for Acceptance 18 P5 and Acceptance 7's last sentence. S's PARTIAL on 18 is now covered clause by clause: (a) both hold kinds × `say` and `interrupt`; (b) `PaneHeld`; (c) unknown, ambiguous and offline × all three verbs. | PASS |
+| Test quality | Each test names a behaviour and asserts the exit, the code and "nothing reached the session". None asserts implementation. Each fails under the mutation that removes its behaviour, and none duplicates a pin: the old `say --pane Q` unknown pin stays as Acceptance 3's check. Readiness is a bounded `wait_for` on the hub's own answer, with no fixed sleep. | PASS |
+| Secrets in asserted output | The tests assert on refusal text that carries ids and names only, with no token or secret. | PASS |
+| Message hygiene (REWORK 2) | The unit test covers a shell metacharacter, a space, ESC with a newline, and an uppercase name. | PASS |
+| Type safety | Clippy `-D warnings` | PASS |
+| API contract | No protocol change this round, and no golden changed | PASS |
+| Migrations, Playwright | none in this repo or story | N/A |
 
-**Evidence appendix:** T appended two entries to `docs/handoffs/839/evidence.md` for the source facts the repairs rely on: the circuit's label binding at authentication (T-1), and the attach's `GET /session/{id}` existence check (T-5).
+**Evidence appendix:** two entries are appended to `evidence.md` under "What T's Acceptance 18 pins rely on":
+- `hold_cmd.rs`: exit 4, and the tail for each hold kind;
+- `live.rs`: `snapshot_offline`, which keeps a removed body's presence as offline.
 
 ## Acceptance criteria status
 
-All 22 pass, each backed by the tests the T-red table names. The items whose tests were repaired in this phase:
-- 3 and 12 (`driven_e2e_test`): PASS;
-- 5, 9 (hub) and 21 (`driven_resolve_test`): PASS;
-- 9 (body, `rebind_test`): PASS;
-- 10 (`check_only_test`): PASS;
-- 13 and 14 (`hold_single_path_test`): PASS;
-- 18 (`driven_e2e_test::a_typed_bare_id_is_unknown_with_no_hub`, `cli_invocation_test`): PASS.
+All 22 pass.
+- **18:** now PASS. The pins come from round 1's tests and this round's three e2e tests.
+- **7:** PASS. Its last sentence is pinned by `a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs`.
+- **The rest:** unchanged from round 1, all green in this run.
 
 ## Blocking issues
 
@@ -103,10 +104,11 @@ None.
 
 ## Advisory notes
 
-1. **Acceptance 20(d) row (1) still needs O's ruling.** The code and the test follow D3's order, so a switch onto another pane's session of record is `session-of-other-pane` (T-red note 1).
-2. **A regression in the gate makes `driven_e2e_test` slow to fail.** With the recorded-DRIVEN key removed, the run took 613 s: the conformance cases that expect a refusal instead send a real turn and wait up to `SEND_TURN_BUDGET` (600 s). It does fail, but a CI run would sit for about ten minutes first. A follow-up could give the conformance's real-client `Send` a shorter budget.
-3. **`send_prompt` spends a grant before the pane gate refuses** (`circuit/dispatch.rs:112-114`: `holds.admit` and then `pane_gate`). This only happens when a pane goes bad between `talk::admit`'s fast path (which checks the pane gate and consumes nothing) and `send_prompt`. The brief orders the hold first. O may want to note it.
-4. **`profile_rename_faults_test`** (#665) is a flake that F reports fails alone; it is outside this story and still needs its own issue.
-5. **`crates/holler-hub/src/live/tests.rs`** is a pure move of `live.rs`'s inline tests, already in F's commit. The six repaired test files and `evidence.md` are uncommitted in the working tree.
+1. **S's advisory 1 still stands for O or the run's agent before merge.** The branch conflicts with `origin/main` in
+   ADR-0021 "Decisions taken", and #839's items renumber to 34 to 47.
+2. **F's trade-off is now pinned as intended.** `kiwi/OC` gets the fallback, not a command. If the operator wants
+   harmless off-grammar names to keep their command, that changes this test.
+3. **`docs/pane-control.md:290`** says `session-held` "names the `holler release SESSION`". The fallback cases, a
+   failed roster read and a crafted name, name none. This is F's known issue, and it is non-blocking.
 
 `T-green complete, no blocking issues. No UI surface — U is N/A, ready for S.`

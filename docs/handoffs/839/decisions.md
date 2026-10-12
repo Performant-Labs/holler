@@ -302,3 +302,27 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
       passed, 0 failed, 36 ignored, which is T-green's count. After a later doc-only edit, clippy, rustdoc with
       broken intra-doc links denied, and the held tests were green again.
   - **New facts** are in `evidence.md`, in its section for this round.
+
+## T (Phase 7, verify GREEN), S rework round 1: 2026-10-12, 10:45 MDT
+
+- **Decided:**
+  - **F's REWORK 2 fix is accepted.** `holler_pane::hub::session_held` quotes the advertised name and builds `holler
+    release NAME` only from a `RoutableName`; `HubClient::held` and `FakeHub::judge` both call it. The existing
+    `session-held` pins (`first.rs`, `fake_hub_test.rs`, `driven_e2e_test.rs`) pass unchanged.
+  - **S's REWORK 1 (test-only) is written by T now,** though the round carried no T-green note for it: F routed it
+    under "Tests that look wrong (for T)", and T owns all test authorship. Three tests in `driven_e2e_test.rs`, on a
+    real hub and body: `pane_not_driven_comes_first_in_all_three_verbs`,
+    `a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs`, `a_pane_hold_on_the_id_prints_pane_held_for_say_pane`.
+  - **F's suggested REWORK 2 pin is taken, at the unit tier:** `driven_test.rs::the_release_command_is_built_only_from_a_routable_name`
+    calls `session_held` directly (the cheapest tier; both ports call the one builder).
+  - **One rig per case group,** not one per clause: the no-body, two-body and offline cases share one rig (the
+    offline case stops that rig's body), which keeps the file at 705 lines.
+  - **`answer --pane` is pinned for all three `pane-not-driven` cases,** beyond S's minimum for the ambiguous and
+    offline cases, since the hub maps both for `answer` too and the helper costs nothing more.
+- **Assumed:** a graceful `body detach` removes the circuit, so the hub's `offline` snapshot is taken; the test waits
+  on the hub's own `-32004 offline` answer (a `check_only` probe) rather than on time.
+- **Hedged:** these tests were written after the code, so there is no RED. Each was instead shown to fail under a
+  mutation that removes its behaviour (six mutations, all restored; `git status -- crates/*/src` clean).
+- **Evidence:** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`:
+  175 binaries, 2725 passed, 0 failed, 36 ignored. `driven_e2e_test` 4 runs, 14 passed each. Clippy `-D warnings`,
+  `lint.sh`, `changelog-check.sh`, `cargo machete`, `test-hooks.sh`, `git diff --check`: all clean.
