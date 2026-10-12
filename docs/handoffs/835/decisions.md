@@ -617,3 +617,20 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     none in this diff. There are 0 diagnostics in `pane/import.rs`, and CI has no doc step.
   - Read: `handoff-S.md`, the brief, handoff-F cycle 2, ADR-0021 section 13, `ports.rs`, `pane.rs`,
     `tmux.rs:35` (`FOREGROUND_FORMAT`), `docs_pane_control_test.rs`, and `git diff HEAD...origin/main`.
+
+## T-green, cycle 3 (2026-10-11, 20:42 MDT)
+
+- **Decided:** PASS. S's REWORK 1 is met: every place says "foreground process" and names a `claude` outside the
+  foreground among the limits. The suite is GREEN on the merged tree (`e6d5fa0`, with `origin/main` `d6ae539` as an
+  ancestor).
+- **Assumed:** a text-only cycle needs no new test and no repeat of the mutation spot check. No production code changed
+  (`git show --remerge-diff e6d5fa0`: 5 files, prose and doc comments only).
+- **Hedged:** ADR-0021:952 still says "the command names of the pane's tmux session". It is left as it is, because its
+  next sentence defines them as the foreground process of each pane.
+- **Evidence:**
+  - CI's workspace step: exit 0, 155 groups, 2406 passed, 0 failed, 32 ignored.
+  - `docs_pane_control_test` 17 passed, `docs_cli_test` 3 passed, `wire_selftest` 3 passed.
+  - clippy `-D warnings` exit 0; `lint.sh` exit 0; `changelog-check` ok; `cargo machete` clean.
+  - rustdoc `-D warnings -p holler-pane` exit 0; `git diff --check` clean.
+  - The built `holler pane import --help` shows the new paragraph.
+  - `tmux.rs:35` `FOREGROUND_FORMAT` matches the wording.
