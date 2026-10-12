@@ -42,6 +42,7 @@
 //! Optional fields are left out when absent and default to absent on read.
 
 pub mod argv;
+pub mod bounded;
 pub mod error;
 pub mod findings;
 pub mod generation;
