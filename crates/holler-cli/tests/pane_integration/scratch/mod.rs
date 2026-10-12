@@ -94,8 +94,23 @@ pub fn alive(pid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// The workspaces the wiring is told about, each 2 rows by 1 column (`label=RxC`).
-pub const WORKSPACES: &str = "hlr649=2x1,hlr649b=2x1,hlr649g=2x1,hlr649h=2x1";
+/// The workspaces the wiring is told about (`label=RxC`): four of 2 rows by 1 column, and
+/// `hlr649sq`, 2 rows by 2 columns, for the whole grid `profile apply` builds (#853).
+pub const WORKSPACES: &str = "hlr649=2x1,hlr649b=2x1,hlr649g=2x1,hlr649h=2x1,hlr649sq=2x2";
+
+/// Each workspace of [`WORKSPACES`] with its extent.
+pub fn workspace_extents() -> Vec<(&'static str, Extent)> {
+    WORKSPACES
+        .split(',')
+        .map(|entry| {
+            let (label, extent) = entry.split_once('=').expect("label=RxC");
+            let (rows, cols) = extent.split_once('x').expect("RxC");
+            let rows = rows.parse().expect("a row count");
+            let cols = cols.parse().expect("a column count");
+            (label, Extent { rows, cols })
+        })
+        .collect()
+}
 
 /// Guard 2: the Herdr session must be `holler649-<8 hex>`; `default` is refused by name.
 pub fn check_session(name: &str) -> Result<(), String> {
@@ -481,15 +496,14 @@ impl Scratch {
 
     /// Herdr's own snapshot, read by the test through the adapter on the scratch socket.
     pub fn herdr_snapshot(&self) -> Vec<HerdrPane> {
-        let extent = Extent { rows: 2, cols: 1 };
-        let labels = WORKSPACES
-            .split(',')
-            .map(|row| row.split_once('=').map_or(row, |(label, _)| label));
-        let config = labels.fold(
+        let config = workspace_extents().into_iter().fold(
             HerdrConfig::new(self.herdr.session(), self.herdr.socket()),
-            |config, label| config.with_workspace(label, extent),
+            |config, (label, extent)| config.with_workspace(label, extent),
         );
-        let adapter = HerdrAdapter::connect(config).expect("connect to the scratch Herdr");
+        let adapter = HerdrAdapter::connect(config).expect(
+            "connect to the scratch Herdr (the first `herdr` on PATH must speak protocol 22, \
+             Herdr 0.9.1)",
+        );
         adapter.snapshot().expect("Herdr's snapshot").panes
     }
 

@@ -444,12 +444,15 @@ holler profile apply fleet --dry-run
 holler profile apply fleet --herdr-session demo
 ```
 
-Each step is `{pane, action, outcome, code, diff, detail}`. The actions are `create`, `adopt`, `report`, `relaunch`,
-`refuse` and `observe`; the outcomes are `created`, `relaunched`, `adopted`, `reported`, `refused`, `failed`, `skipped`
-(after a failed step) and `planned` (a dry run's step that would act). A `refused` or `reported` step does not stop the
-run or change the exit code; a `failed` step stops the run and exits 1. Its own open codes are
-`orchestrator-not-relaunched` and `spec-not-launchable`. It exits 2 (`usage`) when the plan has a create and no
-`--herdr-session`, 3 for `profile-not-found`, 1 for a failed step, and 0 otherwise.
+Each step is `{pane, action, outcome, code, diff, detail}`, one per spec pane in creation order (a workspace's column 1
+by row, then its other cells by row and column), so apply can build a whole grid from an empty workspace. The actions
+are `create`, `adopt`, `report`, `relaunch`, `refuse` and `observe`; the outcomes are `created`, `relaunched`,
+`adopted`, `reported`, `refused`, `failed`, `skipped` (after a failed step) and `planned` (a dry run's step that would
+act). A `refused` or `reported` step does not stop the run; a `failed` step stops the run and exits 1. A real run with a
+`refused` step and no failed one exits 3 and prints only the refusal, `apply refused <N> step(s): ...` (section 6); a
+dry run exits 0 with its plan. Its own open codes are `orchestrator-not-relaunched` and `spec-not-launchable`. It exits
+2 (`usage`) when the plan has a create and no `--herdr-session`, 3 for `profile-not-found` and for a real run with a
+refused step, 1 for a failed step, and 0 otherwise.
 
 ### `holler profile rename OLD NEW`
 
@@ -723,7 +726,7 @@ Apply reads P and the registry, then observes every recorded spec pane. **Health
 stored health: the harness answers its health call, Herdr's snapshot lists the record's pane, and the TUI does not show
 a session other than the session of record (a shown session that cannot be read does not count against it).
 
-One step per spec pane, in workspace, row and column order; the first matching row applies:
+One step per spec pane, in creation order (below); the first matching row applies:
 
 | Row | Situation | Step |
 |---|---|---|
@@ -734,6 +737,12 @@ One step per spec pane, in workspace, row and column order; the first matching r
 | e | Not healthy, role orchestrator. | `refuse`, outcome `refused` (`orchestrator-not-relaunched`); nothing is written, even under `--take-over`. |
 | f | Not healthy, role agent. | `relaunch`, outcome `relaunched`; under `--take-over` from another profile the leave and join happen first, then the relaunch. |
 
+- **The order of the steps** is creation order, which is also the order of `steps` in the output and in a dry run's plan:
+  by workspace, then the workspace's column 1 by row, then every other cell by row and column. A profile of four panes
+  on a 2-row-by-2-column grid runs `r1c1`, `r2c1`, `r1c2`, `r2c2`, so apply builds the whole grid from an empty
+  workspace. Herdr makes every pane by splitting one, so a row can be added only below a row of one pane: apply cannot
+  add `r2c1` beside a live `r1c1` and `r1c2`. That create is a `refused` step (`grid-unreachable`, "place rows before
+  columns"), and nothing live is moved to make room (#853).
 - **A step** is `{pane, action, outcome, code, diff, detail}`; an absent `code`, `diff` or `detail` prints `null`. The
   actions are `create`, `adopt`, `report`, `relaunch`, `refuse` (rows a and e, and a spec whose pane is not a pane name)
   and `observe` (a recorded pane whose health or snapshot call failed). The outcomes are `created`, `relaunched`,
@@ -741,19 +750,32 @@ One step per spec pane, in workspace, row and column order; the first matching r
   would act; row d's stays `reported`). `detail` is the step's own line, inside `data`.
 - **A recorded pane whose spec names another harness** is a `refuse` step, outcome `refused` (`harness-change-refused`,
   #831), before its health is judged: apply never changes a live pane's harness.
-- **Refusals do not stop the run.** A `refused` or `reported` step leaves the exit code alone. A refusal from the launch
-  transaction is a `refused` step with that code; a `usage` answer of the launch for a step's spec is refused with the
-  open code `spec-not-launchable`.
+- **Refusals do not stop the run, but a real run with one exits 3.** Every step still runs, and the panes created,
+  adopted or relaunched around a refusal stay. A `reported` step (a healthy pane that differs from its spec) leaves the
+  exit code alone. A refusal from the launch transaction is a `refused` step with that code; a `usage` answer of the
+  launch for a step's spec is refused with the open code `spec-not-launchable`.
+- **A refused run prints only the refusal** (#853), as a failed run prints only the failure: in JSON the failure
+  envelope, whose `error.code` is the first refused step's code and whose message is
+  `apply refused <N> step(s): <pane> (<code>), ...; <M> other step(s) ran`, then, for each refused step whose launch
+  or relaunch had begun its act, `; <pane>: <detail>` (its detail ends with the command that reconciles, and carries
+  the step's take-over note when it has one); in text one `error:` line on stderr and nothing on stdout. A refused step
+  that acted nothing adds only its pane and code, so a relaunch refused before its act after a `--take-over` does not
+  say that the pane moved: `holler pane list` and `holler profile show NAME` show its new profile. To read the steps as
+  data, run `holler profile apply NAME --dry-run` (exit 0) or read `holler pane list` and `holler profile show NAME`
+  afterwards.
 - **A failure stops it.** A `failed` step (`unavailable`, `timeout`, a failed health call, a store conflict) stops the
   run, and the later steps are `skipped`. A run that ends with a `failed` step prints **only the failure**: in JSON the
   failure envelope, whose `error.code` is the failed step's code and whose message is
   `apply stopped at <pane> (<action>): <step error message>; <N> later step(s) skipped`; in text one `error:` line on
   stderr and nothing on stdout. So `skipped` appears only in that count. A dry run with a failed step prints no plan.
-- A step refused or failed after its launch or relaunch had begun carries the command that reconciles.
+- A step refused or failed after its launch or relaunch had begun carries the command that reconciles, in the failure or
+  refusal line when the run exits non-zero.
 - **`--dry-run`** prints the plan as the same table (for a run that does not fail), runs no probe, issues no split and
-  writes nothing. `data` is `{"profile": NAME, "dry_run": bool, "steps": [...]}`, every key always present.
-- **Exit codes:** 0 for a run with no failed step, 1 for a failed step, 2 for `usage` (a plan with a create and no
-  `--herdr-session`, checked before any step, in a dry run too), 3 for `profile-not-found`.
+  writes nothing. It exits 0 even when the plan has a `refused` step, as the dry run of `pane import` exits 0 on a plan
+  with problems; only a real run exits 3. `data` is `{"profile": NAME, "dry_run": bool, "steps": [...]}`, every key always present.
+- **Exit codes:** 0 for a run with no failed and no refused step (and for any dry run that does not fail), 1 for a failed
+  step, 2 for `usage` (a plan with a create and no `--herdr-session`, checked before any step, in a dry run too), 3 for
+  `profile-not-found` and, since #853, for a real run with a `refused` step and no failed one.
 - `orchestrator-not-relaunched` and `spec-not-launchable` are open codes of apply: refusals, exit 3, not in the closed
   list of section 9.
 
