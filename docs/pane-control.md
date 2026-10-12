@@ -256,6 +256,8 @@ holler pane switch demo-alpha ses_0a1b2c
 Refused (3) with `session-not-found` (the pane's server does not have it), `session-of-other-pane`, `orchestrator-pane`
 (without `--as-operator`) or `server-unhealthy` (relaunch it first). A TUI that does not show the session afterwards is
 `unavailable` (1) and records nothing.
+An OpenCode TUI that is still starting (right after `relaunch`) is asked again every 100 ms until its title shows the
+session, for at most 5 s; one whose title never shows it ends `timeout` (1), and records nothing.
 
 The pane's body follows (#839): once the TUI is seen showing SESSION, the switch asks the attach-mode body that drives the
 pane (the one that advertises its session of record, or its recorded DRIVEN) to drive SESSION, and records the id the

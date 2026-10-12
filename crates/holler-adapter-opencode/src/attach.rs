@@ -14,7 +14,9 @@
 //!   (opencode-pane-spike.md:117-124), so its `true` proves nothing. Both methods query
 //!   the pane every `SETTLE_POLL` (the crate's one poll), within `settle`, until it is a
 //!   live attach to that server whose title shows the session; otherwise the answer is
-//!   `timeout`.
+//!   `timeout`. `select_session` sends the select request again after each query whose
+//!   title does not show the session yet (#845): a TUI that has just started answers
+//!   `true` before it takes a switch, and selecting a session is idempotent.
 //! - **No keystroke is ever sent** (I4): the TUI is switched only over the API.
 //! - **Every tmux call is run by the shared bounded runner** of `holler-pane` (#696), never
 //!   through a shell, as [`TMUX_RUN`] says; [`capture`] maps its answer to this adapter's
@@ -54,7 +56,7 @@ pub(crate) fn attach_tui(
     let tui = Tui::of(harness, pane, OP_ATTACH_TUI, call.deadline)?;
     tui.change(&tui::remain_on_exit_args(&tui.session))?;
     tui.change(&tui::respawn_args(&tui.session, directory, &argv))?;
-    match tui.watch(port, session, config.timeouts.settle)? {
+    match tui.watch(port, session, config.timeouts.settle, |_| Ok(()))? {
         Seen::Shown => Ok(()),
         Seen::Dead(status) => Err(exited(&call, &path, session, &tui, status)),
         Seen::Gone => Err(tui.no_session()),
@@ -65,7 +67,10 @@ pub(crate) fn attach_tui(
 /// server, so the TUI is found first, and a pane with no TUI is `unavailable` before
 /// anything is sent (case 14). Then the session is checked (an unknown one is
 /// `session-not-found`, and the screen stays: case 13), the switch is asked for, and the
-/// title is watched until it shows the session.
+/// title is watched until it shows the session. The switch is asked for again after each
+/// query of the watch that finds the TUI live but not showing the session (#845), by the
+/// same rules as the first request; a dead or missing TUI ends the watch with no further
+/// request.
 pub(crate) fn select_session(
     harness: &OpenCodeHarness,
     pane: &PaneId,
@@ -81,7 +86,20 @@ pub(crate) fn select_session(
     .ok_or_else(|| tui.no_tui())?;
     let call = harness.call_until(port, OP_SELECT_SESSION, deadline);
     known(&call, &session_path(session), session)?;
-    let reply = call.send(SELECT, SELECT.label, Some(&json!({ "sessionID": session })))?;
+    select(&call, session, deadline)?;
+    let again = |until| select(&call, session, until);
+    match tui.watch(port, session, config.timeouts.settle, again)? {
+        Seen::Shown => Ok(()),
+        Seen::Dead(_) | Seen::Gone => Err(tui.no_tui()),
+    }
+}
+
+/// One `POST /tui/select-session` for `session`, within `until` and the call's bounds. A 404
+/// is `session-not-found`; any answer but `true` is `unavailable`. `true` only means the
+/// request was taken (I3): the title is what confirms the switch.
+fn select(call: &Call, session: &str, until: Instant) -> Result<(), PaneError> {
+    let body = json!({ "sessionID": session });
+    let reply = call.send_by(SELECT, SELECT.label, Some(&body), until)?;
     if reply.status == 404 {
         return Err(PaneError::SessionNotFound {
             what: session.to_owned(),
@@ -90,10 +108,7 @@ pub(crate) fn select_session(
     if json_of(&reply) != Some(Value::Bool(true)) {
         return Err(call.unexpected(SELECT, &reply, "true"));
     }
-    match tui.watch(port, session, config.timeouts.settle)? {
-        Seen::Shown => Ok(()),
-        Seen::Dead(_) | Seen::Gone => Err(tui.no_tui()),
-    }
+    Ok(())
 }
 
 /// `HarnessPort::shown_session`: one query of the pane, read by [`showing`]. It never asks
@@ -202,16 +217,29 @@ impl<'a> Tui<'a> {
 
     /// Query the pane every `SETTLE_POLL`, through the crate's one poll, until it is a live
     /// attach to the server on `port` whose title shows `id`, a dead pane or no pane, within
-    /// `settle` and the method's deadline. None of them in time is `timeout`.
-    fn watch(&self, port: u16, id: &str, settle: Duration) -> Result<Seen, PaneError> {
+    /// `settle` and the method's deadline. None of them in time is `timeout`. After a query
+    /// that finds the pane live but not showing `id`, `unseen` runs with the poll's end (a
+    /// switch asks for itself again there); its `Err` ends the watch.
+    fn watch(
+        &self,
+        port: u16,
+        id: &str,
+        settle: Duration,
+        mut unseen: impl FnMut(Instant) -> Result<(), PaneError>,
+    ) -> Result<Seen, PaneError> {
         poll(settle, self.deadline, self.op, |until| {
             let query = self.query(until)?;
             Ok(match query {
                 Query::NoPane => Some(Seen::Gone),
                 Query::Dead(status) => Some(Seen::Dead(status)),
-                Query::Live { .. } => showing(&query)
-                    .is_some_and(|(at, shows)| at == port && shows == id)
-                    .then_some(Seen::Shown),
+                Query::Live { .. } => {
+                    if showing(&query).is_some_and(|(at, shows)| at == port && shows == id) {
+                        Some(Seen::Shown)
+                    } else {
+                        unseen(until)?;
+                        None
+                    }
+                }
             })
         })
     }
