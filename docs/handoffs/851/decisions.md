@@ -128,3 +128,33 @@ Run handoff directory `docs/handoffs/851` Â· branch `issue-851-implementation` Â
   - The Windows leg is not run locally.
 - **Evidence:** handoff-T-green.md (Tier 1 table, mutation table, `git archive` builds giving `unknown`,
   `abc1234`, and `unknown` for a blank `HOLLER_GIT_SHA`).
+
+## A, anti-duplication gate (Phase 7): 2026-10-11T19:39-06:00
+
+- **Decided:** PASS, with 1 warn (see handoff-A-dup.md).
+  - F extended the objects in the map. The three `version` producers and the clap attribute were changed in place,
+    and no field was added.
+  - The new objects are the ones the map justified:
+    - one `build.rs`;
+    - one resolver file, which the test includes with `#[path]`;
+    - one format string, `holler_cli::VERSION`;
+    - the `holler_proto::build_info` seam, shaped like `log`.
+  - Warn 1: `build.rs`'s `source_paths` watches `holler-load-test` and `holler-pane-testkit`, neither of which is in
+    the binary, and the comment says they are. The fix is optional wording; no follow-up issue.
+- **Assumed:** F's rebuild cost (about 10 s) and its fixture table of re-run behaviour hold as reported. I did not
+  rebuild to measure them again.
+- **Hedged:** Nothing about the verdict. The re-run triggers have no automated test (as F and T noted). That is a
+  test-coverage question, which this gate does not cover.
+- **Evidence:**
+  - Read `git diff bda1069..549b451` in full: code, tests and docs.
+  - Read these files: `log.rs:250-316`, `version.rs`, `holler-proto/src/lib.rs`, `holler-cli/src/lib.rs`,
+    `main.rs:101-217`, `control_status.rs` and `holler-cli/Cargo.toml`.
+  - Searched the repo for:
+    - `CARGO_PKG_VERSION`, `build_info` and `HOLLER_BUILD_COMMIT`;
+    - `Command::new("git")` and `rev-parse`;
+    - the callers of `local_status` and `status_doc`;
+    - every consumer of `--version`;
+    - existing temp-git fixtures.
+  - `find` returned one `build.rs`.
+  - `cargo tree -p holler-cli -e normal` lists 8 workspace crates, without `holler-load-test` or `holler-pane-testkit`.
+  - `bash scripts/lint.sh` exited 0, and no golden file is in the diff.
