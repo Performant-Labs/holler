@@ -1,82 +1,125 @@
-# Handoff-A-dup: #839 - DRIVEN follows each pane's session of record  (anti-duplication gate)
+# Handoff-A-dup: #839 - DRIVEN follows each pane's session of record  (anti-duplication gate, S rework round 1)
 
-**Date:** 2026-10-12 (09:55 MDT)
+**Date:** 2026-10-12 (10:47 MDT)
 **Branch:** `issue-839-implementation` (worktree `.claude/worktrees/0839-driven`)
-**Diff base:** `4e691d9` (the merge-base with `origin/main`)   **Diff head:** `8d3e7fa`
-(F's change set is `949115e..d480424`; the rework this cycle, T-green's, is `d480424..8d3e7fa` and touches tests only)
-**Reuse map:** `docs/handoffs/839-brief.md`, "Reuse" (line 383) and "Where the code goes" (line 339); this run has no `survey.md`
+**Diff base:** `fde8eb8` (S's REWORK; its code is the same as at `e83ea9c`, the head of the first A-dup pass)
+**Diff head:** `ee874c1`
+This cycle's change set: F `fde8eb8..9eb55d4`, then T-green `9eb55d4..ee874c1`. The story's whole base is `4e691d9`.
+**Reuse map:** `docs/handoffs/839-brief.md`, "Reuse" (line 383) and "Where the code goes" (line 339). This run has no
+`survey.md`.
 **Verdict:** PASS
+
+This file covers this cycle. The first A-dup pass reviewed the whole story (`4e691d9..8d3e7fa`), and its handoff is in
+git: `git show e83ea9c:docs/handoffs/839/handoff-A-dup.md`.
 
 ## Summary
 
-PASS: 0 `block`, 6 `warn`. F extended every object the Reuse map named, and built no parallel path to any of them:
+**PASS: 0 `block`, 6 `warn`, and every warn is carried from the first pass.** This cycle removed a duplicate and added
+no parallel path.
 
-- **The hub's prompt path.**
-  - `say`'s prelude moved into `talk::admit`; it was not copied. `say` and `check_only` both call it.
-  - `LiveHandle::query`'s send-and-wait moved into the one private `forward`, which `rebind` also calls.
-  - There is no new `LiveCommand` variant, and `circuit.rs` grew by nothing.
-  - `send_prompt` is still the only builder of `session/prompt`.
-- **One predicate and one selection.**
-  - The hub's and the CLI's pane-state predicates are gone, replaced by `holler_pane::gate::prompt_refusal`.
-  - `roster_cmd`'s pair rule now calls `shown_driven_pair_differs`.
-  - `first_refusal` is shared by the hub's `pane_gate` and by `FakeHub`.
-- **The engine.**
-  - `activity_refusal` was extracted from `check_idle` and is shared with the plan's driver check.
-  - `tx_switch/plan.rs` is a move of the plan's helpers, which are gone from `tx_switch.rs`, extended to hand back what they read.
-  - The plan and reconcile share `driver_of`, `not_driven` and `named`.
-- **The edges.**
-  - `control/say` moved whole into `control_say.rs`, with one `SayError` mapping.
-  - `control_rebind.rs` follows `control_hold.rs`. It reuses `find_by_token`, `presence()`, `replace_session` and `parse_session_id`, and fills one roster row through `roster/rebind.rs`, as `set_turn_id` and `set_last_turn` do.
-  - `wiring/hub.rs` reuses `store.rs`'s `Effect`, `timed_out`, `hub_unavailable` and `undecodable`, and the accept rule (`wait_ended`, `QUEUE_ACCEPT_WAIT`).
-  - `FakeHub` runs over `FaultSwitch<HubOp>`.
-  - `live/tests.rs` is a pure move: `diff -w` against the removed block shows only a three-line doc header.
+**What changed in production.** S's REWORK 2 asked for one change, in `HubClient::held`. F instead moved the
+`session-held` refusal into one builder, `holler_pane::hub::session_held(id, name, kind, reason) -> PaneError`. Both
+implementations of the port now call it:
+- the real client: `HubClient::held` (`crates/holler-cli/src/pane/wiring/hub.rs:171-182`);
+- the test kit: `FakeHub::judge` (`crates/holler-pane-testkit/src/hub.rs:215`).
 
-None of the named Phase 7 candidates was copied:
-- `token.rs` is untouched.
-- `Lockout` and `Roster` are reused in `driven_support`.
-- The body's `log_session` is reused.
-- `driven_e2e_test` imports `Hub`, `Body`, `mint_token`, `join`, `wait_for` and `StateDir` from `support`.
+Before this cycle each of them spelled the sentence. That copy was the second half of the first pass's warn 2, and it is
+now gone. A grep of `crates/` finds the sentence only in `holler-pane/src/hub.rs` and in one test assertion.
 
-The warns, most important first:
-1. A second copy of the hub's resolve scaffolding.
-2. The hub's refusal words copied into `FakeHub`.
-3. The fast-path gate order spelled twice.
-4. The failed-exchange composition in two files.
-5. Test fixtures re-typed, `session_id` among them.
-6. A size budget of the brief that the test kit's `hub.rs` exceeds.
+**How it is placed.** The builder follows the patterns that already exist:
+- It sits beside `SESSION_HELD` in the file that declares that code (D7). `driven::not_driven` builds
+  `pane-not-driven` in `holler-pane` the same way.
+- It prints advertised text through `findings::quoted`.
+- It builds the command only from text that passes the grammar: `RoutableName::parse` gates the
+  `holler release NAME` command, as `parse_session_id` gates `switch_command`.
+- `RoutableName::parse` is the one grammar used at the other two boundaries as well: the CLI's typed-SESSION refusal
+  (`say_cmd.rs:282`) and the hub's resolver (`live/target.rs:27`).
+
+**Nothing new in the structure.** There is no new module, crate or dependency. `holler-pane` already depends on
+`holler-proto`, and the CLI and the test kit already depend on `holler-pane`. `HubPort` is unchanged.
+
+**Two other places checked; neither should have been extended:**
+- **`hold_cmd::held_refusal`** (`crates/holler-cli/src/hold_cmd.rs:147-169`) is the CLI's exit-4 held text for `say`
+  and `interrupt`.
+  - It is a different refusal on purpose: P5 keeps the three `--pane` verbs on it and gives only `reset --first` the
+    `session-held` words of D4.
+  - It also lives in `holler-cli`, which neither `holler-pane` nor the test kit may depend on.
+- **A `release_command` beside `switch_command`** in `findings.rs` was rejected by F, and the rejection holds.
+  - That file's builders are the commands of doctor's remedies (`holler pane …`).
+  - `holler release` is the refusal of a prompt, and it has one caller.
+
+**The tests T added this cycle reuse what exists:**
+- The three new process tests in `driven_e2e_test.rs` use the file's existing `Rig`, `pane`, `stderr` and
+  `prompts_to`, and `support`'s `wait_for`, `STARTUP_WAIT` and `Body::stop`.
+- They add one local loop helper, `assert_not_driven_in_all_three_verbs`, which has no twin in `support/` or
+  `pane_verbs/driven*`.
+- None of the named Phase 7 candidates is copied: `Hub`, `Body`, `mint_token`, `join`, `wait_for`, `StateDir`, the
+  token store, `Lockout`, `Roster` and `log(Severity, ..)`.
+- `hold_rig::assert_held` was not a missed reuse. It asserts an in-process control result on a spawn-mode rig, while
+  the new test asserts the CLI's exit code and stderr on the attach-mode `Rig`.
+- The new unit test in `driven_test.rs` calls the one builder directly and uses the file's existing `SOR1`.
+
+**Sizes.** Every file touched this cycle is far below the 900-line lint limit:
+
+| File | Lines |
+|---|---|
+| `holler-pane/src/hub.rs` | 106 |
+| `wiring/hub.rs` | 223 |
+| test kit `hub.rs` | 310 (down from 317) |
+| `driven_e2e_test.rs` | 705 |
+| `driven_test.rs` | 423 |
+
+**The cycle added no drift** in layering, dependency direction, naming, error handling or abstraction level.
 
 ## Findings
 
+All six warns are carried from the first pass, with line numbers re-checked on `ee874c1`. The first column says what
+became of each this cycle. No hub file changed this cycle (`git diff e83ea9c ee874c1 -- crates/holler-hub` is empty).
+
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| 1 | warn | `crates/holler-hub/src/live/target.rs:26-53` | **`resolve_prompt_target`'s id branch re-implements `Registry::resolve_session`'s scaffolding** (`live.rs:762-793`). It does the same steps: walk every handle's cached presence; collect `(LiveHandle, SessionAd)` pairs; then none is offline or `Unknown`, one is `Found`, and more are `Ambiguous`, with the same `"{hostname}/{name}"` candidates.<br><br>`offline_advertises` (`:51`) is `matches_offline` (`live.rs:798`) with another predicate.<br><br>**Why a warn.** The brief justified the new function and its file in writing (D1, P1), so this is not a block. But the classification rules now exist twice and can drift apart: the candidate format, or the offline fallback. | One private helper in `live.rs`, e.g. `Registry::resolve_where(live: impl Fn(&LiveHandle, &SessionAd) -> bool, offline: impl Fn(&str, &SessionAd) -> bool) -> ResolveOutcome`, which both call: `resolve_session` with the name rule, and the id branch with `advertises`. `live.rs` is 832 lines, so it has room. |
-| 2 | warn | `crates/holler-pane-testkit/src/hub.rs:311-317`, `:217`, `:228` | **`FakeHub::why` is a verbatim copy of the hub's `pane_state_refusal`** (`holler-hub/src/panes/gate.rs:20-26`).<br><br>`judge` also re-spells two sentences:<br>- the hub's `"pane {} {}, so it refuses prompts ({code})"` (`gate.rs:52`);<br>- the real client's `session-held` sentence (`pane/wiring/hub.rs:173`).<br><br>**The selection is shared; the words are not.** `conformance/hub.rs` checks only the code and the pane name. `hold_single_path_test`'s "defined once" scan covers only the three code literals, and only in `holler-hub` and `holler-cli`. So these copies can drift without any test failing. | Put the hub's short phrase on `PromptRefusal` in `holler_pane::gate` (e.g. `PromptRefusal::what(self) -> &'static str`). The hub's `pane_gate` and `FakeHub` then both use it.<br><br>Alternatively, have the conformance compare the fake's whole message with the real hub's. |
-| 3 | warn | `crates/holler-hub/src/talk.rs:233-239`; `crates/holler-hub/src/interrupt.rs:117-122` | **The advisory fast path is spelled twice.** It is the hold's `would_refuse`, then `pane_gate` guarded by `(Some(panes), Some(id))`. Each spelling copies `send_prompt`'s order (`circuit/dispatch.rs:113-115`).<br><br>That order is what makes "an operator hold refuses first, with its own kind" (Acceptance 4) hold on the fast paths. With three spellings, one can be reordered alone. | One helper beside `admit`, e.g. `talk::fast_gates(registry, &handle, &ad, grant) -> Result<(), WireError>`. `admit` calls it, and `interrupt` calls it with `grant: None`, so the order is written once next to the authority's. |
-| 4 | warn | `crates/holler-cli/src/pane/wiring/hub.rs:227-233` | **`failed()` repeats the closure inside `store.rs::call`** (`store.rs:354-360`): `timed_out`, then `Timeout { op }`, else `hub_unavailable`.<br><br>The policy pieces are shared (made `pub(super)`). The five-line composition is now in two files.<br><br>**Why a warn.** The brief limited `store.rs` to "visibility of four items only", so this was the closest reuse F could make. | A follow-up: move `failed` into `store.rs` as `pub(super) fn exchange_failed(method, effect, op, error)` and have `call` use it too. |
-| 5 | warn | `crates/holler-hub/tests/driven_support/mod.rs:54-57` (and the fixture builders listed in the next column) | **`id(n)` is `holler_pane_testkit::fixture::session_id(n)` typed again:** the same signature and the same `ses_{n:026x}`. The file already imports `holler_pane_testkit::fixture::sample_pane` (`:428`), and D8 and Acceptance 15 make `session_id` the one hub-routed fixture. All of this is T-owned test code.<br><br>**A "healthy pane on `sor`, SHOWN `sor`, DRIVEN `d`" builder is written seven times over `sample_pane`:**<br>- `circuit/dispatch.rs` `hold_tests::{gate_pane, healthy}` (`:471-483`);<br>- `panes/gate/tests.rs::{pane, parked, unhealthy}` (`:23-47`);<br>- `driven_support::pane` (`:427`);<br>- `conformance/hub.rs::{pane, parked, unhealthy}`;<br>- `fake_hub_test.rs::pane` (`:53`);<br>- `driven_test.rs::pane` (`:40`);<br>- `gate_test.rs::pane` (`:30`).<br><br>**Smaller copies across test binaries** follow a habit this repo already has (`attach_mode_test::join_fresh` says it is copied on purpose):<br>- `driven_support::Conn` is close to `pane_dispatch_test::Conn`;<br>- `driven_e2e_test::with_state_dir` is close to `pane_integration::with_state_dir`;<br>- `driven_e2e_test`'s inline attach block is close to `attach_mode_test::attach_block`. | Replace `id` with `session_id`, called directly or by `use … as id`.<br><br>Add one builder to the test kit's `fixture` (e.g. `observed_pane(name, sor, driven)`, with `parked` and `unhealthy`) and use it in the seven places. A follow-up is fine. |
-| 6 | warn | `crates/holler-pane-testkit/src/hub.rs` (317 lines) | **The brief's "Where the code goes" puts this file under 250 lines**, and handoff-F's list of size deviations does not name it. It is not a lint failure: the limit is 900.<br><br>**Other touched files near the limit**, all under 900:<br>- `circuit.rs` 898 (+0);<br>- `pane_verbs/switch.rs` 895 (+2, against "no growth");<br>- `roster.rs` 893 (+1: `mod rebind;`, the fix A's Phase 3 warn 1 asked for);<br>- `codec_test.rs` 890 (+1, as planned). | Note it at S. Folding finding 2 trims the file a little. |
+| 1 | warn (carried, unchanged) | `crates/holler-hub/src/live/target.rs:26-60` | **`resolve_prompt_target`'s id branch re-implements `Registry::resolve_session`'s scaffolding** (`live.rs:762-798`):<br>- the walk over cached presences;<br>- the `(LiveHandle, SessionAd)` matches;<br>- none/one/many mapped to `Unknown`, `Found` and `Ambiguous`;<br>- the `"{hostname}/{name}"` candidates;<br>- an offline check, `offline_advertises` (`:51`), which is `matches_offline` (`live.rs:798`) with another predicate.<br><br>D1 and P1 justify the function and its file in writing, so this is not a block. | One private `Registry::resolve_where(live_pred, offline_pred)` in `live.rs`, called by both. |
+| 2 | warn (carried, **half fixed this cycle**) | `crates/holler-pane-testkit/src/hub.rs:303-310`, `:220-224` | **Fixed this cycle:** the `session-held` sentence that `FakeHub` copied. Both ports now call `session_held`.<br><br>**Still open:**<br>- `FakeHub::why` (`:303-310`) is a verbatim copy of the hub's `pane_state_refusal` (`crates/holler-hub/src/panes/gate.rs:19-26`);<br>- `judge`'s `"pane {} {}, so it refuses prompts ({code})"` (`:220-224`) re-spells `gate.rs:51-55`.<br><br>The selection (`first_refusal`) is shared, but these words are not, and `conformance/hub.rs` checks only the code and the pane name. So they can drift with no test failing. | Treat it as `session_held` was treated: put the phrase on `PromptRefusal` in `holler_pane::gate`, for example `PromptRefusal::what(self) -> &'static str`, plus a `pane_gate_message(pane, refusal)` builder. The hub's `pane_gate` and `FakeHub` then both call it. |
+| 3 | warn (carried, unchanged) | `crates/holler-hub/src/talk.rs:233-238`; `crates/holler-hub/src/interrupt.rs:117-121` | **The advisory fast path is spelled twice:** the hold's `would_refuse`, then `pane_gate` under `(Some(panes), Some(id))`. Each spelling copies `send_prompt`'s order (`circuit/dispatch.rs:113-114`), which is the order that makes Acceptance 4's "an operator hold refuses first" hold. | One helper beside `admit`, for example `talk::fast_gates(..)`, which `admit` calls and `interrupt` calls with `grant: None`. |
+| 4 | warn (carried, unchanged) | `crates/holler-cli/src/pane/wiring/hub.rs:216-223` | **`failed()` repeats the closure inside `store.rs::call`** (`store.rs:354-360`): `timed_out`, then `Timeout { op }`, else `hub_unavailable`. The brief limited `store.rs` to "visibility of four items only", so this was the closest reuse available. | A follow-up: make it `store.rs`'s `pub(super) fn exchange_failed(..)`, and have `call` use it too. |
+| 5 | warn (carried, **extended this pass**) | `crates/holler-hub/tests/driven_support/mod.rs:55`; `crates/holler-cli/tests/pane_verbs/driven/{order.rs:299-309, evidence.rs:36-46, first.rs:53}` | **Test hygiene; all of it is T-owned, and none of it was added this cycle.**<br><br>**As in the first pass:**<br>- `driven_support::id(n)` is `holler_pane_testkit::fixture::session_id(n)` typed again (D8 and Acceptance 15 make `session_id` the one fixture);<br>- the builder for "a healthy pane on `sor`, SHOWN `sor`, DRIVEN `d`" is written in seven places over `sample_pane`.<br><br>**Noticed this pass, from T-red (`949115e`):** the check that the plan moved nothing is written three times in sibling modules of `pane_verbs/driven`:<br>- `assert_nothing_moved` in `order.rs` and in `evidence.rs`, the same apart from one message;<br>- `assert_refused_in_the_plan` in `first.rs`, a superset that also checks that no prompt was sent. | Replace `id` with `session_id`.<br><br>Add one `observed_pane(name, sor, driven)` builder to the test kit's `fixture`.<br><br>Move one `pub(crate) fn assert_nothing_moved` into the parent `pane_verbs/driven.rs`, which already holds the shared `pub(crate)` helpers (`body_name`, `drive`, `body`, `advertised`). `first.rs` then calls it and adds its prompt check. |
+| 6 | warn (carried, updated) | `crates/holler-pane-testkit/src/hub.rs` (310 lines) | **The brief's "Where the code goes" says "under 250".** This cycle took it down from 317 to 310. It is not a lint failure; the limit is 900. Fixing finding 2 trims it further. | Already recorded at S (scope check); nothing more is needed. |
 
-No parallel path to an object the map named. The rework this cycle introduced no drift: T-green changed six test files and no production file.
+No duplication was introduced this cycle, and the extension is clean. The cycle also introduced no architectural
+drift.
 
 ## Notes for F
 
-None are required: the verdict is PASS. Each warn above is local, and none is needed for this story to merge.
+None are required: the verdict is PASS.
 
 ## Notes for O
 
-- **Findings 1 to 4** are small refactors of production code, each a few lines. Open them as one follow-up issue, or relay them to S. Nothing in them changes behaviour.
-- **Finding 5** is T's test hygiene. The `session_id` line is the cheapest to fix now, if a repair pass happens anyway.
-- **Out of scope but noticed.** `origin/main` moved to `6eff9cc` (#853) after this branch's merge-base.
-  - It touches five of this branch's files: `CHANGELOG.md`, `docs/adr/ADR-0003.md`, `docs/adr/ADR-0021.md`, `docs/pane-control.md` and `crates/holler-cli/tests/profile_verbs/apply/rig.rs`.
-  - It adds no `Ports { … }` literal, so bringing the branch up to date is a text merge and needs no new `hub:` field.
-- **Still open from earlier phases, not decided here:**
-  - Phase 3 warn 2 (the P8 corner) is for the operator.
-  - Acceptance 20(d) row (1) needs O's ruling.
-  - T-green's advisory 3 (a grant spent before the pane gate refuses, in a race only) is for S.
+- **Findings 1 to 4 and the rest of 2** are small production refactors, a few lines each, and none changes behaviour.
+  They are the same follow-up set the first pass named, and S listed them as follow-ups (advisory 3). Finding 2 now
+  has a template in this story: `session_held` is how its first half was folded.
+- **Finding 5** is T's test hygiene. Its new item, the three "nothing moved" helpers, is cheap to fold if another
+  repair pass happens.
+- **Out of scope but noticed (already tracked, not duplication):**
+  - **The guide overstates `session-held`.** `docs/pane-control.md:290` says `session-held` "names the `holler release
+    SESSION` that lifts it". Two cases give the fallback, which names no session:
+    - a failed roster read, as in round 1;
+    - an advertised name outside the routable-name grammar, which is new this cycle.
+
+    F and T both flagged this as non-blocking. It is S's to weigh.
+  - **The branch must be updated before merge.** The local `origin/main` ref is still `6eff9cc` (#853), so S's
+    advisory 1 stands: the conflict is in ADR-0021 "Decisions taken", and #839's items renumber after #853's. I did
+    not fetch.
 
 ## Patterns referenced
 
-- `crates/holler-hub/src/live.rs` (`resolve_session`, `matches_offline`, `query`, `forward`, `replace_session`); `crates/holler-hub/src/roster.rs:570-644` (the one-row forward-fills); `crates/holler-hub/src/control_hold.rs`.
-- `crates/holler-hub/src/circuit/dispatch.rs` (`send_prompt`); `crates/holler-hub/src/talk.rs` (`admit`, `send_turn`); `crates/holler-body/src/prompt_dispatch.rs` (`handle_answer`) and `connection/session_dispatch.rs` (`spawn_answer_dispatch`).
-- `crates/holler-cli/src/pane/wiring/store.rs` (`call`, `timed_out`, `hub_unavailable`); `crates/holler-cli/src/say_cmd.rs` (`run`, `wait_ended`).
-- `crates/holler-pane-testkit/src/{fixture.rs, fault.rs, pane_store.rs, harness.rs}`; `crates/holler-cli/tests/support/{mod.rs, hold_rig.rs}`; `crates/holler-cli/tests/{attach_mode_test.rs, pane_integration/main.rs}`; `crates/holler-hub/tests/{pane_support/mod.rs, pane_dispatch_test.rs}`.
+- **The builder's precedents:** `crates/holler-pane/src/driven.rs` (`not_driven`, `named`) and
+  `crates/holler-pane/src/findings.rs` (`switch_command`, `parse_session_id`, `quoted`).
+- **The held texts compared:** `crates/holler-cli/src/hold_cmd.rs` (`held_refusal`, the exit-4 text) and
+  `crates/holler-hub/src/panes/gate.rs` (`pane_state_refusal`, `pane_gate`).
+- **The failed-exchange mapping:** `crates/holler-cli/src/pane/wiring/store.rs` (`call`, `timed_out`,
+  `hub_unavailable`).
+- **The test harnesses:** `crates/holler-cli/tests/support/{mod.rs, hold_rig.rs}`;
+  `crates/holler-cli/tests/driven_e2e_test.rs` (`Rig`); `crates/holler-cli/tests/pane_verbs/driven.rs` and its
+  `driven/` children.
+- **The resolvers:** `crates/holler-hub/src/live.rs` (`resolve_session`, `matches_offline`) and
+  `crates/holler-hub/src/live/target.rs`.

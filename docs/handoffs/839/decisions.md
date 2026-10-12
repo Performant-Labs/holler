@@ -326,3 +326,53 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
 - **Evidence:** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`:
   175 binaries, 2725 passed, 0 failed, 36 ignored. `driven_e2e_test` 4 runs, 14 passed each. Clippy `-D warnings`,
   `lint.sh`, `changelog-check.sh`, `cargo machete`, `test-hooks.sh`, `git diff --check`: all clean.
+
+## A, anti-duplication gate (Phase 7), S rework round 1: 2026-10-12T10:47-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 6 `warn` findings, every one carried from the first pass
+  (`docs/handoffs/839/handoff-A-dup.md`, which replaces round 1's file; that one is at `e83ea9c`). The diff is
+  `fde8eb8..ee874c1`: F `fde8eb8..9eb55d4` (three production files), then T-green `9eb55d4..ee874c1` (two test files).
+  - **This cycle removed a duplicate.** `holler_pane::hub::session_held` is now the one builder of the `session-held`
+    refusal, and both `HubClient::held` and `FakeHub::judge` call it. That closes the `session-held` half of the first
+    pass's warn 2. The sentence is now spelled once in `crates/`.
+  - **The placement follows the existing patterns:**
+    - it sits beside `SESSION_HELD`, in the file that owns the code (D7), as `driven::not_driven` sits in `holler-pane`;
+    - it uses `quoted`;
+    - a grammar check (`RoutableName::parse`) gates the command it builds, as `parse_session_id` gates
+      `switch_command`.
+
+    It adds no new module, crate or dependency edge.
+  - **Neither alternative was a missed extension:**
+    - `hold_cmd::held_refusal` is the exit-4 text, which P5 keeps for the `--pane` verbs, and it lives in `holler-cli`,
+      which the builder's callers cannot reach;
+    - a `release_command` in `findings.rs` would sit among doctor's remedy builders, with one caller.
+  - **T's new tests reuse the file's `Rig` and `support`'s helpers.** None of the Phase 7 candidates is copied.
+  - **The warns:**
+    1. The resolve scaffolding is written twice. Unchanged.
+    2. `FakeHub::why` and the pane-gate sentence still copy the hub's words. Half fixed.
+    3. The fast-path order is spelled twice. Unchanged.
+    4. `failed()` repeats `store.rs::call`'s closure. Unchanged.
+    5. Test fixtures are re-typed. Extended: three "nothing moved" helpers in `pane_verbs/driven/{order,evidence,first}.rs`,
+       from T-red `949115e`, not this cycle.
+    6. The test kit's `hub.rs` is 310 lines, down from 317, against the brief's 250.
+- **Assumed:**
+  - The rule from the first pass still applies: a justified object whose internals copy a neighbour is a `warn`.
+  - A test-helper copy that predates this cycle is re-flagged as a `warn`, never a `block`. It is T-owned test code,
+    and it is not one of the named Phase 7 candidates.
+- **Hedged:**
+  - I ran no build or test. T-green's run (2725 passed, 0 failed) is the runtime evidence; this gate reviews structure.
+  - I did not fetch. The `origin/main` facts come from the local ref (`6eff9cc`).
+- **Evidence:**
+  - **Read:**
+    - the brief's decisions, "Where the code goes", "Reuse", Acceptance and Blast radius;
+    - `handoff-S.md`, this round's `handoff-F.md` and `handoff-T-green.md`, round 1's `handoff-A-dup.md`, and this
+      journal;
+    - in full: the three production files of this cycle, and `driven_e2e_test.rs`'s rig and helpers;
+    - the diffs of the two test files;
+    - the neighbours: `hold_cmd.rs`, `findings.rs`'s builders, `driven.rs`'s `not_driven` and `named`, the hub's
+      `panes/gate.rs`, `store.rs::call`, `support/hold_rig.rs`, and `live/target.rs` against `live.rs`.
+  - **Commands:**
+    - `git diff`, `git show --stat`, `git log` and `git merge-base`;
+    - `grep -rn` for the held sentence, for `RoutableName::parse`, and for the carried copies;
+    - `wc -l`;
+    - `git diff --quiet e83ea9c ee874c1 -- crates/holler-hub`, which shows no hub change this cycle.
