@@ -28,3 +28,9 @@
 - **Assumed:** the workspace-wide clippy failure at `token_load_test.rs:60` is pre-existing, because that file is absent from the diff.
 - **Hedged:** AC 6's `--all-targets` clippy clause is unmet for a reason outside this story; reported, not fixed here.
 - **Evidence:** loaded runs used the compiled test binary directly; mutant failures at `remote_admin_test.rs:392`.
+
+## A (Phase 7, anti-duplication) - 2026-10-12
+- **Decided:** PASS. The diff extends `rig_with_env` (via `joined_rig`) and centralises the presence literal in `presence_frame`; `live_socket`, `roster_json`, `run`, `wait_for` reused as-is. No parallel path, no production change.
+- **Assumed:** `holler_proto::now_secs` is the hub's roster clock source (`token::now_secs` delegates to it).
+- **Hedged:** `remote_admin_test.rs` is 827 lines (above the ~800 flag, under the 900 gate); warn only.
+- **Evidence:** `docs/handoffs/847/handoff-A-dup.md`.
