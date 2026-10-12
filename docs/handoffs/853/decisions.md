@@ -302,3 +302,66 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - for the refused and stopped message heads across the tests;
     - for cites of decisions 30 and 31 on this branch and on `issue-835-implementation`, and PR #860's state;
     - for personal infrastructure names in the added lines: none (only generic `~/.local/bin` in the handoffs).
+
+## S, spec audit: 2026-10-12T06:45-06:00 (MDT)
+
+- **Decided:** REWORK (production), one item. See `handoff-S.md`.
+  - **On the branch, all is met.** Each of the six acceptance criteria has a proving test that asserts behaviour, and
+    T-green's removal checks show they fail without the change. The branch is spec-compliant, and the quality audit is
+    clean.
+  - **The item: `origin/main` moved during the run.**
+    - PR #860 (#835) merged at 06:29 MDT as `4e691d9`, three minutes after A-dup's entry.
+    - Its ADR-0021 decisions 30 and 31 collide with #853's. The merge is textually clean (`git merge-tree` exits 0), so
+      the PR would show as mergeable and CI would pass, but ADR-0021 would hold 30, 31, 30 and 31.
+    - The fix:
+      - merge `origin/main` (not a rebase: `05d8e6a` is already on origin, and the push must fast-forward);
+      - renumber #853's decisions to 32 and 33;
+      - update 13 cites. A-dup counted 11; `refused.rs:31` and `:222` also cite "Decision 31". Two of the 13 are in the
+        `profile/apply.rs` doc comments.
+      - re-run the docs tests and the verify command on the merged tree.
+  - **Accepted:**
+    - F's option (a) for A's warn 4: A allowed it, and F recorded it here.
+    - The brief's ruling that `cli-surface.txt` does not change: the fixture holds no exit codes (checked).
+    - T-green's `scenario.rs:407` wording repair: stale on `main` since #857, and needed for the scenario to reach step 5.
+    - F leaving #664's CHANGELOG entry as written: the repo keeps `[Unreleased]` entries as written.
+- **Assumed:**
+  - T-green's GREEN on `07a576c` holds for `c1f7deb`, which adds handoffs only. I re-ran no build or test, as the role
+    says.
+  - A textually clean merge has no semantic conflict beyond the numbering. #860 shares only four docs files with this
+    branch. T-green re-verifies on the merged tree.
+- **Hedged:**
+  - **Why REWORK, and not PASS with a note for the merger.** Nothing automatic catches the duplicate numbers. The fix
+    touches a production file, so it should pass the gates. #835's S required a merge of `origin/main` through a REWORK
+    the same way.
+  - **The unpushed history.** T-red's commit added the operator's machine-derived Herdr session names, and T-green
+    redacted them in the tree. They stay in the unpushed commits, so this is an advisory for the operator before the
+    push, not a REWORK item.
+    - Nothing new is disclosed: the same name is already public on `main` (#834's handoff) and in issue #655.
+    - #835's S treated its own unpushed-history item the same way.
+- **Evidence:**
+  - **Live:**
+    - `git fetch` at the start of the audit, then the shared `origin/main` at `4e691d9`, confirmed with
+      `git ls-remote origin` (the branch on origin is `05d8e6a`);
+    - `gh pr view 860`: merged at 06:29 MDT;
+    - `gh issue view 853`: the body and two comments, nothing new since 04:12 MDT;
+    - `gh pr list --head issue-853-implementation`: none;
+    - `git merge-tree --write-tree HEAD origin/main`: clean, and the merged ADR-0021 lists 29, 30, 31, 30, 31.
+  - **Read:**
+    - the brief, every handoff, this journal and `evidence.md`;
+    - the production diff in full;
+    - `order.rs`, `refused.rs` and `grid.rs` in full, and the other test diffs;
+    - the planner (`plan.rs:75-216`);
+    - `tx_apply.rs` (`plan`, `choose`, `dry`, `halted`) and `run.rs` (`step`);
+    - `scratch/mod.rs` (`start`, `herdr_snapshot`);
+    - the ADR, guide and CHANGELOG diffs;
+    - `CONTRIBUTING.md` and `ci.yml`;
+    - the release's workflow script: S's routing and the PR phase's push;
+    - #835's `handoff-S.md` and journal, as precedent.
+  - **Greps:**
+    - the old order and the old exit rule, over `crates`, `docs` and `CHANGELOG.md`;
+    - the cites of decisions 30 and 31 on the branch, on `main` and in the merged tree;
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added `src` lines;
+    - `wc -l` of every touched file;
+    - private names, IPs, home paths and secrets, in the diff and in each branch commit;
+    - consumers of `profile apply` in `src`, `scripts` and `plugins`: none;
+    - other tests that run `profile apply` (`pane_claude/mixed.rs`).
