@@ -24,10 +24,11 @@
 //!   among them;
 //! - #832's: [`HerdrPort::observe_pane`] and its batch form [`HerdrPort::observe_panes`],
 //!   what Herdr says about a pane that no record names;
-//! - #835's: the required [`HostPort::foreground_commands`], the command name of each pane
-//!   process of a tmux session (how the import tells a pane that runs Claude Code). It is
-//!   required so that the compiler finds every implementation, a wrapper port included: a
-//!   default answers silently in place of a port a wrapper forgot to forward;
+//! - #835's: the required [`HostPort::foreground_commands`], the command name of the
+//!   foreground process of each pane of a tmux session (how the import tells a pane that
+//!   runs Claude Code), and [`HerdrPort::observe_pane`] lost its default. Both are required
+//!   so that the compiler finds every implementation, a wrapper port included: a default
+//!   answers silently in place of a port a wrapper forgot to forward;
 //! - #831's, a second harness (ADR-0021 section 15): every [`HarnessPort`] method keyed by a
 //!   server's `port: u16` is keyed by a [`HarnessEndpoint`] instead (a port, or a single
 //!   process), the change of the port that #802 decision 2 set as the pattern, so a call
@@ -220,6 +221,39 @@ impl Key {
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
 /// Only the adapter converts a [`GridPos`] to Herdr's own order and base.
+///
+/// [`HerdrPort::observe_pane`] has no default (#835), so an implementation that leaves it
+/// out, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec, Key, PaneError, PaneId};
+///
+/// struct NoObservation;
+///
+/// impl HerdrPort for NoObservation {
+///     fn ensure_pane(&self, _: &HerdrSpec) -> Result<HerdrPane, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn send_text(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn send_keys(&self, _: &PaneId, _: &[Key]) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn read(&self, _: &PaneId, _: usize) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+///     fn close(&self, _: &PaneId) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn snapshot(&self) -> Result<HerdrSnapshot, PaneError> {
+///         Ok(HerdrSnapshot { panes: Vec::new() })
+///     }
+///     fn version(&self) -> Result<String, PaneError> {
+///         Ok(String::new())
+///     }
+/// }
+/// ```
 pub trait HerdrPort: Send + Sync {
     /// Make a pane exist at `spec.grid` by issuing right/down splits, or fail
     /// loudly; never relocates a healthy pane. An occupied cell answers its pane and
@@ -252,20 +286,20 @@ pub trait HerdrPort: Send + Sync {
     /// fresh and never stored; `pane list` and `pane get` show it for a pane no record
     /// names.
     ///
-    /// The default answers an empty [`PaneObservation`]: an implementation that cannot
-    /// tell says so with `None` fields and never guesses, so one that does not override
-    /// this keeps compiling and reports nothing. `pane-not-found` when Herdr has no such
-    /// pane.
-    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError> {
-        let _ = pane;
-        Ok(PaneObservation::default())
-    }
+    /// An implementation that cannot tell says so with `None` fields (an empty
+    /// [`PaneObservation`]) and never guesses. `pane-not-found` when Herdr has no such pane.
+    ///
+    /// Required since #835, with no default. The default answered an empty observation, so a
+    /// wrapper port that did not forward it reported nothing, silently, over the real wiring;
+    /// now the compiler finds every implementation.
+    fn observe_pane(&self, pane: &PaneId) -> Result<PaneObservation, PaneError>;
 
     /// [`HerdrPort::observe_pane`] for several panes at once: one observation for each of
     /// `panes`, in the same order, where a pane that cannot be observed (Herdr does not have
     /// it, or the call failed) reports an empty one. A list of many unmanaged panes costs one
     /// call to Herdr when the implementation can read them together; the default asks about
-    /// each pane in turn.
+    /// each pane in turn. A wrapper port overrides it to forward the batch, so that a list
+    /// stays one call to the port it wraps.
     fn observe_panes(&self, panes: &[PaneId]) -> Vec<PaneObservation> {
         panes
             .iter()
@@ -310,6 +344,30 @@ impl PaneObservation {
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// No method has a default (#835), so an implementation that answers only the four methods
+/// that came before `foreground_commands`, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct PidsOnly;
+///
+/// impl HostPort for PidsOnly {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+/// }
+/// ```
 pub trait HostPort: Send + Sync {
     /// Make the tmux session `name` exist, working in `cwd`.
     fn ensure_session(&self, name: &PaneName, cwd: &str) -> Result<(), PaneError>;

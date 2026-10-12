@@ -1,13 +1,18 @@
 //! The join, per pane (#650): what one pane directory becomes, from its files, Herdr's
 //! snapshot and what its chain observed. Pure: the port calls are `observe`'s.
 //!
+//! A pane whose tmux session runs Claude Code is left alone first (#835): one
+//! `harness-claude-code` finding, no record and nothing else, so it blocks nothing. Every other
+//! pane is joined:
+//!
 //! 1. **The Herdr pane** is the snapshot entry in the run's Herdr session whose label is the
 //!    pane's name. None is `pane-unlabelled`, two or more `pane-label-ambiguous`; either
 //!    leaves the pane unplaced. The record takes the entry with its label cleared (a label is
 //!    an observation, never recorded state, as launch records it).
 //! 2. **The position** is the entry's cell. A name `hj-<cell>` whose cell differs is only
 //!    information (`name-cell-differs`).
-//! 3. **The tmux session and the server**: `observe`'s findings.
+//! 3. **The tmux session and the server**: `observe`'s findings. A session that could not be
+//!    read, or a chain that did not finish, is `harness-unreadable`, a problem (#835).
 //! 4. **The session of record** is `last-session`, when every other file present names it
 //!    and the healthy server's list holds it. Recency is never a tie-break, and a session id
 //!    read from a file is never recorded as observed (I6).
@@ -26,7 +31,7 @@ use crate::{Argv, GridPos, HerdrPane, Pane, PaneName, Ports, ProfileName};
 
 use super::files::{FileState, LauncherCommand, PaneFiles, SessionFiles};
 use super::findings::{Finding, ImportFinding, Level};
-use super::observe::{observe_all, tmux_finding, Observed, Target};
+use super::observe::{lost_finding, observe_all, tmux_finding, Chain, Observed, Target};
 use super::{Action, PaneRow};
 
 /// The prefix of the old launcher's pane names, `hj-<cell>` (`hj-c1r2`): the only names whose
@@ -93,9 +98,23 @@ impl Outcome {
             message,
         )
     }
+
+    /// A pane whose tmux session runs Claude Code (#835): no record, never blocking.
+    pub(super) fn claude_code(name: &PaneName) -> Self {
+        let message = "its tmux session runs Claude Code, and the import does not adopt such a \
+                       pane until #831's adoption step lands (--adopt-claude-code), so it leaves \
+                       the pane alone";
+        Self::left_alone(
+            name,
+            Action::Skipped,
+            ImportFinding::HarnessClaudeCode,
+            message,
+        )
+    }
 }
 
-/// Observe every pane of `panes` at once, then join each.
+/// Observe every pane of `panes` at once, then join each; a pane whose tmux session runs
+/// Claude Code is left alone instead (#835).
 pub(super) fn assess_all(
     ports: Ports<'_>,
     context: &Context<'_>,
@@ -112,7 +131,11 @@ pub(super) fn assess_all(
     panes
         .iter()
         .zip(observed)
-        .map(|(files, seen)| assess(context, files, &seen))
+        .map(|(files, observed)| match observed {
+            Observed::ClaudeCode => Outcome::claude_code(&files.name),
+            Observed::Seen(chain) => assess(context, files, Some(&chain)),
+            Observed::Lost => assess(context, files, None),
+        })
         .collect()
 }
 
@@ -122,13 +145,14 @@ struct Seen {
     session: Option<String>,
 }
 
-/// Join one pane: its findings, its row and (when it has no problem) its record.
-fn assess(context: &Context<'_>, files: &PaneFiles, observed: &Observed) -> Outcome {
+/// Join one pane: its findings, its row and (when it has no problem) its record. `chain` is
+/// what the pane's chain observed, `None` when it did not finish.
+fn assess(context: &Context<'_>, files: &PaneFiles, chain: Option<&Chain>) -> Outcome {
     let name = &files.name;
     let mut findings = files.problems.clone();
     let herdr = join(context, name, &mut findings);
     let port = files.launcher.as_ref().map(|entry| entry.port);
-    let (health, listed) = observations(name, port, observed, &mut findings);
+    let (health, listed) = observations(name, port, chain, &mut findings);
     let session = session_of_record(name, port, &files.sessions, listed, &mut findings);
     let command = command_of(files, &mut findings);
     let role = if context.orchestrators.contains(name) {
@@ -227,16 +251,16 @@ fn name_cell(name: &PaneName, grid: GridPos) -> Option<Finding> {
 }
 
 /// Step 3: the findings of what the chain observed, the health the record takes and the
-/// sessions of a healthy server whose list was read.
+/// sessions of a healthy server whose list was read. A chain that did not finish read
+/// nothing: `harness-unreadable` (#835).
 fn observations<'o>(
     name: &PaneName,
     port: Option<u16>,
-    observed: &'o Observed,
+    chain: Option<&'o Chain>,
     findings: &mut Vec<Finding>,
 ) -> (Health, Option<&'o [String]>) {
-    let Observed::Seen { tmux, server } = observed else {
-        let message = "the pane was not observed: its check did not finish".to_owned();
-        findings.push(Finding::about(name, ImportFinding::ObserveFailed, message));
+    let Some(Chain { tmux, server }) = chain else {
+        findings.push(lost_finding(name));
         return (Health::Unknown, None);
     };
     findings.extend(tmux_finding(name, tmux));
