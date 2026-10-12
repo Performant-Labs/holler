@@ -75,7 +75,9 @@ ctx_hard = 900000
 # LAYOUT — a nested array: outer = columns left to right, inner = each column's panes top to
 # bottom. Every [[pane]] name appears exactly once, and no column is taller than the column to
 # its left. Must come before any table header below (a bare key after a [table]/[[array]] header
-# silently becomes a member of that table in TOML, not a top-level key).
+# silently becomes a member of that table in TOML, not a top-level key), and on one line:
+# instance.sh reads a line that starts with [ as a table header, so panes.sh check refuses a
+# layout spread over several lines, naming layout.
 layout = [["r1c1", "r2c1"], ["r1c2"]]
 
 workspace = "herald-relay"
@@ -157,12 +159,12 @@ workspace command of its own (`herdr.sh run` refuses every word but `status`, `s
    `--harness claude` for a Claude Code pane). A spec-only launch writes the pane's spec into the
    profile and touches nothing live. The profile's name is the workspace's.
 4. **The dry run, then `profile apply` alone** (Stage 7). The dry run prints the steps apply would
-   take; the apply then creates every pane of the grid on its own, in its creation order (a
-   workspace's column 1 by row, then the rest by row and column), adopts a healthy pane that matches
-   its spec and relaunches an unhealthy agent. It never kills a healthy pane and never relaunches an
-   orchestrator. A rerun is the same sequence without `profile create`. The wizard launches no pane
-   outside that one apply. Apply's exit codes and what it prints (0, 1 for a failed step, 3 for a
-   refused one) are in [pane-control.md section 6](pane-control.md#6-profiles); the wizard stops and
+   take; the apply then creates every pane of the grid on its own, in its own creation order, adopts
+   a healthy pane that matches its spec and relaunches an unhealthy agent. It never kills a healthy
+   pane and never relaunches an orchestrator. A rerun is the same sequence without `profile create`.
+   The wizard launches no pane outside that one apply. Apply's creation order, its exit codes and
+   what it prints (0, 1 for a failed step, 3 for a refused one) are in
+   [pane-control.md section 6](pane-control.md#6-profiles); the wizard stops and
    asks on a refused, failed or reported step, and gives the apply a timeout above its expected
    duration (up to 10 s to observe, plus about 15 s per create).
 5. **One body** (Stage 8) on the same machine, joined over `ws://127.0.0.1:<hub_port>`, whose attach
@@ -280,8 +282,14 @@ anything already there, not merely a different string.
   under `server:` and still accepts the older `server: not running`.
 - **A resumed orchestrator can't prove the `AGENTS.md` briefing works.** It may already know about
   Holler from its own past turns. A pane the run just created is a fresh session; on a rerun that
-  adopted the orchestrator, give it a fresh one first (`holler pane reset PANE`, with your yes,
-  since it drops the conversation). Then ask it something with no Holler context, like "Send a hello
+  adopted the orchestrator, the wizard gives it a fresh one first, with your yes, since it drops the
+  conversation: it runs `holler pane reset PANE --as-operator` through its door (the orchestrator's
+  pane changes only as the operator's deliberate act; without the flag the reset is refused as
+  `orchestrator-pane`). An OpenCode orchestrator then has a new session of record, so the wizard
+  derives the body config again and restarts the body, and its old session stays on its server,
+  where a doctor pass reports it as a `stray-session` (no Holler verb deletes a session). A Claude
+  Code orchestrator is relaunched on a fresh session id: it has no body row to derive again and no
+  server to keep a stray session. Then ask it something with no Holler context, like "Send a hello
   to r2c1" — it should find the roster, resolve the namespaced session name, and get a real reply.
 
 ## Running an instance beside another
@@ -350,7 +358,8 @@ state the session it targets.
 A named session is driven from a terminal outside any Herdr pane (see "Herdr session"), and
 `holler` calls in your own shells need `HOLLER_STATE_DIR=<state_dir>` (for example
 `HOLLER_STATE_DIR=$HOME/.holler-work holler hub status`); without it they reach the default
-instance.
+instance. A `holler pane` or `holler profile` call needs more than that: it goes through the
+wizard's door (see "Basic Herdr commands").
 
 ## Instance state and the ledger
 
@@ -643,8 +652,15 @@ workspace; `prefix+shift+n` / `prefix+shift+w` / `prefix+shift+d` create, rename
 workspace (also `herdr workspace close <id>`); `prefix+v` / `prefix+minus` split right / down;
 `prefix+h/j/k/l` move between panes; `prefix+z` / `prefix+x` zoom and close a pane; `prefix+q`
 detaches and leaves everything running. The wizard's panes are Holler's: to close, restart or
-replace one, use Holler (`holler pane close PANE`, `holler pane relaunch PANE`), not `prefix+x`, or the
-registry keeps a record of a pane that is gone.
+replace one, use Holler through the wizard's door, not `prefix+x`, or the registry keeps a record of
+a pane that is gone. The wizard's final report prints what the door needs, the instance's
+`<herdr_env>` settings and the skill's absolute `lib` path, so from your own shell a close is
+`<herdr_env> bash <lib>/herdr.sh holler pane close PANE --profile <profile>` and a relaunch is
+`<herdr_env> bash <lib>/herdr.sh holler pane relaunch PANE`. Never a bare `holler pane` verb, with
+only `HOLLER_STATE_DIR` or with no environment: without the instance's Herdr session and tmux socket,
+a close reads the record, then stops the processes of the tmux session of that name on tmux's default
+server, which may be another instance's pane, and only then fails on the missing Herdr session,
+leaving the record and the Herdr pane in place.
 
 It also names any workspace the wizard did not create that sits beside the new one (a restored
 saved session, or a fresh server's own first workspace, which holds one pane that is not the

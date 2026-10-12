@@ -28,22 +28,27 @@
 # The profile P the wizard builds is the workspace label (`workspace`, default `holler`); `grid`
 # prints it, so the agent never chooses it, and `plan` / `teardown` refuse any other.
 #
-# What it reads (docs/setup-wizard.md, "The config file"): the bare top-level `layout` (columns of
-# pane names, left to right, each top to bottom; no column taller than the column to its left,
-# because Herdr adds a row only below a row of one pane), the top-level defaults `model`,
-# `effort`, `ctx_soft` and `ctx_hard`, and every `[[pane]]` table (`name`, `dir`, `harness`,
-# `role`, `agent`, `backend_port`, `model`, `effort`, `ctx_soft`, `ctx_hard`). A Claude Code pane
-# never inherits the top-level `model` (it names an OpenCode model). `[[orchestrator]]`,
+# What it reads (docs/setup-wizard.md, "The config file"): the bare top-level `layout`, on one
+# line (columns of pane names, left to right, each top to bottom; no column taller than the column
+# to its left, because Herdr adds a row only below a row of one pane), the top-level defaults
+# `model`, `effort`, `ctx_soft` and `ctx_hard`, and every `[[pane]]` table (`name`, `dir`,
+# `harness`, `role`, `agent`, `backend_port`, `model`, `effort`, `ctx_soft`, `ctx_hard`). A Claude
+# Code pane never inherits the top-level `model` (it names an OpenCode model). `[[orchestrator]]`,
 # `[[session]]` and their keys are retired and refused by name.
 #
 # The `[instance]` table and `workspace` are instance.sh's: this script runs it (in WIZARD_LIB,
-# else its own directory) and reads only the lines it prints. Its value parser (trim, value_of)
-# is a copy of instance.sh's and accepts exactly the same TOML subset. The port rule is
-# instance.sh's too, applied to the OpenCode panes in layout order: a pane's own backend_port,
-# else backend_port_base + its index (a pane with its own port keeps its index), at most 65535,
-# no two panes on one port, and a non-default instance stays out of the first instance's range
-# (the base instance.sh prints for a config with no table, up the pane count) unless every
-# OpenCode pane sets its own port.
+# else its own directory) and reads only the lines it prints. Its value helpers (trim, value_of,
+# strip_slash) are copies of instance.sh's, and it accepts exactly the same TOML subset: one value
+# per line. instance.sh reads every line that starts with `[` as a table header, so for it a
+# `layout` written over several lines would end the top level at its first continuation line,
+# and the keys after it (`workspace` among them) would go unread: such a `layout` is refused,
+# naming `layout`.
+#
+# The port rule is instance.sh's too, applied to the OpenCode panes in layout order: a pane's own
+# backend_port, else backend_port_base + its index (a pane with its own port keeps its index), at
+# most 65535, no two panes on one port, and a non-default instance stays out of the first
+# instance's range (the base instance.sh prints for a config with no table, up the pane count)
+# unless every OpenCode pane sets its own port.
 #
 # bash 3.2 and POSIX awk (no associative arrays in bash, no GNU-only flags), so it runs on macOS
 # and Linux.
@@ -115,7 +120,8 @@ function num_in(v, lo, hi,   t) {
     t = substr(v, 3)
     return (substr(v, 1, 2) == "n:" && t ~ /^[0-9]+$/ && length(t) <= 10 && t + 0 >= lo && t + 0 <= hi)
 }
-function noslash(s) { while (length(s) > 1 && substr(s, length(s), 1) == "/") s = substr(s, 1, length(s) - 1); return s }
+# Drops trailing slashes (keeps a lone "/").
+function strip_slash(s) { while (length(s) > 1 && substr(s, length(s), 1) == "/") s = substr(s, 1, length(s) - 1); return s }
 # A shell word: bare when it is safe as it is, else single-quoted.
 function q(s) { return (s ~ SAFE ? s : qq(s)) }
 function qq(s,   n, parts, i, out) {
@@ -207,7 +213,8 @@ function top_key(key, raw) {
     if (key == "layout") {
         if (has_layout) { err("layout is given twice"); return }
         has_layout = 1; lraw = strip_comment(raw)
-        if (depth_of(lraw) > 0) inlayout = 1
+        # Left open on its own line: refused (check_layout), its continuation lines only skipped.
+        if (depth_of(lraw) > 0) { inlayout = 1; layout_open = NR }
         return
     }
     if (key == "workspace") return
@@ -308,7 +315,7 @@ function check_panes(   i, v, nm, w, d, h, r) {
             d = substr(pv[i, "dir"], 3)
             if (d == "~" || substr(d, 1, 2) == "~/") {
                 if (home !~ /^\//) err("dir of " w " starts with ~ but HOME is not an absolute path")
-                else d = noslash(home) substr(d, 2)
+                else d = strip_slash(home) substr(d, 2)
             } else if (substr(d, 1, 1) != "/") err("dir of " w " must be an absolute path or start with ~/: " d)
         }
         pdir[i] = d
@@ -354,7 +361,8 @@ function check_panes(   i, v, nm, w, d, h, r) {
 # The layout against the panes: every name placed once, defined, and a staircase. 1 when sound.
 function check_layout(   c, r, nm, i, ok) {
     if (!has_layout) { err("layout is missing: a bare top-level layout = [[...], ...] names every pane, columns left to right, each top to bottom"); return 0 }
-    if (inlayout || !parse_layout(lraw)) { err("layout must be a nested array of quoted pane names, columns left to right and each top to bottom, for example [[\"r1c1\", \"r2c1\"], [\"r1c2\"]]"); return 0 }
+    if (layout_open) { err("layout must be written on one line, the line of its key (line " layout_open " leaves it open): instance.sh reads a line that starts with [ as a table header, so the keys after a layout written over several lines, workspace among them, would go unread"); return 0 }
+    if (!parse_layout(lraw)) { err("layout must be a nested array of quoted pane names, columns left to right and each top to bottom, for example [[\"r1c1\", \"r2c1\"], [\"r1c2\"]]"); return 0 }
     if (ncol == 0) { err("layout has no column"); return 0 }
     ok = 1
     for (c = 1; c <= ncol; c++) {
@@ -421,9 +429,9 @@ function read_instance(   n, l, i, line) {
     nondefault = (iname != "default")
 }
 function config_home(   x) {
-    x = noslash(ENVIRON["XDG_CONFIG_HOME"])
+    x = strip_slash(ENVIRON["XDG_CONFIG_HOME"])
     if (x ~ /^\//) return x
-    if (home ~ /^\//) return noslash(home) "/.config"
+    if (home ~ /^\//) return strip_slash(home) "/.config"
     return ""
 }
 function spec(i, nm,   s) {
@@ -447,6 +455,7 @@ BEGIN {
 }
 {
     line = trim($0)
+    # The rest of a layout left open on its line (refused in check_layout), up to its last bracket.
     if (inlayout) {
         lraw = lraw " " strip_comment(line)
         if (depth_of(lraw) <= 0) inlayout = 0
@@ -493,9 +502,9 @@ END {
             sd = istate
             if (sd == "~" || substr(sd, 1, 2) == "~/") {
                 if (home !~ /^\//) { print "panes.sh: state_dir starts with ~ but HOME is not an absolute path" > "/dev/stderr"; exit 1 }
-                sd = noslash(home) substr(sd, 2)
+                sd = strip_slash(home) substr(sd, 2)
             }
-            sock_name = "WIZARD_TMUX_SOCKET"; sock = noslash(sd) "/tmux.sock"
+            sock_name = "WIZARD_TMUX_SOCKET"; sock = strip_slash(sd) "/tmux.sock"
         } else {
             ch = config_home()
             if (ch == "") { print "panes.sh: neither XDG_CONFIG_HOME nor HOME is an absolute directory, so the default Herdr socket has no path" > "/dev/stderr"; exit 1 }

@@ -272,3 +272,45 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
     - `proof.rs` with `pub(super) ` stripped equals `main` (825 lines);
     - privacy grep of all 8625 added lines: clean;
     - `diff --check`: whitespace only inside the brief's verbatim evidence.
+
+## F, rework of S's REWORK (Phase 6, rework 1): 2026-10-12T10:54-06:00 (MDT)
+
+- **Decided:**
+  - **Item 1.** The user's route to a pane verb is the door. Stage 10's report prints the instance's `<herdr_env>`
+    and the absolute `lib` path, with every value written out. Stage 11's note and the docs' "Basic Herdr commands"
+    give `<herdr_env> bash <lib>/herdr.sh holler pane close NAME --profile <profile>` and `... pane relaunch NAME`,
+    and say what a bare pane verb does. The two "own shells" sentences (Stage 1, "Running an instance beside
+    another") now say a pane or profile call needs the door. Printing the five `HOLLER_*` values instead was
+    rejected: a second spelling of the door's literals that skips its scrub (D8).
+  - **Item 2, S's option (a).** `panes.sh` refuses a `layout` left open on its own line (exit 1, naming `layout`,
+    "on one line"), skipping its continuation lines so the refusal is one message. (b) was rejected: it patches
+    one key and keeps a parser that differs from `instance.sh`'s. The header, the two `LAYOUT` comments, Stage 1's
+    refusal list and the CHANGELOG's Breaking Changes item state the rule.
+  - **Item 3.** Stage 10 and the docs run `holler pane reset PANE --as-operator` through the door, with the user's
+    yes, and say what the reset leaves: an OpenCode orchestrator's new session of record (derive Stage 8's body
+    config again and restart the body), the old session as `stray-session` (Stage 9's gate shows it; no exception
+    added, D14), and nothing of either for a Claude Code orchestrator.
+  - **Item 4.** The docs drop the restated creation order; the section 6 pointer names it.
+  - **Also taken: A-dup warn 4.** `noslash` is renamed `strip_slash`, byte-identical to `instance.sh:43-44`, and
+    listed in the header.
+  - **Not taken: S's advisories 1 to 6** (the one-sided socket guard needs `herdr.sh` and two T cases; the others
+    are test-only, observations, or fail closed). Recorded in handoff-F-rework.md.
+- **Assumed:**
+  - No user relies on a multi-line `layout`: no doc example, fixture or test writes one (grep of every tracked
+    file outside `docs/handoffs/`), and the wizard writes the config itself in Stage 1.
+  - The user's shell does not export `WIZARD_*_SOCKET`, so the door line printed for one instance carries only
+    that instance's socket (S's advisory 1 stays open).
+- **Hedged:**
+  - Item 1's description of a bare close is read from code (`wiring.rs`, `env.rs`, `close.rs`), not run: no test here
+    starts a real tmux or Herdr.
+  - The `stray-session` that a reset leaves will stop a later Stage 9 run as a Gate; the text tells the agent what
+    it is, rather than changing D14's gate.
+  - **A flaky `holler-hub` test, not this change.** `profile_rename_faults_test`'s inode assertion (`:250-254`)
+    fails when ext4 hands the freed inode straight back. This session's `TMPDIR` is ext4: the test fails 10 times of
+    10 run alone, failed in my first full run, and passed in the second. The hub crate is identical to `origin/main`,
+    and `main`'s CI at `6eff9cc` is green. A follow-up for #665's test is the orchestrator's call; not filed.
+- **Evidence:** `wizard_scripts` 303 passed (also with mawk and busybox awk first on `PATH`); `docs_cli_test` 3 and
+  `docs_pane_control_test` 19 passed; the CI workspace command with `--no-fail-fast`: 167 binaries, 2624 passed,
+  0 failed (handoff-F-rework.md); `lint.sh` and `changelog-check.sh` pass; `bash -n` and `shellcheck` clean; S's
+  repro and four variants run by hand under gawk, mawk and busybox awk; seven evidence.md entries for the unchanged
+  code relied on.

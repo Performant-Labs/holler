@@ -161,3 +161,74 @@ Phase 6 (F) entries. Each fact is quoted from unchanged source at the branch's b
   > its record names, which must be the adapter's session too. The flag is required even when `HOLLER_HERDR_SESSION` is set, and is not defaulted from it: the
   > variable configures the adapter, and the flag names the session the verb acts on. **The two must name the same
   > session**, and a mismatch is not answered the same way by every verb:
+
+## Added by F (Phase 6 rework, S's REWORK items 1 to 3)
+
+- **Fact:** `instance.sh` reads every line that starts with `[` as a table header, and reads `workspace` only while no header has been seen, so a continuation line of a `layout` written over several lines ends its top level and a `workspace` after it is never read; `panes.sh` therefore refuses such a `layout` (item 2).
+  **Source:** `agent-skills/herdr-setup/lib/instance.sh:69-71`, `agent-skills/herdr-setup/lib/instance.sh:87`
+  **Verbatim excerpt:**
+  > if (substr(line, 1, 1) == "[") {
+  >     seen_table = 1
+  >     if (line ~ /^\[instance\]/) {
+  >
+  > if (section == "" && key == "workspace") {
+
+- **Fact:** a pane verb keeps each configuration error for its port's first use, and the Herdr port is built lazily, so a verb with no `HOLLER_HERDR_SESSION` acts through its other ports before the Herdr error surfaces (item 1).
+  **Source:** `crates/holler-cli/src/pane/wiring.rs:148`, `crates/holler-cli/src/pane/wiring.rs:160`
+  **Verbatim excerpt:**
+  > /// The ports `env` configures, each configuration error kept for its port's first use. No
+  >
+  > Arc::new(LazyHerdr::new(move || connect_herdr(&herdr_config)));
+
+- **Fact:** with `HOLLER_TMUX_SOCKET` unset, the host and the harness use tmux's default server (item 1).
+  **Source:** `crates/holler-cli/src/pane/wiring/env.rs:86-94`
+  **Verbatim excerpt:**
+  > /// The tmux server of the host and the harness (D6): `HOLLER_TMUX_SOCKET` as a socket path, or
+  > /// tmux's default socket when it is unset. A relative or empty value is `usage` naming the
+  > /// variable; it never falls back to the default socket.
+  > pub fn tmux_socket(env: Lookup<'_>) -> Result<TmuxSocket, PaneError> {
+  >     match env(TMUX_SOCKET) {
+  >         Some(value) => absolute(TMUX_SOCKET, value).map(TmuxSocket::Path),
+  >         None => Ok(TmuxSocket::Default),
+  >     }
+  > }
+
+- **Fact:** a live close stops the pane's owned processes on the host before it closes the Herdr pane, so a close whose Herdr configuration is missing has already stopped the processes of the tmux session of that name when it fails, and the record and the Herdr pane stay (item 1).
+  **Source:** `crates/holler-cli/src/pane/close.rs:180-184`
+  **Verbatim excerpt:**
+  > reached = Some(Step::StopOwned);
+  > ports.host.stop_owned(&name)?;
+  > reached = Some(Step::Close);
+  > ports.herdr.close(&record.herdr.pane_id)?;
+  > reached = Some(Step::Delete);
+
+- **Fact:** a reset (or switch) of the orchestrator's pane is refused as `orchestrator-pane` unless `--as-operator` is passed (item 3).
+  **Source:** `crates/holler-pane/src/tx_switch.rs:345-355`
+  **Verbatim excerpt:**
+  > fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError> {
+  >     if record.role == PaneRole::Orchestrator && !as_operator {
+  >         return Err(PaneError::Refused {
+  >             code: ORCHESTRATOR_PANE,
+  >             message: format!(
+  >                 "{} is the orchestrator's pane; pass --as-operator to change it",
+  >                 record.name
+  >             ),
+  >         });
+  >     }
+  >     Ok(())
+
+- **Fact:** after a successful reset the previous session stays on the pane's server, unrecorded, and doctor reports it as a stray session; nothing deletes a session (item 3).
+  **Source:** `crates/holler-cli/src/pane/reset.rs:13-15`, `docs/pane-control.md:268`
+  **Verbatim excerpt:**
+  > //! message that does not land fails the run after the record, which stands. After a
+  > //! successful reset the previous session stays on the server too, as a stray: no port deletes
+  > //! a session.
+  >
+  > once it is recorded. The previous session stays on the server, and `doctor` then reports it as a `stray-session`.
+
+- **Fact:** a Claude Code pane is reset by a relaunch on a fresh session id, and has no server list, so `stray-session` never fires for it (item 3).
+  **Source:** `docs/pane-control.md:275`, `docs/pane-control.md:615`
+  **Verbatim excerpt:**
+  > an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. A Claude Code pane is reset by a relaunch on
+  >
+  > has no server list, so `session-of-record-missing`, `tui-foreign-session` and `stray-session` never fire for it. It has

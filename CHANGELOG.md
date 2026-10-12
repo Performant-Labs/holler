@@ -616,9 +616,10 @@ fills this file in at release time.
   orchestrator is a role on an OpenCode or Claude Code pane. `[[orchestrator]]` and `[[session]]`, the free-form `cmd`,
   remote attach-mode sessions (with `endpoint`, `mode`, `session_id`, `remote_host` and `remote_tailnet_host`) and the
   manual-relay mode are gone: `panes.sh check` refuses each by name, and the wizard shows a conversion as text and never
-  rewrites the old file. `layout` must be a staircase (no column taller than the column to its left), the set of grids
-  `holler profile apply` can build. `herdr.sh label` and every pane and workspace word of `herdr.sh run` are gone (`run`
-  refuses them with exit 2, naming `holler pane`). `hub_host` is ignored and `serve_https_port` unused.
+  rewrites the old file. `layout` goes on one line and must be a staircase (no column taller than the column to its
+  left), the set of grids `holler profile apply` can build. `herdr.sh label` and every pane and workspace word of
+  `herdr.sh run` are gone (`run` refuses them with exit 2, naming `holler pane`). `hub_host` is ignored and
+  `serve_https_port` unused.
 
 ### Bug Fixes
 - `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic

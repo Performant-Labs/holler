@@ -145,6 +145,8 @@ ctx_hard = 900000
 # this grid and appears in it exactly once. No column may be taller than the column to its left (the
 # first column is the tallest): Herdr adds a row only below a row of one pane, so that is the set of
 # grids Holler can build. Stage 1's check refuses a taller column, naming `layout` and the column.
+# Written on ONE line: `instance.sh` reads a line that starts with `[` as a table header, so the
+# check refuses a layout spread over several lines, naming `layout`.
 #
 # MUST come before every table header below (`[instance]`, `[[pane]]`) — a bare top-level key
 # placed after any table header is parsed as belonging to THAT table, not the file's top level.
@@ -577,7 +579,8 @@ everything else here can be read or proposed.
      a named session is driven from a terminal outside any Herdr pane (rule (2) of "Two rules for
      a non-default instance", below), and `holler` calls in the user's own shells need
      `HOLLER_STATE_DIR=<state_dir>` (for example `HOLLER_STATE_DIR=$HOME/.holler-work holler hub
-     status`), or they reach the default instance instead.
+     status`), or they reach the default instance instead. A `holler pane` or `holler profile` call
+     needs the door, not that variable alone (Stage 11's first note).
 
    **Then, once the panes and the session are settled, ask the last question: the
    workspace name.**
@@ -641,17 +644,18 @@ the default state directory (`~/.holler`: it would share the first instance's st
 `panes.sh check` validates the panes, and only the panes: it reads the `[instance]` table and the
 workspace from what `instance.sh` prints, never again from the file. It exits 1 with one message per
 problem, each naming the key: a name outside the grammar or given twice, a name missing from `layout` or
-extra in it, a column taller than the column to its left (naming `layout` and the column), a relative
-`dir`, a `harness` or `role` outside its set, no orchestrator, a pane with no `model`, `effort`,
-`ctx_soft` or `ctx_hard` of its own or from the defaults, `ctx_soft` above `ctx_hard`, an `agent` or a
-`backend_port` on a Claude Code pane, a Claude Code pane with no `model` of its own, the retired tables
-and keys (with the word "attach"), and the port rules below. On success it prints one summary line, and
-an ignored `hub_host` is one warning line. `panes.sh grid` prints the workspace, its extent (`RxC`:
-the first column's height by the number of columns), **the profile** and one `cell` line per pane in
-layout order: its cell, name, harness, role, directory (with `~/` expanded) and, for an OpenCode pane,
-its port. **Those ports are the only ports every later stage uses** (the collision plan, the specs, the
-body): never recompute one from `backend_port_base`. `panes.sh env` prints the environment literals
-below.
+extra in it, a column taller than the column to its left (naming `layout` and the column), a `layout`
+spread over several lines (it goes on one line, so that `instance.sh` reads every top-level key after
+it, `workspace` included), a relative `dir`, a `harness` or `role` outside its set, no orchestrator, a
+pane with no `model`, `effort`, `ctx_soft` or `ctx_hard` of its own or from the defaults, `ctx_soft`
+above `ctx_hard`, an `agent` or a `backend_port` on a Claude Code pane, a Claude Code pane with no
+`model` of its own, the retired tables and keys (with the word "attach"), and the port rules below.
+On success it prints one summary line, and an ignored `hub_host` is one warning line. `panes.sh grid`
+prints the workspace, its extent (`RxC`: the first column's height by the number of columns), **the
+profile** and one `cell` line per pane in layout order: its cell, name, harness, role, directory (with
+`~/` expanded) and, for an OpenCode pane, its port. **Those ports are the only ports every later stage
+uses** (the collision plan, the specs, the body): never recompute one from `backend_port_base`.
+`panes.sh env` prints the environment literals below.
 
 **Two rules for a non-default instance, stated here because Stage 3 refuses them.** (1) It never
 uses the first instance's ports: `instance.sh` refuses a `hub_port` of 41807 and a `serve_https_port`
@@ -1464,11 +1468,19 @@ resumed one proves nothing.** An orchestrator with old conversation history may 
 Holler from its own past turns, not from the briefing. Confirmed live 2026-09-23: an auto-resumed
 orchestrator's recap already mentioned earlier `holler say` calls, so it would have passed any check
 regardless of whether `AGENTS.md` worked. A pane this run created is a fresh session; on a rerun that
-adopted the orchestrator, ask before giving it one (`holler pane reset PANE` through the door, which
-drops its conversation). Then ask the user to attach (Stage 11's first row) and give that orchestrator a
-task with **no Holler context at all** — e.g. "Send a hello to `<an agent pane's name>`". Pass only if it
-discovers the roster on its own (`holler roster` in its own pane), finds the namespaced name
-(`<label>/<name>`), and gets a real reply.
+adopted the orchestrator, ask before giving it one, since it drops the conversation, and with the
+user's yes run `holler pane reset PANE --as-operator` through the door
+(`<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane reset PANE --as-operator`): the orchestrator's pane
+changes only as the operator's deliberate act, and without `--as-operator` the reset is refused as
+`orchestrator-pane`. Then say what the reset leaves. An OpenCode orchestrator has a new session of
+record, so its body row is stale: derive Stage 8's body config again and restart the body (Stage 8's
+reuse rule) before the test below. Its old session stays on its server (no Holler verb deletes a
+session), and a doctor pass reports it as `stray-session` from then on: when Stage 9's gate shows it,
+say it is the session this reset left. A Claude Code orchestrator is relaunched on a fresh session id:
+it has no body row and no server to keep a stray session. Then ask the user to attach (Stage 11's
+first row) and give that orchestrator a task with **no Holler context at all** — e.g. "Send a hello to
+`<an agent pane's name>`". Pass only if it discovers the roster on its own (`holler roster` in its own
+pane), finds the namespaced name (`<label>/<name>`), and gets a real reply.
 
 **Gate:** a CLI reply that never lands for a given OpenCode pane means its body row is stale (the pane
 was relaunched onto a new session of record, or the body was not restarted after a change): derive the
@@ -1476,8 +1488,16 @@ body config again and restart the body (Stage 8) before anything else.
 
 **Every stage green or skipped = done.** Report the final layout (which cell holds which pane, its
 harness and role) and every pane's session of record (from `pane list`), so the user has them on hand
-for a later repair. Then give the user precise instructions to actually **see** the workspace, since
-everything above ran headlessly through Holler and Herdr's socket — nothing was visible on screen yet:
+for a later repair. Also print, with every value written out, the two literals that a pane verb needs
+in the user's own shell: the instance's `<herdr_env>` (Stage 1) and the skill's absolute `lib` path
+(the value of `$WIZARD_LIB`). A pane verb the user runs goes through the same door as the wizard's
+own (`<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane ...`, Stage 11's first note). Never give the
+user a pane verb with `HOLLER_STATE_DIR` alone or with no environment: without the instance's Herdr
+session and tmux socket, a `holler pane close` stops the processes of the tmux session of that name on
+tmux's default server, which may be another instance's pane, and only then fails on the missing
+Herdr session, leaving the record and the Herdr pane in place. Then give the user precise
+instructions to actually **see** the workspace, since everything above ran headlessly through Holler
+and Herdr's socket — nothing was visible on screen yet:
 
 1. Tell the user to open a terminal and attach (Stage 11's first row has the exact command, with
    the instance's `herdr_session` when it has one), then switch to the workspace `<workspace>`
@@ -1508,9 +1528,14 @@ binding):
 Then add three notes:
 
 - **The wizard's panes are Holler's.** Moving between them, zooming one and detaching are fine; to
-  close, restart or replace one, use Holler (`holler pane close`, `holler pane relaunch`, with the
-  instance's `HOLLER_STATE_DIR` in your own shells), never `prefix+x`, or the registry keeps a record of
-  a pane that is gone (`holler pane doctor` then reports it).
+  close, restart or replace one, use Holler through the wizard's door, with the `<herdr_env>` and the
+  `lib` path Stage 10's report printed (write both out here too):
+  `<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane close NAME --profile <profile>` to close one, and
+  `<herdr_env> bash $WIZARD_LIB/herdr.sh holler pane relaunch NAME` to restart one. Never `prefix+x`,
+  or the registry keeps a record of a pane that is gone (a doctor pass then reports it), and never a
+  bare `holler pane` verb in your own shell, with only `HOLLER_STATE_DIR` or with no environment: a
+  close then stops the processes of the tmux session of that name on tmux's default server, which may
+  be another instance's pane, and fails, leaving the record and the Herdr pane in place.
 - **A restored workspace:** if `herdr.sh run workspace list` shows any workspace the wizard did
   **not** create beside the new one (a restored saved session, or the fresh server's own first
   workspace), name it with its id and pane count and say how to close it if the user wants
