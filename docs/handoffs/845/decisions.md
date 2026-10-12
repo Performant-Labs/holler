@@ -22,3 +22,6 @@
 - Assumed: `cargo machete` unavailable locally; CI runs it and the change adds no dependency.
 - Hedged: criterion 6 live run and risk 1 stay with the operator.
 - Evidence: docs/handoffs/845/handoff-T-green.md.
+
+## A (Phase 7, anti-duplication): PASS
+F extended Tui::watch and reused poll/send_by/query/known; one private `select` helper. Two warns (test-only Rig::on_select near-copy of Fake::reply, attach_test.rs at 841 lines). See handoff-A-dup.md.
