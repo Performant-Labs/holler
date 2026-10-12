@@ -21,3 +21,8 @@
 - **Assumed:** The workspace clippy error in `token_load_test.rs` (untouched file) and the `remote_admin_test` failure under load are pre-existing/unrelated (#847), since the file passes 21/21 alone three times.
 - **Hedged:** `cargo machete` is not installed, so the unused-dependency check was skipped; the diff adds no dependency.
 - **Evidence:** `docs/handoffs/848/handoff-T-green.md`.
+
+## A (anti-duplication) — 2026-10-12
+- **Decided:** PASS. F extended the existing scan in `skilltext_w5_rename.rs` and mirrored `is_cli_doc` as the brief decided; no parallel path.
+- **Hedged:** The duplicated `starts_with("docs/handoffs")` predicate is a warn only, since the brief justified it in writing.
+- **Evidence:** `docs/handoffs/848/handoff-A-dup.md`.
