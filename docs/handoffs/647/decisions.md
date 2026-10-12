@@ -248,3 +248,38 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
     - `gh api .../compare/6eff9cc...05471b9`: remote `main` gained #847 and #848, both test-only, with no overlap;
     - `wc -l` on the four touched files.
   - Read: `handoff-S.md`, `handoff-F.md` (Rework round), `handoff-T-green.md` (Re-entry 2), this journal's S, F and T entries, `findings.rs:395-458`, `error.rs:689-698`, `profile/delete.rs:140-219`, `profile_scope.rs:30-56, 255-272`, `create.rs:232-260`, `import/writes.rs:60-90, 168-186`, `reconcile/drift.rs` (the message), `docs/pane-control.md:606, 650` and `ADR-0021.md:530-531`.
+
+## S (Phase 8, spec audit, round 2 after the S REWORK) — 2026-10-12T12:42-06:00
+- **Decided:**
+  - PASS (`handoff-S.md`, "Round 2"), at `f62ff16`. The A precondition (A PASS; A-dup re-entry PASS) and the T precondition (T-green re-entry 2: no blocking issue, 2689/0/39) are met.
+  - Round 1's item 1 is resolved. The W-3 clause quotes the profile as `quoted` in the prose and POSIX-single-quoted (`findings::single_quoted`) as the suggested `--profile` argument. The remedy is unchanged.
+  - I accept F's deviation from round 1's literal fix, which was `quoted` in both places:
+    - round 1's stated goal was #662 B1's rule, which is single quoting (`profile/delete.rs:202-205`);
+    - `quoted` is `{:?}`, whose double quotes a shell expands `$(...)` in;
+    - the repository's messages that name a profile and suggest a command with it use exactly F's split (`delete.rs:158-183`, `profile_scope.rs:54-55`, ADR-0021 section 3).
+  - Round 1's item 2 is resolved. `a_profile_members_message_names_its_profile_as_one_shell_word` pins F's form for `Some Profile` and `It's $(id) Demo`, and T's mutations Q0, Q1 and Q2 fail it.
+  - Round 1's advisory 1 is taken. `pane_claude/doctor.rs::a_claude_pane_with_no_tmux_client_is_unattached` pins D9's Claude Code clause, and mutation C1 fails it.
+  - As a fresh S, I re-audited the whole branch: acceptance 1 to 21 and W1 to W8 each have a proving test or evidence, and nothing new is blocking.
+- **Assumed:**
+  - T's recorded Tier 1 output at `6f07eff` plus `1d12249` is accurate, and the opt-in real runs of round 1 still hold. The round touched only a message and a `pub(crate)` helper in `holler-pane`, which neither adapter calls. I did not re-run them (S's rule).
+  - The run's agent does the brief's "Pipeline" step 3 and the PR steps after the script opens the PR.
+- **Hedged:**
+  - The merge timing is the operator's (Q2). #654 is still open, and merging changes what `doctor` reports on the live fleet during the soak. Advisory 2 asks the run's agent to surface it before merging.
+  - Acceptance 18's opt-in scratch scenarios have never been run in this run. Their premise, that Holler attaches no tmux client, I confirmed in the code (`tui.rs`: the TUI runs inside the session through `respawn-pane`).
+  - Acceptance 9's "skipped" against the ADR's `None` stays a brief defect for the operator, not an ADVISORY-HOLD. The implementation follows the standing spec, and the reading can only suppress a finding.
+- **Evidence:**
+  - Diffs read:
+    - `git diff e393e87 HEAD -- crates/` (the round);
+    - `git diff origin/main...HEAD` for every production file, the ADR, the guide and the CHANGELOG;
+    - the new or edited tests of every acceptance row (`doctor/agent.rs`, `doctor/attach.rs`, `pane_claude/doctor.rs`, `forwarding.rs`, `bind.rs`, `read_only.rs`, `doctor/rig.rs`, `findings_test.rs`, both `agent_view_test.rs`, `fake_harness_agent_test.rs`, `fake_host_test.rs`, `host_conformance_test.rs`, `attached_test.rs`, the Claude tests, `scratch/verbs.rs`, `scenario.rs`, `wired.rs`, `real_opencode_test.rs`).
+  - Commands:
+    - added-line greps for `unwrap`, `expect`, `panic`, `todo`, `dbg`, `unsafe` and `#[allow` (none in `src`; every allow linked);
+    - the privacy grep of all 10,168 added lines and of the commit messages (clean);
+    - `wc -l` on every touched `.rs` file (max 865);
+    - the per-commit `crates/` check before `45bff85`, and the `//!`-only filter on its `ports.rs` hunk;
+    - the `cli-surface.txt` and ADR-0003 diff (empty);
+    - the `with_fix`, `remedy` and `with_agent` call sites;
+    - `gh issue view 647` (comments) and `gh issue view 654` (OPEN);
+    - `gh pr list` (#839 is PR #863, open);
+    - `git log 6eff9cc..origin/main` (#847 and #848, test-only), with `comm` of the two file lists (no overlap).
+  - Read: `error.rs:689-698` (`excerpt`, 64 characters), `profile.rs:25-62` (`ProfileName`), `profile/delete.rs:150-208`, `profile_scope.rs:40-56, 262-272`, `ADR-0021.md:531`, and `holler-adapter-opencode/src/tui.rs:1-40, 160-200`.
