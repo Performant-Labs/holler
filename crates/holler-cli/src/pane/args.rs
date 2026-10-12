@@ -13,7 +13,7 @@
 //! story.
 
 use clap::Args;
-use holler_pane::pane::PaneRole;
+use holler_pane::pane::{HarnessKind, PaneRole};
 use holler_pane::{AgentKey, Argv, EnvVarName, GridPos, PaneError};
 
 /// `--profile NAME`: scope the verb to a profile.
@@ -70,9 +70,13 @@ pub struct SpecFlags {
     /// The hard context ceiling a watchdog reads.
     #[arg(long, value_name = "N")]
     pub ctx_hard: Option<u32>,
-    /// How the harness server's port is chosen.
+    /// How the harness server's port is chosen: fixed:PORT for opencode, none for claude.
     #[arg(long, value_name = "POLICY")]
     pub port_policy: Option<String>,
+    /// The harness the pane runs: opencode or claude. Without it, a new spec runs opencode and
+    /// an existing spec keeps its own; a relaunch never changes a live pane's harness.
+    #[arg(long, value_name = "HARNESS")]
+    pub harness: Option<String>,
     /// One element of the launch command, program first. Repeatable; not with --command-json.
     #[arg(long, value_name = "ARG", conflicts_with = "command_json")]
     pub command_arg: Vec<String>,
@@ -93,7 +97,8 @@ pub struct SpecFlags {
 /// The spec flags, typed: what [`SpecFlags::validate`] returns.
 ///
 /// The fields that need no check here (`project`, `workspace`, `model`, `effort`, `port_policy`,
-/// `expect`) are the user's strings, as given.
+/// `expect`) are the user's strings, as given. `harness` is absent unless given (#831): the
+/// effective spec gives a new spec OpenCode, and an existing one keeps its own.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpecValues {
     pub project: Option<String>,
@@ -107,6 +112,7 @@ pub struct SpecValues {
     pub ctx_soft: Option<u32>,
     pub ctx_hard: Option<u32>,
     pub port_policy: Option<String>,
+    pub harness: Option<HarnessKind>,
     pub command: Option<Argv>,
     pub check: Option<Argv>,
     pub expect: Vec<String>,
@@ -121,6 +127,7 @@ impl SpecFlags {
     /// - `--command-json` and `--check-json`: `command-not-argv` for JSON that is not an array of
     ///   strings, and `usage` for text that is not JSON;
     /// - `--role`: `usage` for anything but `agent` or `orchestrator`;
+    /// - `--harness`: `usage` for anything but `opencode` or `claude` (the text is never echoed);
     /// - `--agent`: `agent-key-invalid` for a key that is empty or holds anything but ASCII
     ///   letters, digits, `-` and `_` (the key is never echoed).
     pub fn validate(&self) -> Result<SpecValues, PaneError> {
@@ -140,6 +147,7 @@ impl SpecFlags {
             ctx_soft: self.ctx_soft,
             ctx_hard: self.ctx_hard,
             port_policy: self.port_policy.clone(),
+            harness: self.harness.as_deref().map(parse_harness).transpose()?,
             command: argv_of(&self.command_arg, self.command_json.as_deref(), "command")?,
             check: argv_of(&self.check_arg, self.check_json.as_deref(), "check")?,
             expect: self.expect.clone(),
@@ -153,6 +161,17 @@ fn parse_role(text: &str) -> Result<PaneRole, PaneError> {
     serde_json::from_value(serde_json::Value::String(text.to_owned())).map_err(|_| {
         PaneError::Usage {
             message: "--role must be agent or orchestrator".to_owned(),
+        }
+    })
+}
+
+/// A harness kind from its flag text (#831). The accepted names are `HarnessKind`'s serde names,
+/// so they cannot drift from the pane record's; anything else is `usage`, which never echoes the
+/// text.
+fn parse_harness(text: &str) -> Result<HarnessKind, PaneError> {
+    serde_json::from_value(serde_json::Value::String(text.to_owned())).map_err(|_| {
+        PaneError::Usage {
+            message: "--harness must be opencode or claude".to_owned(),
         }
     })
 }

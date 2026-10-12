@@ -1,0 +1,237 @@
+# Decision journal: #667 `holler profile apply` on scratch Herdr, tmux and OpenCode
+
+## A (Phase 3, up-front plan review): 2026-10-11T19:46-06:00 (MDT)
+- **Decided:** PASS on `docs/handoffs/667-brief.md` at `bc965ae` (sha256 `ed09f85f35d2a8c4...`), with no block and nine warns, five of them binding. The detail is in `handoff-A.md`.
+  - **The objects and the layer are right.**
+    - The scenario drives the real binary through a real hub, so the private `Wiring::from_env` stays the one assembly of the ports.
+    - It reuses #649's scratch set whole.
+    - It moves #649's private helpers into `impl Scratch` once. This is a spec'd refactor-to-extend, not drift.
+    - No production code, manifest, ADR or wire format changes.
+  - **W-1 (binding on T and F):**
+    - T-red writes all the test code and shows each pin failing against the broken variant the Acceptance names (A12 to A14). A compile failure from missing helpers is not a valid RED under `tester.md`.
+    - F runs, since the script has no skip. It owns the CHANGELOG entry and the deletion of section 12's bullet, as #652's F did, and reports `archChanged: false`.
+    - T-green checks GREEN, runs the opted-in run twice, and runs A16.
+  - **W-2 (binding on T):** the `--herdr-session` guard also refuses the `--herdr-session=VALUE` spelling, and A13 gains those cases.
+  - **W-3 (binding on T):** both tests are sequences of step functions. clippy's `too_many_lines` (100) and `cognitive_complexity` (15) are denied workspace-wide, and no allow is added for either.
+  - **W-4 (binding on T):**
+    - Any further helper of `scenario.rs` that #667 needs (e.g. `delete_strays`) moves into `impl Scratch`, never a copy.
+    - No `pane doctor` call runs inside a `Still` window, because doctor writes records by compare-and-swap.
+  - **W-5 (binding on T):** `launch_args` is pure (no `&self`), so A14 can pin it in the default run. Its pin is recommended for `guards.rs`.
+  - **Not binding:**
+    - W-6: `scratch/mod.rs` reaches lint's 600-line warning; use a child module if it does.
+    - W-7: the `Applied` reader types steps with production's `Action` and `Outcome`.
+    - W-8: #839 rebases over two changed calls in `reset_with_a_first_message`.
+    - W-9: record on #667 that the brief supersedes the issue's harness, dependency and blast-radius text.
+    - A nit.
+- **Assumed:**
+  - The step table's runtime claims are T's to prove in the opted-in run. I read the code paths and ran nothing against a real Herdr, tmux or OpenCode. The claims include:
+    - doctor finds no stray session after apply's relaunches;
+    - `owned_pids` is empty after a server is killed;
+    - every create and relaunch fits launch's 10 s budget.
+  - `curl` and `sh` are on the binary's `PATH` (`/usr/bin:/bin`) on the operator's machine.
+  - Every other in-flight story keeps to the blast radius its branch shows today.
+- **Hedged:**
+  - **W-1 is a pipeline finding, not code drift.** I made it binding because this automated run has no O to decide the brief's Question 2. This handoff is what T and F read next.
+  - **W-2 is a warn, not a block.** The adapter refuses a session other than its configured one (E75), so the gap is one layer of two.
+  - **W-6's estimate** of 140 to 150 added lines is mine, not measured.
+  - **T-red's verdict is T's own self-report** (`T_RED_VERDICT_SCHEMA`: PASS/BLOCK). So a RED shown against broken variants is accepted by the script. I did not run the script.
+- **Evidence:**
+  - **Read in full:**
+    - the brief (all 2793 lines);
+    - `pane_integration/{main,scenario,guards}.rs` and `scratch/mod.rs`;
+    - the issue #667 body (`gh issue view 667`).
+  - **Read in part:**
+    - `real_opencode/rig.rs` (header and `fn` list);
+    - `tx_launch.rs` (120-230, 440-475);
+    - `tx_apply.rs` (94-205);
+    - `profile_scope.rs` (1-40, 92-240);
+    - `reconcile.rs` (1-54);
+    - `pane/launch.rs` (1-140);
+    - `profile_verbs/apply/rig.rs` (480-640);
+    - `pane_verbs/process/main.rs` (40-80);
+    - ADR-0021 (1020-1036);
+    - `docs/testing.md` (439-449);
+    - `tester.md` (15-60);
+    - `coding-pipeline.workflow.mjs` (215-250, 575-620, 2415-2470, 2600-2660, 5620-5680);
+    - `scripts/lint.sh` (40-62);
+    - `clippy.toml`;
+    - `Cargo.toml` `[workspace.lints]`;
+    - `ci.yml` (348).
+  - **Searches:**
+    - `crate::`, `super::` and `mod` declarations in the three included rigs: none;
+    - `infer_long_args` in `holler-cli/src`: none;
+    - section 12 pins in `docs_pane_control_test.rs`: none;
+    - `profile-secret-refused`: environment values only;
+    - `/global/health`: `server.rs:34`;
+    - `allow(clippy::too_many_lines|cognitive_complexity)` in tests: none.
+  - **Compiled** a model of the doubly nested `#[path]` include, with a child module of `scratch/`, in the scratchpad (rustc 1.98.1). Both targets build and pass.
+  - **In flight:** `git fetch`; `git worktree list`; per-branch `git diff --name-only <merge-base> <branch>` over `pane_integration/`, `profile_apply_scenario/` and `Cargo.toml`. No branch touches the files #667 edits.
+  - **Precedent:** `docs/handoffs/652/decisions.md:120-124` (F wrote the guide and its CHANGELOG entry).
+
+## T (Phase 4, author and RED): 2026-10-11T20:06-06:00 (MDT)
+- **Decided:** RED is valid; F may start. F's part is documentation only. The detail is in `handoff-T-red.md`.
+  - **All test code is T's (W-1):**
+    - decision 3's moves (`pane_integration/out.rs`, and `scratch/verbs.rs` as a second `impl Scratch`, per W-6);
+    - the `--herdr-session` argument guard, in both spellings (W-2);
+    - the pure `launch_args` (W-5);
+    - the new target's `plan.rs` (the strict `Applied` reader over production's `Action`/`Outcome`, per W-7; `Still`; the plan-against-show comparison);
+    - `pins.rs`;
+    - test A as step functions and test B as phase functions (W-3).
+  - **The valid RED** is each pin failing on its own assertion against the broken variant the Acceptance names:
+    - A12: one `#[ignore]` removed;
+    - A13: a guard that ignores the flag, and one blind to the `=` spelling;
+    - A14: `launch_args` without the `--herdr-session` pair, a reader that takes a missing key as null, and a reader that takes an unknown action as the first.
+    - Each file was restored afterwards.
+  - **Four step-table changes:**
+    - Test B's (ii) and (iii) pass `--herdr-session`, because `Y` has no record until (iii) (E32).
+    - The checks use `--check-json`.
+    - `Still` reads `pane list`'s `panes` rows, not the unmanaged table, whose `idle_seconds` moves with the clock.
+    - `delete_strays` was not moved: #667 never needed it.
+- **Assumed:**
+  - F's CHANGELOG entry and the deletion of the guide's bullet change no test result. T-green runs the docs tests.
+  - One opted-in run of each target is enough for RED. A1's two consecutive runs and A16's M1 and M3 to M7 are T-green's.
+- **Hedged:**
+  - **`scenario.rs` is 551 lines**, against the brief's "about 450". It is under lint's warning at 600.
+  - **The A12 source pin parses attribute lines above a top-level `fn`.** A scratch test written another way would escape it, for instance through a helper that calls `Scratch::start` for it. Its companion test proves the pin finds a test with no `#[ignore]`.
+  - **The step 5 generation +2 is asserted exactly.** It held, so the brief's relaxation was not used.
+- **Evidence:**
+  - **Baseline before the moves:** `cargo test -p holler-cli --test pane_integration` gave 66 passed and 4 ignored.
+  - **After the moves:** 68 passed (66 plus the 2 new guard pins) and 4 ignored. #649's opted-in run passed 4 of 4 in 54.74 s.
+  - **The new target:** 5 passed and 2 ignored. Opted in, 2 passed in 43.13 s, leaving no scratch process or directory behind.
+  - **Liveness:** mutant M2 in `tx_launch.rs` failed test B at `probe.rs:142` with `(Create, Created)` against `(Create, Refused)`. The file was restored, and `git diff -- crates/holler-pane/` was empty afterwards.
+  - **Lint:** `cargo clippy -p holler-cli --all-targets -- -D warnings` was clean, and `bash scripts/lint.sh` exited 0.
+  - **Tools:** herdr 0.9.1-preview, tmux 3.7c, OpenCode 1.19.0, `/usr/bin/curl`.
+
+## F (Phase 6 in the script's numbering, implement): 2026-10-11T20:10-06:00 (MDT)
+- **Decided:** F's part is documentation only, as A's W-1 binds. Nothing under `crates/` was touched. The detail is in `handoff-F.md`.
+  - **`CHANGELOG.md`:** decision 14's text, word for word, as the first entry under `## [Unreleased]` / `### Enhancements` (the section is newest first). It links #633 and #667, gives the opt-in run line of decision 4, and says "Tests only: no behaviour change."
+  - **`docs/pane-control.md` section 12:** the one bullet for #667 is deleted, because the scenario now exists. The other bullets and the list's punctuation are unchanged.
+  - **Not done, as decided:** no `docs/testing.md` run line (A's nit: #666 or a docs follow-up). No ADR-0021 edit (E60 already describes the scenario).
+  - `archChanged: false`.
+- **Assumed:**
+  - The script's orchestrator green check runs the full workspace suite after this phase. F ran only the targets that read the edited files and T's two targets.
+  - The other stories in flight (#839, #835, #648, #831) resolve the CHANGELOG by keeping every entry, and section 12 by keeping every bullet that is not theirs (the brief's Clashes).
+- **Hedged:**
+  - The entry is decision 14's proposed text unchanged. Linking the bare `#649` was considered and not done: the brief decided the text, and the section already uses bare `#NNN` references.
+- **Evidence:**
+  - `bash scripts/changelog-check.sh`: `changelog-check: ok`.
+  - `cargo test -p holler-cli --test docs_pane_control_test --test docs_cli_test --test profile_apply_scenario --test pane_integration`: 16, 3, 5 (2 ignored) and 68 (4 ignored) passed.
+  - `bash scripts/lint.sh`: exit 0, with no warning on a file of this story.
+  - `cargo clippy -p holler-cli --all-targets -- -D warnings`: exit 0.
+  - **Searches:**
+    - No `section(&doc, 12)` in `docs_pane_control_test.rs`.
+    - `CHANGELOG` and `pane-control` across `crates/`, `plugins/` and `scripts/`: only `docs_pane_control_test.rs` (its #652 pin, `:478-487`), `scripts/changelog-check.sh` and comments.
+  - The two source facts are in `evidence.md`.
+
+## T (Phase 7 in the script's numbering, verify GREEN): 2026-10-11T20:24-06:00 (MDT)
+- **Decided:** GREEN with no blocking issue. Verdict PASS. No test was changed: F flagged none, and the review found none to repair. The detail is in `handoff-T-green.md`.
+  - **A16:** all seven mutants were applied by script, one at a time, each run opted in with `--exact` and then restored. Each was killed. M3 was run in both readings of the brief's wording (M3 drops `&& !take_over`, M3b never refuses), and both were killed at step 5.
+  - **Where three mutants failed:** M1 and M5 were caught at step 2's dry run, and M7 at step 1's `pane launch`, which uses the same `below()`. That is earlier than the steps A16 names. Each is still killed by the scenario, so no assertion was strengthened.
+  - **Evidence appendix:** six unchanged-source facts the scenario asserts literally were appended to `evidence.md`, each with a verbatim excerpt copied from source.
+- **Assumed:**
+  - **Mutant compilation.** A mutant written behind `std::hint::black_box(true)` is equivalent to the brief's plain edit: the original branch stays compiled, so `dead_code = "deny"` does not reject the mutant build.
+  - **The two 20:19 `/tmp/hlr649-*` directories** came from another session's `pane_integration` default run, not from this target. They held only `wired.rs`'s trap script. `profile_apply_scenario` does not include `wired.rs`. `pgrep` showed the `0835` worktree's `pane_integration` binary running, and the directories were gone once that run ended.
+- **Hedged:** the `/tmp` and `ps` checks read the whole machine, and other worktrees run tests at the same time. The baseline (10 entries) was taken before this phase's runs and compared again after the mutants.
+- **Evidence:**
+  - **The opted-in target, twice:** `ok. 2 passed` in 42.84 s, then in 36.92 s.
+  - **Workspace suite (CI command):** exit 0. That covers `pane_integration` 68 passed and 4 ignored, and `profile_apply_scenario` 5 passed and 2 ignored.
+  - **Lint and CI checks:** workspace clippy, `lint.sh`, `changelog-check.sh`, `docs_cli_test` (3), `docs_pane_control_test` (16), `cargo machete` and `wire_selftest` (3) are all clean.
+  - **Mutant failures:**
+    - M1: `plan.rs:221`
+    - M2: `probe.rs:142`
+    - M3: `scenario.rs:465`
+    - M3b: `scenario.rs:455`
+    - M4: `scenario.rs:400`
+    - M5: `plan.rs:221`
+    - M6: `scenario.rs:474`
+    - M7: `scratch/mod.rs:448`, "Herdr put the new pane ... at r1c2, not at r2c1"
+  - **After each mutant:** `git diff --stat -- crates/` was empty.
+
+## A (Phase 7 anti-duplication; the script's Phase 8): 2026-10-11T20:32-06:00 (MDT)
+- **Decided:** PASS on `bda1069..367e921`, with no block, two low warns and one nit, none binding. The detail is in `handoff-A-dup.md`.
+  - **The diff extends the analogous objects the map named:**
+    - `Scratch` gained a second `impl` in `scratch/verbs.rs` holding the six moved helpers, plus `launch_argv`;
+    - the guards gained `check_herdr_session_args`, called from `Scratch::holler`;
+    - `launch_args` is the one argv builder;
+    - `Out` has one home, `out.rs`.
+  - **The new target builds only decision 2's "Built new":** `Applied`, `Still`, `assert_plan_agrees_with_show` and the A12 pin. F's diff is documentation only.
+  - **W-1:** `assert_on_binary_path` is a fourth PATH lookup, and it belongs in `scratch/mod.rs` for later scenarios to find.
+  - **W-2:** `plan.rs`'s hand-listed `Action`/`Outcome` variants are a follow-up for production `ALL` tables (`FindingKind::ALL`'s pattern).
+  - **W-3 (nit):** `Run::port` and the spec-only launch wrapper are each written twice in the new target.
+- **Assumed:**
+  - The moved helpers behave as before. I compared them by reading, not by running. T-red's opted-in #649 run (4 of 4 after the moves) is the runtime evidence.
+  - The trial merge with `origin/main` stands for the eventual merge. Only `CHANGELOG.md` conflicts (with #851).
+- **Hedged:**
+  - **W-2 is a warn, not a block.** The copy is forced by the brief's no-production-code scope, and it parses through production's own `as_str`.
+  - **W-3 is a nit.** Both wrappers go through the shared `launch_argv`, so no second argv builder exists.
+  - **My Phase-3 expectation 1** ("every operation ... is a `Scratch` method") is read in its intent. The target's `Run` methods are bound to each test's state and return the target's own `Applied`, so moving them onto the shared `Scratch` would invert the dependency.
+- **Evidence:**
+  - **Diffs and files read in full:**
+    - `git diff bda1069 HEAD` for every changed file under `crates/`, plus `CHANGELOG.md` and `docs/pane-control.md`;
+    - `scratch/verbs.rs`, `scratch/mod.rs` (195-540), and the target's `main.rs`, `plan.rs`, `pins.rs`, `scenario.rs` and `probe.rs`;
+    - `profile_verbs/apply/dry_run.rs`, `profile_verbs/apply/rig.rs` (400-640) and `tx_apply.rs` (76-225);
+    - all of this run's handoffs.
+  - **Searches:**
+    - `struct Out` (four before, four after);
+    - PATH lookups (`rig::on_path`, `tmux_on_path`, `wizard/proof.rs` `find_on_path`);
+    - readers of `show`'s `["comparison"]`;
+    - source-scanning tests;
+    - `pub const ALL` in `holler-pane/src`;
+    - the overlay's Phase-7 candidates in the new code (none);
+    - personal infrastructure names in the code diff (none).
+  - **Merge state:**
+    - `git merge-tree --write-tree HEAD origin/main`: conflict in `CHANGELOG.md` only;
+    - per-branch `git diff --name-only <merge-base> <branch>` over the shared scratch files: only #649's merged branch.
+
+## S (spec audit): 2026-10-11T20:45-06:00 (MDT)
+- **Decided:** PASS on `bda1069...4bf1524`. The detail is in `handoff-S.md`.
+  - **Preconditions met:**
+    - A: PASS, and A-dup: PASS.
+    - T-red: RED shown on each pin's own assertion, never a compile error.
+    - T-green: GREEN, with no blocking issue.
+  - **A1 to A17:** each is met by a named test or by recorded evidence. The table in `handoff-S.md` names the file, function and line.
+  - **Decisions 1 to 14:** each is implemented as stated, including A's binding W-1 to W-5.
+  - **Deviations:** T's five are recorded with reasons, so none is silent:
+    - test B passes `--herdr-session` in (ii) and (iii);
+    - `--check-json`;
+    - `Still.registry` as `data.panes`;
+    - `delete_strays` was not moved;
+    - `scenario.rs` is 551 lines.
+
+    Each is necessary or equivalent.
+  - **Scope:** exactly the brief's. `scratch/verbs.rs` is A's W-6 decomposition.
+  - **Advisory only:**
+    - M1 and M7 die earlier than A16 names, so step 3's own placement check has no mutant of its own.
+    - Test B (ii) measures probe order from the end state only.
+    - PR-phase work: the `CHANGELOG.md` conflict with #851, the AI disclosure in the PR body, and a session link in the squash message.
+    - W-9's comment on #667.
+    - A-dup's W-1 to W-3.
+    - `docs/testing.md`.
+- **Assumed:**
+  - T-red's and T-green's recorded command output is accurate. I ran no Tier 1 or Tier 2 check, and no opted-in run.
+  - The squash merge will carry a session link and the PR body will carry the AI disclosure. Both are the run's agent's, after the script opens the PR (CLAUDE.md).
+- **Hedged:**
+  - **A16's "each must fail the named step".** I read it by decision 12's purpose: a mutant the scenario does not fail is a gap. Each mutant is killed. M5 fails in its named step, while M1 and M7 fail in earlier steps.
+  - **The handoff's file name.** I wrote `handoff-S.md` inside the run directory, as #649's and #652's S handoffs are named there. The role doc's `<issue>-S.md` names a file loose under `docs/handoffs/`.
+- **Evidence:**
+  - **Read in full:**
+    - the brief's sections before the Evidence, plus E48 and E61;
+    - every handoff of this run, `decisions.md` and `evidence.md`;
+    - the issue (`gh issue view 667`: open, no comments);
+    - the whole code diff, and all of `scratch/mod.rs` and `scratch/verbs.rs`;
+    - every file of `profile_apply_scenario/`.
+  - **Facts checked:**
+    - **Equal to the code they replace:** the moved bodies, against the deleted hunks; and `launch_args`'s literal list, against `bda1069`'s inline list.
+    - **Matching production:** `ACTIONS` and `OUTCOMES`, against `tx_apply.rs`'s variants (6 and 8).
+    - **The guard's coverage:** clap's `--herdr-session` is `#[arg(long, value_name = "NAME")]` only, with no short form, alias or env.
+    - **Test B's tmux check:** `owned_pids` targets `={pane}`, so a pane's tmux session bears its name.
+    - **The model guard:** `no_model_can_be_reached` needs `raw` to get a reply.
+    - **T-green's `/tmp` attribution:** `wired.rs`'s `trap_dir()` makes `/tmp/hlr649-*` directories.
+  - **Commands:**
+    - `wc -l` on the touched files (largest 551);
+    - the `lint.sh` rules, and the allows the diff adds (five, each `// #667`);
+    - `rustfmt --edition 2021 --check` on the six new non-`main.rs` files (clean);
+    - a privacy grep over every added line (no hit);
+    - the commit messages against `.githooks/commit-msg`;
+    - `git merge-tree --write-tree HEAD origin/main` (conflict in `CHANGELOG.md` only);
+    - a use count for every new function.

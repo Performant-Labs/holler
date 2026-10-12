@@ -4,8 +4,11 @@
 //! returns a plain [`AnswerResult`]; only the bin (`main.rs`, the one file
 //! allowed to exit the process) turns that into an actual exit.
 
+use holler_pane::pane::Shape;
+use holler_pane::{PaneError, Ports};
+
 use crate::prompt_target::Routed;
-use crate::say_cmd::route_target;
+use crate::say_cmd::{resolve_pane_record, route_target_by, session_of_record, ANSWER_UNSUPPORTED};
 use crate::Answer;
 
 /// What `answer_command` (in `main.rs`) should print and exit with.
@@ -16,6 +19,29 @@ pub struct AnswerResult {
     /// stdout (a confirmation).
     pub to_stderr: bool,
     pub exit_code: i32,
+}
+
+/// The session `answer --pane NAME [--profile P]` answers on (#831): the pane gates of
+/// `say_cmd::resolve_pane_record` first, then the pane's session of record, or
+/// `answer-unsupported` for a single-process pane (Claude Code): nothing but a keypress answers
+/// its question, its launch removes the question tool, and the hub reaches no body for it.
+pub fn answer_pane_target(
+    ports: Ports<'_>,
+    pane: &str,
+    profile: Option<&str>,
+) -> Result<String, PaneError> {
+    let record = resolve_pane_record(ports, pane, profile)?;
+    if record.harness.kind.shape() == Shape::SingleProcess {
+        return Err(PaneError::Refused {
+            code: ANSWER_UNSUPPORTED,
+            message: format!(
+                "{} is a Claude Code pane, whose question only a keypress answers (its launch \
+                 removes the question tool); answer it in the pane",
+                record.name
+            ),
+        });
+    }
+    session_of_record(&record)
 }
 
 fn ok(message: String) -> AnswerResult {
@@ -35,11 +61,12 @@ fn err(message: String, exit_code: i32) -> AnswerResult {
 /// convention) or a malformed positional tail.
 ///
 /// `--pane NAME [--profile P]` (story #646) answers on the pane's session of record,
-/// routed by `say`'s engine (`say_cmd::route_target`), with its refusals and exit
-/// codes. `session/answer` is not a prompt, so the hub's pane-state gate does not
-/// apply to it.
+/// routed by `say`'s engine (`say_cmd::route_target_by`, with [`answer_pane_target`]), with its
+/// refusals and exit codes. `session/answer` is not a prompt, so the hub's pane-state gate does
+/// not apply to it. A Claude Code pane (#831) is refused `answer-unsupported`.
 pub fn run(answer: &Answer, json: bool) -> AnswerResult {
-    let Routed { session, arg } = match route_target(answer.resolve(), &answer.profile) {
+    let routed = route_target_by(answer.resolve(), &answer.profile, answer_pane_target);
+    let Routed { session, arg } = match routed {
         Ok(routed) => routed,
         Err(stop) => return err(stop.message, stop.exit_code),
     };

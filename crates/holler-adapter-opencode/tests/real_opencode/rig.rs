@@ -45,7 +45,7 @@ use holler_adapter_opencode::{
 };
 use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
-use holler_pane::{Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
 use holler_pane_testkit::conformance::harness::HarnessRig;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -241,7 +241,8 @@ impl Recording {
             let mut child = child;
             let _ = child.wait();
         });
-        if !wait_healthy(&self.inner, port, BOOT_POLL, Instant::now() + BOOT)? {
+        let at = HarnessEndpoint::Port(port);
+        if !wait_healthy(&self.inner, &at, BOOT_POLL, Instant::now() + BOOT)? {
             return Err(PaneError::Timeout {
                 op: "real_opencode.launch".to_owned(),
             });
@@ -276,37 +277,51 @@ impl HarnessPort for Recording {
     ) -> Result<Argv, PaneError> {
         self.inner.serve_command(name, port, spec)
     }
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, spec)
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, spec)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.attach_tui(pane, port, session)
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
     // #642 part 3: forwarded, or the trait's defaults (`prompt-unsupported`, `Idle`) would
     // answer for the adapter through `rig.harness`.
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-        self.inner.send_prompt(port, session, text)
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.send_prompt(at, session, text)
     }
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        self.inner.session_activity(port, session)
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.inner.session_activity(at, session)
     }
 }
 
@@ -448,7 +463,7 @@ impl Rig {
 
     pub fn create(&self, i: usize) -> String {
         self.harness
-            .create_session(self.ports[i])
+            .create_session(&HarnessEndpoint::Port(self.ports[i]))
             .unwrap_or_else(|e| panic!("create_session({}): {e:?}", self.ports[i]))
     }
 
@@ -478,7 +493,9 @@ impl Rig {
     ) -> Result<Option<String>, PaneError> {
         let until = Instant::now() + within;
         loop {
-            let shown = self.harness.shown_session(pane);
+            let shown = self
+                .harness
+                .shown_session(pane, &HarnessEndpoint::Port(self.ports[0]));
             if shown.as_ref() == Ok(want) || Instant::now() >= until {
                 return shown;
             }

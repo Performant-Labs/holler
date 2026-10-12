@@ -20,7 +20,9 @@
 //!   fails makes the step of a recorded pane `failed`, unless row a refuses it.
 //! - **The steps**, one per spec pane in `(workspace, row, col)` order; the first row that
 //!   matches applies. (a) A record of another profile, without `--take-over`: `refused`
-//!   (`pane-in-other-profile`). (b) No record: `create`, by `tx_launch::launch`. (c) Healthy and
+//!   (`pane-in-other-profile`). A record whose spec names another harness than the pane runs:
+//!   `refused` (`harness-change-refused`, #831: a live pane's harness is never rewritten, by
+//!   apply or by a relaunch). (b) No record: `create`, by `tx_launch::launch`. (c) Healthy and
 //!   matching its spec: `adopt`, which records the pane as a member of P and touches nothing
 //!   live. (d) Healthy and differing: `reported`, with its row of `diff_profile`. (e) Not
 //!   healthy, the orchestrator: `refused` ([`ORCHESTRATOR_NOT_RELAUNCHED`]). (f) Not healthy, an
@@ -63,7 +65,7 @@ use crate::error::{class_of, ErrorClass, RefusalCode};
 use crate::findings::quoted;
 use crate::pane::PaneRole;
 use crate::profile_diff::{diff_profile, is_member, PaneDiff, PaneStatus};
-use crate::tx_launch::{self, TxOptions};
+use crate::tx_launch::{self, check_harness_unchanged, TxOptions};
 use crate::{Pane, PaneError, PaneName, Ports, Profile, ProfileName, ProfileSpec};
 
 use observe::{Judged, Observed};
@@ -373,6 +375,9 @@ fn choose(
     };
     if in_other_profile(record, profile) && !take_over {
         return Row::Refuse(other_profile(record, profile));
+    }
+    if let Err(changed) = check_harness_unchanged(record, spec) {
+        return Row::Refuse(changed);
     }
     match observe::judge(record, seen, &observed.snapshot) {
         Err(error) => Row::Unobserved(error),

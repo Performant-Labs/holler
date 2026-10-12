@@ -13,8 +13,8 @@
 //! Issue #639 filled the `pane/*` stub, so the pane-method assertions below expect the
 //! real registry's answers (an empty list, a decode error, an empty batch) rather than
 //! `not-implemented`. Issue #661 filled the `profile/*` stub the same way, so the
-//! profile-method assertions expect the profile registry's answers too; only
-//! `profile/rename` (PROPOSED, #665) still answers `not-implemented`. Both registries are
+//! profile-method assertions expect the profile registry's answers too, and issue #665
+//! filled `profile/rename`, so no method answers `not-implemented` any more. Both registries are
 //! loaded with the short long-poll window, so no test here waits the real one.
 //!
 //! The tests drive `handle_control_conn` in process over a `UnixStream::pair()`
@@ -155,8 +155,8 @@ async fn every_pane_method_is_forwarded_to_the_registry_not_method_not_found() {
 }
 
 /// What each profile method answers to a request that carries no `params`, now that the
-/// registry is real: a decode error, an empty list, or an empty batch. Only
-/// `profile/rename` (#665) is still `not-implemented`. Never `method_not_found`.
+/// registry is real: a decode error, an empty list, or an empty batch (`profile/rename`
+/// too, since #665). Never `method_not_found`.
 fn assert_answers_an_empty_profile_request(
     method: &str,
     outcome: Result<Option<Value>, PaneError>,
@@ -168,11 +168,12 @@ fn assert_answers_an_empty_profile_request(
             Ok(Some(json!({"events": [], "cursor": 0}))),
             "{method}"
         ),
-        "profile/get" | "profile/cas_put" | "profile/delete" | "profile/log" => assert!(
-            matches!(outcome, Err(PaneError::Usage { .. })),
-            "{method} without params must be a usage error, got {outcome:?}"
-        ),
-        "profile/rename" => assert_eq!(outcome, Err(PaneError::NotImplemented), "{method}"),
+        "profile/get" | "profile/cas_put" | "profile/delete" | "profile/log" | "profile/rename" => {
+            assert!(
+                matches!(outcome, Err(PaneError::Usage { .. })),
+                "{method} without params must be a usage error, got {outcome:?}"
+            )
+        }
         other => panic!("{other} is a new profile method: add its expectation here"),
     }
 }
@@ -323,24 +324,21 @@ async fn panes_dispatch_takes_both_handles_and_answers_as_a_result() {
 }
 
 #[tokio::test]
-async fn profile_dispatch_takes_both_handles_and_routes_rename_to_the_stub() {
+async fn profile_dispatch_takes_both_handles_and_routes_rename_to_its_handler() {
     let (deps, _dir) = fresh_deps();
     let cid = CorrelationId::parse("h-direct-2").unwrap();
     // The handles arrive in the opposite order to `panes::dispatch`: the profile
     // store first, the pane store second (`profile/rename` reaches the panes). With no
-    // params `profile/get` is a usage error from the real registry; `profile/rename` is
-    // still #665's stub.
+    // params `profile/get` and `profile/rename` (#665) are usage errors from the real
+    // handlers.
     for method in ["profile/get", "profile/rename"] {
         let line = profile::dispatch(method, &cid, &json!({}), &deps.profiles, &deps.panes).await;
         let reply: Value = serde_json::from_str(&line).unwrap();
         let outcome = pane_outcome(&reply, method);
-        match method {
-            "profile/get" => assert!(
-                matches!(outcome, Err(PaneError::Usage { .. })),
-                "{method}: {reply}"
-            ),
-            _ => assert_eq!(outcome, Err(PaneError::NotImplemented), "{method}: {reply}"),
-        }
+        assert!(
+            matches!(outcome, Err(PaneError::Usage { .. })),
+            "{method}: {reply}"
+        );
     }
 }
 

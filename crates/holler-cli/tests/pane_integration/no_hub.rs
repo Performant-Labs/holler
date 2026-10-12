@@ -17,9 +17,10 @@ use crate::support::StateDir;
 use crate::{holler_on, Out};
 
 /// Every verb of both namespaces, with arguments that parse (A's W-P: `pane import` takes a
-/// required `--from` since #650, `profile apply` a required name since #664, so a bare row
-/// would be clap's usage error before `connect` runs). The stubs are here too: with no hub,
-/// `connect` fails before any verb runs, stub or not.
+/// required `--from` since #650, `profile apply` a required name since #664, and `profile
+/// rename`, `export` and `import` their positionals since #665, so a bare row would be clap's
+/// usage error before `connect` runs). With no hub, `connect` fails before any verb runs, so
+/// `import`'s file is never read.
 pub const EVERY_VERB: &[&[&str]] = &[
     &["pane", "list"],
     &["pane", "get", "hlr649-c1r1"],
@@ -38,9 +39,9 @@ pub const EVERY_VERB: &[&[&str]] = &[
     &["profile", "list"],
     &["profile", "show", "hlr649"],
     &["profile", "apply", "hlr649"],
-    &["profile", "rename"],
-    &["profile", "export"],
-    &["profile", "import"],
+    &["profile", "rename", "hlr649", "hlr649b"],
+    &["profile", "export", "hlr649"],
+    &["profile", "import", "/nonexistent-hlr649"],
 ];
 
 /// The phrase the CLI prints for a missing hub (`say_cmd.rs`, `hub_cmd.rs`; A's W-9).

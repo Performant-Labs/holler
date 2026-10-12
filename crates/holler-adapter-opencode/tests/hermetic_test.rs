@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use fixtures::*;
 use holler_adapter_opencode::http::{self, HttpError};
 use holler_adapter_opencode::{OpenCodeHarness, ProcessEnv, Timeouts};
-use holler_pane::{HarnessPort, PaneError, ServeSpec};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError, ServeSpec};
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
 use serde_json::Value;
@@ -200,25 +200,35 @@ fn ac1_a_chunked_reply_with_an_extension_and_a_trailer_reads_its_body() {
 fn ac2_health_is_true_for_the_healthy_json() {
     let stub = Stub::start();
     stub.json("GET", "/global/health", 200, HEALTHY);
-    assert_eq!(harness(quick()).health(stub.port), Ok(true));
+    assert_eq!(
+        harness(quick()).health(&HarnessEndpoint::Port(stub.port)),
+        Ok(true)
+    );
 }
 
 #[test]
 fn ac2_health_is_false_for_unbound_frozen_html_unhealthy_and_500() {
     let h = harness(quick());
-    let (_, unbound) = on_refused_port(|port| h.health(port), |answer| *answer == Ok(false));
+    let (_, unbound) = on_refused_port(
+        |port| h.health(&HarnessEndpoint::Port(port)),
+        |answer| *answer == Ok(false),
+    );
     assert_eq!(unbound, Ok(false), "an unbound port");
 
     let frozen = Stub::start();
     frozen.freeze();
     let start = Instant::now();
-    assert_eq!(h.health(frozen.port), Ok(false), "a frozen server");
+    assert_eq!(
+        h.health(&HarnessEndpoint::Port(frozen.port)),
+        Ok(false),
+        "a frozen server"
+    );
     assert_within(start, quick().health + SLACK, "health of a frozen server");
 
     let html = Stub::start();
     html.html("GET", "/global/health");
     assert_eq!(
-        h.health(html.port),
+        h.health(&HarnessEndpoint::Port(html.port)),
         Ok(false),
         "a 200 of the web app's HTML"
     );
@@ -226,14 +236,18 @@ fn ac2_health_is_false_for_unbound_frozen_html_unhealthy_and_500() {
     let unhealthy = Stub::start();
     unhealthy.json("GET", "/global/health", 200, r#"{"healthy":false}"#);
     assert_eq!(
-        h.health(unhealthy.port),
+        h.health(&HarnessEndpoint::Port(unhealthy.port)),
         Ok(false),
         "a 200 saying not healthy"
     );
 
     let failing = Stub::start();
     failing.json("GET", "/global/health", 500, HEALTHY);
-    assert_eq!(h.health(failing.port), Ok(false), "a 500");
+    assert_eq!(
+        h.health(&HarnessEndpoint::Port(failing.port)),
+        Ok(false),
+        "a 500"
+    );
 }
 
 // ---- AC 3: create_session ----
@@ -252,7 +266,7 @@ fn ac3_create_session_titles_the_session_with_its_id() {
     let stub = Stub::start();
     creatable(&stub, 200, ID);
     assert_eq!(
-        harness(quick()).create_session(stub.port),
+        harness(quick()).create_session(&HarnessEndpoint::Port(stub.port)),
         Ok(ID.to_string())
     );
     let seen = stub.seen();
@@ -273,7 +287,7 @@ fn ac3_a_failed_title_patch_deletes_the_session_and_is_unavailable() {
     let stub = Stub::start();
     creatable(&stub, 500, ID);
     unavailable(
-        harness(quick()).create_session(stub.port),
+        harness(quick()).create_session(&HarnessEndpoint::Port(stub.port)),
         "a PATCH that answers 500",
     );
     let delete = format!("DELETE /session/{ID} HTTP/1.1");
@@ -289,7 +303,7 @@ fn ac3_a_patch_reply_with_another_title_is_unavailable() {
     let stub = Stub::start();
     creatable(&stub, 200, "New session - 2026-10-09T00:00:00.000Z");
     unavailable(
-        harness(quick()).create_session(stub.port),
+        harness(quick()).create_session(&HarnessEndpoint::Port(stub.port)),
         "a PATCH reply whose title is not the id",
     );
 }
@@ -306,7 +320,7 @@ fn ac4_list_sessions_returns_the_listed_ids_in_order() {
         r#"[{"id":"ses_b","title":"b"},{"id":"ses_a","title":"a"}]"#,
     );
     assert_eq!(
-        harness(quick()).list_sessions(stub.port),
+        harness(quick()).list_sessions(&HarnessEndpoint::Port(stub.port)),
         Ok(vec!["ses_b".to_string(), "ses_a".to_string()])
     );
 }
@@ -318,7 +332,7 @@ fn ac11e_child_sessions_are_left_out_of_the_list() {
         r#"[{"id":"ses_a"},{"id":"ses_b","parentID":"ses_a"},{"id":"ses_c","parentID":null}]"#;
     stub.json("GET", "/session", 200, body);
     assert_eq!(
-        harness(quick()).list_sessions(stub.port),
+        harness(quick()).list_sessions(&HarnessEndpoint::Port(stub.port)),
         Ok(vec!["ses_a".to_string(), "ses_c".to_string()])
     );
 }
@@ -332,7 +346,7 @@ fn ac5_abort_of_an_unknown_id_is_session_not_found_and_sends_no_abort() {
         let stub = Stub::start();
         stub.json("GET", "/session/ses_missing", status, stub::NOT_FOUND);
         stub.json("POST", "/session/ses_missing/abort", 200, "true");
-        let result = harness(quick()).abort(stub.port, "ses_missing");
+        let result = harness(quick()).abort(&HarnessEndpoint::Port(stub.port), "ses_missing");
         assert_eq!(
             result,
             Err(PaneError::SessionNotFound {
@@ -354,7 +368,10 @@ fn ac5_abort_of_an_idle_known_session_is_ok() {
     known_session(&stub);
     stub.json("POST", &format!("/session/{ID}/abort"), 200, "true");
     stub.json("GET", "/session/status", 200, "{}");
-    assert_eq!(harness(quick()).abort(stub.port, ID), Ok(()));
+    assert_eq!(
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
+        Ok(())
+    );
     let abort = format!("POST /session/{ID}/abort HTTP/1.1");
     assert!(
         stub.lines().contains(&abort),
@@ -376,7 +393,7 @@ fn ac5_abort_of_a_session_that_stays_busy_times_out() {
     );
     let start = Instant::now();
     let op = timeout_op(
-        harness(quick()).abort(stub.port, ID),
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
         "a session that stays busy",
     );
     assert_eq!(op, HarnessOp::Abort.as_str());
@@ -398,7 +415,7 @@ fn ac5_abort_of_a_session_that_stays_in_retry_times_out() {
     stub.json("GET", "/session/status", 200, &retrying());
     let start = Instant::now();
     let op = timeout_op(
-        harness(quick()).abort(stub.port, ID),
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
         "a session that stays in retry",
     );
     assert_eq!(op, HarnessOp::Abort.as_str());
@@ -419,7 +436,10 @@ fn ac5_abort_settles_once_a_retrying_session_reads_idle() {
         200,
         &format!(r#"{{"{ID}":{{"type":"idle"}}}}"#),
     );
-    assert_eq!(harness(quick()).abort(stub.port, ID), Ok(()));
+    assert_eq!(
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
+        Ok(())
+    );
     let asked = stub
         .lines()
         .iter()
@@ -436,9 +456,9 @@ fn ac6_server_calls_to_an_unbound_port_are_unavailable() {
     let (port, [created, listed, aborted]) = on_refused_port(
         |port| {
             [
-                h.create_session(port).map(drop),
-                h.list_sessions(port).map(drop),
-                h.abort(port, ID),
+                h.create_session(&HarnessEndpoint::Port(port)).map(drop),
+                h.list_sessions(&HarnessEndpoint::Port(port)).map(drop),
+                h.abort(&HarnessEndpoint::Port(port), ID),
             ]
         },
         |answers| {
@@ -470,7 +490,7 @@ fn ac7_the_call_bound_caps_the_request_timeout() {
     };
     let start = Instant::now();
     let op = timeout_op(
-        harness(timeouts).create_session(stub.port),
+        harness(timeouts).create_session(&HarnessEndpoint::Port(stub.port)),
         "create_session on a frozen server",
     );
     assert_eq!(op, HarnessOp::CreateSession.as_str());
@@ -591,7 +611,7 @@ fn ac8_a_spec_with_an_agent_is_applied_and_checked_on_the_server() {
             .any(|e| e.contains("feature-implementor")),
         "the argv carries the key: {argv:?}"
     );
-    let verified = h.verify_serving(stub.port, &with);
+    let verified = h.verify_serving(&HarnessEndpoint::Port(stub.port), &with);
     assert!(!is_agent_unsupported(&verified), "{verified:?}");
     assert_eq!(
         stub.lines().first().map(String::as_str),
@@ -673,7 +693,7 @@ fn ac11d_an_html_200_for_the_session_is_unavailable_and_sends_no_abort() {
     stub.html("GET", &format!("/session/{ID}"));
     stub.json("POST", &format!("/session/{ID}/abort"), 200, "true");
     let message = unavailable(
-        harness(quick()).abort(stub.port, ID),
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
         "an HTML session reply",
     );
     assert_one_line_naming(&message, "/session/", "an HTML session reply");
@@ -695,7 +715,7 @@ fn ac11d_a_session_reply_for_another_id_is_unavailable_and_sends_no_abort() {
     );
     stub.json("POST", &format!("/session/{ID}/abort"), 200, "true");
     let message = unavailable(
-        harness(quick()).abort(stub.port, ID),
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
         "a reply for another session",
     );
     assert_one_line_naming(&message, "/session/", "a reply for another session");
@@ -712,7 +732,10 @@ fn ac11d_an_html_200_for_the_abort_is_unavailable() {
     known_session(&stub);
     stub.html("POST", &format!("/session/{ID}/abort"));
     stub.json("GET", "/session/status", 200, "{}");
-    let message = unavailable(harness(quick()).abort(stub.port, ID), "an HTML abort reply");
+    let message = unavailable(
+        harness(quick()).abort(&HarnessEndpoint::Port(stub.port), ID),
+        "an HTML abort reply",
+    );
     assert_one_line_naming(&message, "/abort", "an HTML abort reply");
 }
 
@@ -721,7 +744,7 @@ fn ac11d_an_html_200_for_the_list_is_unavailable() {
     let stub = Stub::start();
     stub.html("GET", "/session");
     let message = unavailable(
-        harness(quick()).list_sessions(stub.port),
+        harness(quick()).list_sessions(&HarnessEndpoint::Port(stub.port)),
         "an HTML list reply",
     );
     assert_one_line_naming(&message, "/session", "an HTML list reply");
@@ -730,7 +753,7 @@ fn ac11d_an_html_200_for_the_list_is_unavailable() {
 #[test]
 fn ac11d_a_session_id_is_percent_encoded_in_the_request_line() {
     let stub = Stub::start();
-    let result = harness(quick()).abort(stub.port, "ses x/?");
+    let result = harness(quick()).abort(&HarnessEndpoint::Port(stub.port), "ses x/?");
     assert_eq!(
         result,
         Err(PaneError::SessionNotFound {

@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use fixtures::*;
 use holler_pane::ports::Activity;
-use holler_pane::{HarnessPort, PaneError};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError};
 use serde_json::{json, Value};
 use stub::Stub;
 
@@ -57,7 +57,10 @@ fn ac7_send_prompt_posts_the_text_part_to_prompt_async_and_a_204_is_ok() {
     let stub = Stub::start();
     known_session(&stub);
     stub.json("POST", &prompt_path(), 204, "");
-    assert_eq!(harness(quick()).send_prompt(stub.port, ID, PROMPT), Ok(()));
+    assert_eq!(
+        harness(quick()).send_prompt(&HarnessEndpoint::Port(stub.port), ID, PROMPT),
+        Ok(())
+    );
     let seen = stub.seen();
     let lines: Vec<&str> = seen.iter().map(|s| s.line.as_str()).collect();
     assert_eq!(
@@ -84,7 +87,7 @@ fn ac7_an_unknown_session_is_session_not_found_and_nothing_is_posted() {
         stub.json("GET", &format!("/session/{ID}"), status, stub::NOT_FOUND);
         stub.json("POST", &prompt_path(), 204, "");
         assert_eq!(
-            harness(quick()).send_prompt(stub.port, ID, PROMPT),
+            harness(quick()).send_prompt(&HarnessEndpoint::Port(stub.port), ID, PROMPT),
             Err(PaneError::SessionNotFound {
                 what: ID.to_string()
             }),
@@ -109,7 +112,10 @@ fn ac7_another_answer_to_the_existence_check_is_unavailable_and_nothing_is_poste
     );
     for (stub, what) in [(&failing, "a 500"), (&another, "another session")] {
         stub.json("POST", &prompt_path(), 204, "");
-        unavailable(harness(quick()).send_prompt(stub.port, ID, PROMPT), what);
+        unavailable(
+            harness(quick()).send_prompt(&HarnessEndpoint::Port(stub.port), ID, PROMPT),
+            what,
+        );
         assert!(!posted(stub), "{what}: {:?}", stub.lines());
     }
 }
@@ -139,7 +145,7 @@ fn ac7_a_post_not_answered_204_is_unavailable_and_never_carries_the_prompt() {
         (&ok_json, "200", "a JSON 200"),
     ] {
         known_session(stub);
-        let result = harness(quick()).send_prompt(stub.port, ID, PROMPT);
+        let result = harness(quick()).send_prompt(&HarnessEndpoint::Port(stub.port), ID, PROMPT);
         if let Err(error) = &result {
             assert_no_prompt(error, what);
         }
@@ -162,7 +168,7 @@ fn ac7_ac8_a_frozen_server_is_timeout_with_each_methods_op() {
     stub.freeze();
     let h = harness(quick());
     let start = Instant::now();
-    let sent = h.send_prompt(stub.port, ID, PROMPT);
+    let sent = h.send_prompt(&HarnessEndpoint::Port(stub.port), ID, PROMPT);
     if let Err(error) = &sent {
         assert_no_prompt(error, "a frozen server");
     }
@@ -170,7 +176,10 @@ fn ac7_ac8_a_frozen_server_is_timeout_with_each_methods_op() {
     assert_within(start, quick().call + SLACK, "send_prompt");
     let start = Instant::now();
     assert_eq!(
-        timeout_op(h.session_activity(stub.port, ID), "session_activity"),
+        timeout_op(
+            h.session_activity(&HarnessEndpoint::Port(stub.port), ID),
+            "session_activity"
+        ),
         "harness.session_activity"
     );
     assert_within(start, quick().call + SLACK, "session_activity");
@@ -227,7 +236,7 @@ fn activity(scene: &Scene) -> Result<Activity, PaneError> {
             Answer::Html => stub.html("GET", &path),
         }
     }
-    harness(quick()).session_activity(stub.port, ID)
+    harness(quick()).session_activity(&HarnessEndpoint::Port(stub.port), ID)
 }
 
 /// A pending question of `session`, in OpenCode's `QuestionRequest` shape (E17).

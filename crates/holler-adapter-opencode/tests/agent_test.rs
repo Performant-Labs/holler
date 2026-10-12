@@ -16,7 +16,7 @@ use std::time::Instant;
 use fixtures::*;
 use holler_adapter_opencode::tui::tui_argv;
 use holler_adapter_opencode::{ProcessEnv, AGENT_UNUSABLE};
-use holler_pane::{HarnessPort, PaneError, ServeSpec};
+use holler_pane::{HarnessEndpoint, HarnessPort, PaneError, ServeSpec};
 use holler_pane_testkit::fault::PortOp;
 use holler_pane_testkit::harness::HarnessOp;
 use stub::{on_refused_port, Stub};
@@ -182,7 +182,10 @@ fn ac2_ac3_without_an_agent_nothing_is_applied_and_nothing_is_sent() {
         .serve_command(&pane_name(), stub.port, &ServeSpec::default())
         .unwrap();
     assert!(strings(&argv).iter().all(|e| !e.contains(VAR)), "{argv:?}");
-    assert_eq!(h.verify_serving(stub.port, &ServeSpec::default()), Ok(()));
+    assert_eq!(
+        h.verify_serving(&HarnessEndpoint::Port(stub.port), &ServeSpec::default()),
+        Ok(())
+    );
     assert!(stub.lines().is_empty(), "sent: {:?}", stub.lines());
 }
 
@@ -204,7 +207,8 @@ fn ac4_a_server_that_runs_the_agent_verifies() {
     ] {
         let stub = server(&config_naming("plan"), agents);
         assert_eq!(
-            serving(ProcessEnv::Inherit).verify_serving(stub.port, &spec("plan")),
+            serving(ProcessEnv::Inherit)
+                .verify_serving(&HarnessEndpoint::Port(stub.port), &spec("plan")),
             Ok(()),
             "{what}"
         );
@@ -261,7 +265,8 @@ fn ac5_a_server_that_does_not_run_the_agent_is_refused_agent_unusable() {
     for (config, agents, reason, what) in cases {
         let stub = server(&config, &agents);
         let (code, message) = refused(
-            serving(ProcessEnv::Inherit).verify_serving(stub.port, &spec("plan")),
+            serving(ProcessEnv::Inherit)
+                .verify_serving(&HarnessEndpoint::Port(stub.port), &spec("plan")),
             what,
         );
         assert_eq!(code, AGENT_UNUSABLE.as_str(), "{what}");
@@ -287,7 +292,8 @@ fn ac6_an_html_200_for_config_or_agent_is_unavailable() {
     agent_html.html("GET", "/agent");
     for (stub, route) in [(&config_html, "/config"), (&agent_html, "/agent")] {
         let message = unavailable(
-            serving(ProcessEnv::Inherit).verify_serving(stub.port, &spec("plan")),
+            serving(ProcessEnv::Inherit)
+                .verify_serving(&HarnessEndpoint::Port(stub.port), &spec("plan")),
             route,
         );
         assert_one_line_naming(&message, route, route);
@@ -306,7 +312,8 @@ fn ac6_an_agent_without_a_string_mode_is_unavailable() {
     ] {
         let stub = server(&config_naming("plan"), agents);
         unavailable(
-            serving(ProcessEnv::Inherit).verify_serving(stub.port, &spec("plan")),
+            serving(ProcessEnv::Inherit)
+                .verify_serving(&HarnessEndpoint::Port(stub.port), &spec("plan")),
             agents,
         );
     }
@@ -318,7 +325,7 @@ fn ac6_an_agent_without_a_string_mode_is_unavailable() {
 fn ac6_a_refused_or_frozen_server_is_unavailable_or_timeout() {
     let h = serving(ProcessEnv::Inherit);
     let (_, answer) = on_refused_port(
-        |port| h.verify_serving(port, &spec("plan")),
+        |port| h.verify_serving(&HarnessEndpoint::Port(port), &spec("plan")),
         |answer| matches!(answer, Err(PaneError::Unavailable { .. })),
     );
     unavailable(answer, "a refused port");
@@ -326,7 +333,7 @@ fn ac6_a_refused_or_frozen_server_is_unavailable_or_timeout() {
     frozen.freeze();
     let start = Instant::now();
     let op = timeout_op(
-        h.verify_serving(frozen.port, &spec("plan")),
+        h.verify_serving(&HarnessEndpoint::Port(frozen.port), &spec("plan")),
         "a frozen server",
     );
     assert_eq!(op, HarnessOp::VerifyServing.as_str());

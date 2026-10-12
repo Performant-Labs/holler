@@ -20,7 +20,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use holler_pane::error::RefusalCode;
-use holler_pane::{AgentKey, Argv, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 
 use crate::fault::{FaultSwitch, PortOp};
 
@@ -157,6 +159,10 @@ pub struct TuiView {
 ///   with no TUI. It does not reach the server: a TUI keeps its screen while its server
 ///   is frozen or dead (opencode-pane-spike.md:193-194).
 ///
+/// Every method reaches a server through its endpoint's port (#831); an endpoint that names a
+/// process is the refusal `process-unsupported` (`HarnessEndpoint::port`), which the router of
+/// the two harness fakes never sends here.
+///
 /// Every port method first passes [`FakeHarness::faults`], which models a wedged
 /// *adapter*: under `Fault::Wedged` every method answers `timeout`, `health` and
 /// `shown_session` included. [`FakeHarness::freeze`] models a wedged *server* behind a
@@ -249,6 +255,16 @@ impl FakeHarness {
         self.lock().signal(port, ServerState::Killed)
     }
 
+    /// SIGKILL every server started for the pane `name` that is not dead yet, as
+    /// `HostPort::stop_owned` of its tmux session would (#831: the one linker,
+    /// `FakeHarnesses::stop`).
+    pub(crate) fn kill_servers_of(&self, name: &PaneName) {
+        let mut world = self.lock();
+        for server in world.servers.values_mut().filter(|s| s.name == *name) {
+            server.state = ServerState::Killed;
+        }
+    }
+
     /// Another client created a session in the data directory of `port`: a stray
     /// "ping" session, or one a person started by hand on a TUI's home screen. It needs
     /// no running server. Returns its id.
@@ -329,8 +345,9 @@ impl HarnessPort for FakeHarness {
         Ok(description(name, port, spec.agent.as_ref()))
     }
 
-    fn verify_serving(&self, port: u16, spec: &ServeSpec) -> Result<(), PaneError> {
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
         self.faults.enter(HarnessOp::VerifyServing)?;
+        let port = at.port()?;
         let world = self.lock();
         world.reach(port, HarnessOp::VerifyServing)?;
         let running = world.servers.get(&port).and_then(|s| s.agent.as_ref());
@@ -343,20 +360,23 @@ impl HarnessPort for FakeHarness {
         })
     }
 
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
         self.faults.enter(HarnessOp::Health)?;
+        let port = at.port()?;
         Ok(self.lock().state(port) == Some(ServerState::Running))
     }
 
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
         self.faults.enter(HarnessOp::CreateSession)?;
+        let port = at.port()?;
         let mut world = self.lock();
         world.reach(port, HarnessOp::CreateSession)?;
         Ok(world.mint_session(port))
     }
 
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
         self.faults.enter(HarnessOp::ListSessions)?;
+        let port = at.port()?;
         let world = self.lock();
         world.reach(port, HarnessOp::ListSessions)?;
         Ok(world.sessions_of(port).to_vec())
@@ -364,8 +384,9 @@ impl HarnessPort for FakeHarness {
 
     // ASSUMPTION (#642 to confirm): abort stops a model turn as it stops a shell command;
     // the spike verified only a shell command (opencode-pane-spike.md:179, 267).
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
         self.faults.enter(HarnessOp::Abort)?;
+        let port = at.port()?;
         let mut world = self.lock();
         world.reach(port, HarnessOp::Abort)?;
         if !world.quirks.contains(&Quirk::AbortUnknownAcked) {
@@ -375,8 +396,14 @@ impl HarnessPort for FakeHarness {
         Ok(())
     }
 
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
         self.faults.enter(HarnessOp::AttachTui)?;
+        let port = at.port()?;
         let mut world = self.lock();
         world.reach(port, HarnessOp::AttachTui)?;
         world.known(port, session)?;
@@ -407,8 +434,13 @@ impl HarnessPort for FakeHarness {
     // ASSUMPTION (#642 to confirm): the shown session is read from the pane's terminal
     // title; the spike read it through tmux, and whether Herdr exposes a pane's terminal
     // title is unverified (opencode-pane-spike.md:151-152, 269).
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
         self.faults.enter(HarnessOp::ShownSession)?;
+        at.port()?;
         Ok(self.lock().tuis.get(pane).and_then(|tui| tui.shown.clone()))
     }
 }

@@ -18,12 +18,11 @@
 //! [`spec_of`], because the frozen `pane/mod.rs` admits no new module.
 
 use clap::Args;
+use holler_pane::error::{class_of, ErrorClass};
 use holler_pane::findings::quoted;
 use holler_pane::pane::{ContextCeilings, HarnessKind, ModelSpec, PaneRole};
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
-use holler_pane::tx_launch::{
-    launch, port_of_policy, LaunchRequest, Launched, TxFailure, TxOptions,
-};
+use holler_pane::tx_launch::{launch, port_for, LaunchRequest, Launched, TxFailure, TxOptions};
 use holler_pane::{AgentKey, Pane, PaneError, PaneName, Ports, Profile, ProfileName, ProfileSpec};
 use serde::Serialize;
 
@@ -49,7 +48,10 @@ use crate::output::{emit, emit_error, ErrorBody, VerbCtx};
 /// With no `--profile` every position, directory, model, effort, ceiling and port-policy flag is
 /// needed; with `--profile P` the profile's spec for the pane fills the ones not given, and the
 /// run sets P's spec for the pane in the same transaction (a failed run puts P's specs back).
-/// `--spec-only` sets P's spec and changes nothing live. The one port policy is fixed:PORT.
+/// `--spec-only` sets P's spec and changes nothing live. The harness is opencode unless
+/// --harness says claude: an opencode pane's port policy is fixed:PORT, and a claude pane, one
+/// Claude Code process recorded by its pid, takes the policy none and no --agent, and its spec
+/// may not name an environment variable that changes its login.
 ///
 /// `--format=json` prints one envelope whose data is
 /// `{"verb", "pane", "profile", "spec_only", "agent"}`: the stored record, the profile's name,
@@ -131,11 +133,13 @@ pub(crate) fn spec_of<'a>(profile: &'a Profile, name: &PaneName) -> Option<&'a P
 /// Overlay the typed flags on `base` (with `None`, every required field must come from the
 /// flags). A flag given replaces its field; a repeatable flag given at least once (`--env`,
 /// `--expect`, `--command-arg`, `--check-arg`) replaces the whole list; `--role` defaults to
-/// `agent` and the harness to OpenCode for a new spec. `usage`, in one line naming every flag
-/// that is missing or bad: with no base, a missing `--project`, `--workspace`, `--grid`,
+/// `agent` and `--harness` to OpenCode for a new spec (#831). `usage`, in one line naming every
+/// flag that is missing or bad: with no base, a missing `--project`, `--workspace`, `--grid`,
 /// `--model`, `--effort`, `--ctx-soft`, `--ctx-hard` or `--port-policy`; a `--model` that is not
 /// `PROVIDER/ID` with both halves non-empty; `--ctx-soft` above `--ctx-hard`; a port policy
-/// `port_of_policy` refuses; and an `--expect` with no check.
+/// outside the grammar (`tx_launch::port_for`'s `usage`: a policy the harness's kind does not
+/// take is the engine's plan's refusal, `port-policy-unsupported`); and an `--expect` with no
+/// check.
 pub(crate) fn effective_spec(
     base: Option<&ProfileSpec>,
     name: &PaneName,
@@ -179,9 +183,13 @@ pub(crate) fn effective_spec(
         .or(base.and_then(|b| b.opencode_agent.clone()));
     let env = replaced(&values.env, base.map(|b| &b.env));
     let expect = replaced(&values.expect, base.map(|b| &b.expect));
+    let kind = values
+        .harness
+        .or(base.map(|b| b.harness.kind))
+        .unwrap_or(HarnessKind::Opencode);
     problems.check_values(
         soft.zip(hard),
-        port_policy.as_deref(),
+        port_policy.as_deref().map(|policy| (kind, policy)),
         !expect.is_empty() && check.is_none(),
     );
     let (
@@ -204,10 +212,7 @@ pub(crate) fn effective_spec(
         pane: name.as_str().to_owned(),
         herdr: SpecHerdr { workspace, grid },
         host: SpecHost { cwd },
-        harness: SpecHarness {
-            kind: base.map_or(HarnessKind::Opencode, |b| b.harness.kind),
-            port_policy,
-        },
+        harness: SpecHarness { kind, port_policy },
         model: ModelSpec {
             provider,
             model_id,
@@ -272,12 +277,13 @@ impl Problems {
         }
     }
 
-    /// The checks of values that are present: the ceilings' order, the port policy and an
-    /// `--expect` with no check.
+    /// The checks of values that are present: the ceilings' order, the port policy's grammar
+    /// for the harness's kind (its refusal, a policy the kind does not take, is the engine's
+    /// plan's) and an `--expect` with no check.
     fn check_values(
         &mut self,
         ceilings: Option<(u32, u32)>,
-        port_policy: Option<&str>,
+        port_policy: Option<(HarnessKind, &str)>,
         expect_without_check: bool,
     ) {
         if let Some((soft, hard)) = ceilings.filter(|(soft, hard)| soft > hard) {
@@ -285,8 +291,10 @@ impl Problems {
                 "--ctx-soft ({soft}) must not be above --ctx-hard ({hard})"
             ));
         }
-        if let Some(Err(refused)) = port_policy.map(port_of_policy) {
-            self.bad.push(format!("--port-policy {refused}"));
+        if let Some(Err(refused)) = port_policy.map(|(kind, policy)| port_for(kind, policy)) {
+            if class_of(refused.code()) == ErrorClass::Usage {
+                self.bad.push(format!("--port-policy {refused}"));
+            }
         }
         if expect_without_check {
             self.bad
@@ -391,18 +399,14 @@ impl Report {
     fn text(&self, verb: Verb, name: &PaneName) -> String {
         match (&self.pane, &self.profile) {
             (Some(pane), profile) => {
-                let pid = pane
-                    .harness
-                    .pid
-                    .map_or_else(String::new, |pid| format!(" (pid {pid})"));
                 let mut line = format!(
-                    "{} {} at {} in {}: session {}, harness port {}{pid}",
+                    "{} {} at {} in {}: session {}, {}",
                     verb.done(),
                     pane.name,
                     pane.herdr.grid,
                     text_value(&pane.herdr.workspace),
                     optional_text(pane.session_of_record.as_deref()),
-                    pane.harness.port
+                    harness_text(pane)
                 );
                 if let Some(agent) = &self.agent {
                     line.push_str(&format!(", agent {}", text_value(agent.as_str())));
@@ -422,6 +426,23 @@ impl Report {
                 profile.generation
             ),
             (None, None) => format!("{name}: nothing changed"),
+        }
+    }
+}
+
+/// Where a launched pane's harness is, in the text line: `harness port <port>`, with ` (pid
+/// <pid>)` when a record carries one, for a server; `harness <kind>, pid <pid>` for a harness
+/// with no port, a Claude Code process (#831).
+fn harness_text(pane: &Pane) -> String {
+    let pid = pane.harness.pid;
+    match pane.harness.port {
+        Some(port) => {
+            let pid = pid.map_or_else(String::new, |pid| format!(" (pid {pid})"));
+            format!("harness port {port}{pid}")
+        }
+        None => {
+            let pid = pid.map_or_else(|| "-".to_owned(), |pid| pid.to_string());
+            format!("harness {}, pid {pid}", pane.harness.kind.as_str())
         }
     }
 }

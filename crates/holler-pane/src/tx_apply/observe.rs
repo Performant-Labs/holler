@@ -56,13 +56,19 @@ pub(super) fn observe(ports: Ports<'_>, records: &[Pane]) -> Observed {
         let snapshot = spawn(threads, move || ports.herdr.snapshot());
         let health: Vec<_> = records
             .iter()
-            .map(|pane| spawn(threads, move || ports.harness.health(pane.harness.port)))
+            .map(|pane| {
+                spawn(threads, move || {
+                    let at = pane.harness.endpoint(&pane.name)?;
+                    ports.harness.health(&at)
+                })
+            })
             .collect();
         let shown: Vec<_> = records
             .iter()
             .map(|pane| {
                 spawn(threads, move || {
-                    ports.harness.shown_session(&pane.herdr.pane_id)
+                    let at = pane.harness.endpoint(&pane.name)?;
+                    ports.harness.shown_session(&pane.herdr.pane_id, &at)
                 })
             })
             .collect();
@@ -119,9 +125,12 @@ pub(super) fn judge(
         .as_ref()
         .map_err(|error| as_failure(HERDR_SNAPSHOT, record, error.clone()))?;
     if !answers {
-        let port = record.harness.port;
+        let at = record
+            .harness
+            .endpoint(&record.name)
+            .map_or_else(|_| "its recorded endpoint".to_owned(), |at| at.to_string());
         return Ok(Judged::Unhealthy(format!(
-            "its harness server on port {port} did not answer"
+            "its harness at {at} did not answer"
         )));
     }
     if !listed(snapshot, record) {

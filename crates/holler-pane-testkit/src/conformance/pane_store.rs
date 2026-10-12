@@ -437,7 +437,7 @@ fn at(pane: &Pane, generation: u64) -> Pane {
 /// the harness port up by `rev`.
 fn revised(pane: &Pane, rev: u16) -> Pane {
     let mut next = pane.clone();
-    next.harness.port = pane.harness.port.saturating_add(rev);
+    next.harness.port = pane.harness.port.map(|port| port.saturating_add(rev));
     next
 }
 

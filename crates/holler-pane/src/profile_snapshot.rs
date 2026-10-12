@@ -9,17 +9,31 @@
 //!
 //! The record holds the port its harness uses, not the policy that chose the port, so a
 //! snapshot writes the one policy that keeps that fact: `fixed:<port>`
-//! ([`fixed_port_policy`]). The rest of the policy grammar is #644's.
+//! ([`fixed_port_policy`]), or for a harness with no port (a Claude Code process, #831) the
+//! word `none` ([`NO_PORT_POLICY`]), so a spec round-trips ([`port_policy_of`]). The rest of
+//! the policy grammar is #644's.
 
-use crate::pane::Pane;
+use crate::pane::{HarnessInfo, Pane};
 use crate::profile::{Profile, ProfileName, ProfileSpec, SpecHarness, SpecHerdr, SpecHost};
 
 /// The prefix of the port policy that pins a harness to one port.
 pub const FIXED_PORT_POLICY_PREFIX: &str = "fixed:";
 
+/// The port policy of a harness that has no port: a single process (#831, ADR-0021 section 15
+/// item 12), the only policy a `claude` spec takes.
+pub const NO_PORT_POLICY: &str = "none";
+
 /// The port policy that pins a pane's harness to `port`: `fixed:<port>`, e.g. `fixed:48100`.
 pub fn fixed_port_policy(port: u16) -> String {
     format!("{FIXED_PORT_POLICY_PREFIX}{port}")
+}
+
+/// The port policy that reproduces `harness` as recorded: [`fixed_port_policy`] of its port,
+/// or [`NO_PORT_POLICY`] for a harness with none.
+pub fn port_policy_of(harness: &HarnessInfo) -> String {
+    harness
+        .port
+        .map_or_else(|| NO_PORT_POLICY.to_owned(), fixed_port_policy)
 }
 
 /// The spec that reproduces `pane` as its record holds it. Pure; no port is called.
@@ -30,7 +44,7 @@ pub fn fixed_port_policy(port: u16) -> String {
 /// | `herdr.workspace`, `herdr.grid` | `herdr.workspace`, `herdr.grid` (never parsed from the name) |
 /// | `host.cwd` | `host.cwd` |
 /// | `harness.kind` | `harness.kind` |
-/// | `harness.port_policy` | [`fixed_port_policy`] of `harness.port` |
+/// | `harness.port_policy` | [`port_policy_of`] `harness`: `fixed:<port>`, or `none` with no port |
 /// | `model`, `role`, `context` | `model`, `role`, `context` |
 /// | `opencode_agent` | `opencode_agent` (absent stays absent) |
 /// | `env` | `env`: the names, in order |
@@ -56,7 +70,7 @@ pub fn spec_from_pane(pane: &Pane) -> ProfileSpec {
         },
         harness: SpecHarness {
             kind: pane.harness.kind,
-            port_policy: fixed_port_policy(pane.harness.port),
+            port_policy: port_policy_of(&pane.harness),
         },
         model: pane.model.clone(),
         opencode_agent: pane.opencode_agent.clone(),

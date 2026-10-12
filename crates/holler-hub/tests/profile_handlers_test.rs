@@ -456,6 +456,10 @@ async fn a_corrupt_registry_answers_store_corrupt_on_every_profile_method() {
         ),
         ("profile/watch", json!({"since": 0})),
         ("profile/log", json!({"name": "Night Shift"})),
+        (
+            "profile/rename",
+            json!({"from": "Night Shift", "to": "Day Shift", "expected_generation": 1, "actor": "a"}),
+        ),
     ];
     for (method, params) in requests {
         // `outcome` fails the test if the answer is a JSON-RPC error frame.
@@ -471,10 +475,6 @@ async fn a_corrupt_registry_answers_store_corrupt_on_every_profile_method() {
         b"{ not json"
     );
     assert_eq!(dir_listing(&rig.state.hub_dir), listing);
-
-    // profile/rename is #665's: it still answers not-implemented, corrupt registry or not.
-    let rename = rig.call("profile/rename", Some(json!({}))).await;
-    assert_eq!(rename, Err(PaneError::NotImplemented));
 }
 
 // --- AC 33: a detached spec ----------------------------------------------------------

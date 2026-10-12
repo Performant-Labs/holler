@@ -20,11 +20,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use holler_cli::output::Format;
 use holler_cli::pane::wiring::bind::{
-    tui_session, BindingHerdr, BindingHost, Bindings, LazyHerdr, WiredHarness,
+    tui_session, BindingHerdr, BindingHost, Bindings, LazyHerdr, WiredHarness, WiredHost,
 };
-use holler_pane::ports::Activity;
+use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Actor, Argv, GridPos, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
+    Actor, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
     PaneError, PaneId, PaneName, PaneStore, Ports, ServeSpec,
 };
 use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
@@ -161,8 +161,9 @@ fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
 
 // --- the wired harness (W-4) --------------------------------------------------------------
 
-/// A harness that records which method was called and answers each distinctively: the two
-/// default-armed methods answer what their defaults never would.
+/// A harness that records which method was called and answers each distinctively: the
+/// default-armed methods answer what their defaults never would (#645's two; #831's four
+/// process methods, whose defaults refuse `process-unsupported`).
 #[derive(Default)]
 struct Recording {
     calls: Mutex<Vec<&'static str>>,
@@ -182,27 +183,27 @@ impl HarnessPort for Recording {
         self.note("serve_command");
         Ok(Argv::new(vec!["serve".to_owned()]))
     }
-    fn verify_serving(&self, _: u16, _: &ServeSpec) -> Result<(), PaneError> {
+    fn verify_serving(&self, _: &HarnessEndpoint, _: &ServeSpec) -> Result<(), PaneError> {
         self.note("verify_serving");
         Ok(())
     }
-    fn health(&self, _: u16) -> Result<bool, PaneError> {
+    fn health(&self, _: &HarnessEndpoint) -> Result<bool, PaneError> {
         self.note("health");
         Ok(true)
     }
-    fn create_session(&self, _: u16) -> Result<String, PaneError> {
+    fn create_session(&self, _: &HarnessEndpoint) -> Result<String, PaneError> {
         self.note("create_session");
         Ok("ses_1".to_owned())
     }
-    fn list_sessions(&self, _: u16) -> Result<Vec<String>, PaneError> {
+    fn list_sessions(&self, _: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
         self.note("list_sessions");
         Ok(Vec::new())
     }
-    fn abort(&self, _: u16, _: &str) -> Result<(), PaneError> {
+    fn abort(&self, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
         self.note("abort");
         Ok(())
     }
-    fn attach_tui(&self, _: &PaneId, _: u16, _: &str) -> Result<(), PaneError> {
+    fn attach_tui(&self, _: &PaneId, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
         self.note("attach_tui");
         Ok(())
     }
@@ -210,36 +211,108 @@ impl HarnessPort for Recording {
         self.note("select_session");
         Ok(())
     }
-    fn shown_session(&self, _: &PaneId) -> Result<Option<String>, PaneError> {
+    fn shown_session(&self, _: &PaneId, _: &HarnessEndpoint) -> Result<Option<String>, PaneError> {
         self.note("shown_session");
         Ok(None)
     }
-    fn send_prompt(&self, _: u16, _: &str, _: &str) -> Result<(), PaneError> {
+    fn send_prompt(&self, _: &HarnessEndpoint, _: &str, _: &str) -> Result<(), PaneError> {
         self.note("send_prompt");
         Ok(())
     }
-    fn session_activity(&self, _: u16, _: &str) -> Result<Activity, PaneError> {
+    fn session_activity(&self, _: &HarnessEndpoint, _: &str) -> Result<Activity, PaneError> {
         self.note("session_activity");
         Ok(Activity::Busy)
+    }
+    fn process_command(
+        &self,
+        _: &PaneName,
+        _: &ServeSpec,
+        _: &SessionChoice,
+    ) -> Result<Argv, PaneError> {
+        self.note("process_command");
+        Ok(Argv::new(vec!["claude".to_owned()]))
+    }
+    fn new_session_id(&self) -> Result<String, PaneError> {
+        self.note("new_session_id");
+        Ok("s-1".to_owned())
+    }
+    fn locate_process(&self, _: &PaneName, _: &str) -> Result<Option<u32>, PaneError> {
+        self.note("locate_process");
+        Ok(Some(4242))
+    }
+    fn login_status(&self) -> Result<LoginStatus, PaneError> {
+        self.note("login_status");
+        Ok(LoginStatus::Missing)
     }
 }
 
 /// Call every method of `harness` once; each answer, as `Ok` or the error's code.
 fn call_every_method(harness: &dyn HarnessPort) -> Vec<Result<String, String>> {
-    let (pane, port, spec) = (PaneId::new("w1:p1"), 48100, ServeSpec::default());
+    let (pane, port, spec) = (
+        PaneId::new("w1:p1"),
+        HarnessEndpoint::Port(48100),
+        ServeSpec::default(),
+    );
+    let choice = SessionChoice::Fresh("s-1".to_owned());
     let code = |e: PaneError| e.code().to_owned();
     vec![
-        harness.serve_command(&name("demo-c1r1"), port, &spec).map(|_| "serve_command".into()).map_err(code),
-        harness.verify_serving(port, &spec).map(|()| "verify_serving".into()).map_err(code),
-        harness.health(port).map(|_| "health".into()).map_err(code),
-        harness.create_session(port).map(|_| "create_session".into()).map_err(code),
-        harness.list_sessions(port).map(|_| "list_sessions".into()).map_err(code),
-        harness.abort(port, "ses_1").map(|()| "abort".into()).map_err(code),
-        harness.attach_tui(&pane, port, "ses_1").map(|()| "attach_tui".into()).map_err(code),
-        harness.select_session(&pane, "ses_1").map(|()| "select_session".into()).map_err(code),
-        harness.shown_session(&pane).map(|_| "shown_session".into()).map_err(code),
-        harness.send_prompt(port, "ses_1", "hello").map(|()| "send_prompt".into()).map_err(code),
-        harness.session_activity(port, "ses_1").map(|a| format!("{a:?}")).map_err(code),
+        harness
+            .serve_command(&name("demo-c1r1"), 48100, &spec)
+            .map(|_| "serve_command".into())
+            .map_err(code),
+        harness
+            .verify_serving(&port, &spec)
+            .map(|()| "verify_serving".into())
+            .map_err(code),
+        harness.health(&port).map(|_| "health".into()).map_err(code),
+        harness
+            .create_session(&port)
+            .map(|_| "create_session".into())
+            .map_err(code),
+        harness
+            .list_sessions(&port)
+            .map(|_| "list_sessions".into())
+            .map_err(code),
+        harness
+            .abort(&port, "ses_1")
+            .map(|()| "abort".into())
+            .map_err(code),
+        harness
+            .attach_tui(&pane, &port, "ses_1")
+            .map(|()| "attach_tui".into())
+            .map_err(code),
+        harness
+            .select_session(&pane, "ses_1")
+            .map(|()| "select_session".into())
+            .map_err(code),
+        harness
+            .shown_session(&pane, &port)
+            .map(|_| "shown_session".into())
+            .map_err(code),
+        harness
+            .send_prompt(&port, "ses_1", "hello")
+            .map(|()| "send_prompt".into())
+            .map_err(code),
+        harness
+            .session_activity(&port, "ses_1")
+            .map(|a| format!("{a:?}"))
+            .map_err(code),
+        harness
+            .process_command(&name("demo-c1r1"), &spec, &choice)
+            .map(|_| "process_command".into())
+            .map_err(code),
+        harness
+            .new_session_id()
+            .map(|_| "new_session_id".into())
+            .map_err(code),
+        harness
+            .locate_process(&name("demo-c1r1"), "s-1")
+            .map(|p| format!("{p:?}"))
+            .map_err(code),
+        harness
+            .login_status()
+            .map(|s| format!("{s:?}"))
+            .map_err(code),
     ]
 }
 
@@ -250,14 +323,24 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
     let wired = WiredHarness::new(Ok(port));
     let answers = call_every_method(&wired);
     assert_eq!(
-        answers.last(),
-        Some(&Ok("Busy".to_owned())),
+        answers[10],
+        Ok("Busy".to_owned()),
         "session_activity is the inner one's, not the default Idle"
     );
     assert_eq!(
         answers[9],
         Ok("send_prompt".to_owned()),
         "send_prompt is the inner one's, not the default prompt-unsupported"
+    );
+    assert_eq!(
+        answers[11..],
+        [
+            Ok("process_command".to_owned()),
+            Ok("new_session_id".to_owned()),
+            Ok("Some(4242)".to_owned()),
+            Ok("Missing".to_owned()),
+        ],
+        "#831's four process methods are the inner one's, not the process-unsupported defaults"
     );
     assert_eq!(
         *inner.calls.lock().unwrap(),
@@ -273,6 +356,10 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
             "shown_session",
             "send_prompt",
             "session_activity",
+            "process_command",
+            "new_session_id",
+            "locate_process",
+            "login_status",
         ],
         "each method reached the inner harness once"
     );
@@ -320,6 +407,15 @@ fn the_binding_host_passes_the_host_conformance_suite() {
     let result = run_host_conformance(|| {
         (BindingHost::new(Arc::new(FakeHost::new()), Bindings::new()), ())
     });
+    assert_eq!(result, Ok(()));
+}
+
+/// #835 (A's W6): the production host is `BindingHost` over `WiredHost` over the adapter, so
+/// `WiredHost` forwards every `HostPort` method too; the suite's `foreground_commands` case
+/// pins the method #835 adds.
+#[test]
+fn the_wired_host_passes_the_host_conformance_suite() {
+    let result = run_host_conformance(|| (WiredHost::new(Ok(Arc::new(FakeHost::new()))), ()));
     assert_eq!(result, Ok(()));
 }
 
@@ -442,6 +538,9 @@ impl HostPort for LinkedHost {
     fn ps(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
         self.host.ps(name)
     }
+    fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
+        self.host.foreground_commands(name)
+    }
 }
 
 /// What `attach_tui` saw: the resolver's answer for its pane, and whether the pane store
@@ -461,41 +560,55 @@ impl HarnessPort for Resolving {
     fn serve_command(&self, n: &PaneName, port: u16, s: &ServeSpec) -> Result<Argv, PaneError> {
         self.inner.serve_command(n, port, s)
     }
-    fn verify_serving(&self, port: u16, s: &ServeSpec) -> Result<(), PaneError> {
-        self.inner.verify_serving(port, s)
+    fn verify_serving(&self, at: &HarnessEndpoint, s: &ServeSpec) -> Result<(), PaneError> {
+        self.inner.verify_serving(at, s)
     }
-    fn health(&self, port: u16) -> Result<bool, PaneError> {
-        self.inner.health(port)
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.inner.health(at)
     }
-    fn create_session(&self, port: u16) -> Result<String, PaneError> {
-        self.inner.create_session(port)
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.inner.create_session(at)
     }
-    fn list_sessions(&self, port: u16) -> Result<Vec<String>, PaneError> {
-        self.inner.list_sessions(port)
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.inner.list_sessions(at)
     }
-    fn abort(&self, port: u16, session: &str) -> Result<(), PaneError> {
-        self.inner.abort(port, session)
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.inner.abort(at, session)
     }
-    fn attach_tui(&self, pane: &PaneId, port: u16, session: &str) -> Result<(), PaneError> {
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
         let answer = (self.resolve)(pane).map_err(|e| e.code().to_owned());
         let stored = !self.panes.list().unwrap_or_default().is_empty();
         self.seen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((answer, stored));
-        self.inner.attach_tui(pane, port, session)
+        self.inner.attach_tui(pane, at, session)
     }
     fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
         self.inner.select_session(pane, session)
     }
-    fn shown_session(&self, pane: &PaneId) -> Result<Option<String>, PaneError> {
-        self.inner.shown_session(pane)
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.inner.shown_session(pane, at)
     }
-    fn send_prompt(&self, port: u16, session: &str, text: &str) -> Result<(), PaneError> {
-        self.inner.send_prompt(port, session, text)
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        self.inner.send_prompt(at, session, text)
     }
-    fn session_activity(&self, port: u16, session: &str) -> Result<Activity, PaneError> {
-        self.inner.session_activity(port, session)
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.inner.session_activity(at, session)
     }
 }
 

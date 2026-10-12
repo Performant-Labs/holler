@@ -5,7 +5,7 @@
 //! The cases pin the port's rules (`holler_pane::profile`; ADR-0021 sections 7 and 8):
 //! the compare-and-swap on a profile's generation, `delete` checking that the profile
 //! exists before it checks the generation, one log entry per applied write and none
-//! for a refused one, `rename` answering `not-implemented` while it is PROPOSED (#665),
+//! for a refused one, the record half of `rename` (#665),
 //! an environment of names only, and the watch stream (the current state from
 //! `Cursor(0)`, a resume with no gap and no repeat, idle as `Ok(None)`).
 //!
@@ -38,11 +38,12 @@
 //!
 //! A store's own idle wait bounds each idle read, so a store with a long-poll window is
 //! run with a short one. This file holds cases 1 to 14 and the helpers every case
-//! uses. The child module `log` holds cases 15 to 18 (the log, `rename`, the env), and
-//! `watch` holds the watch cases, 19 to 23, which use the watch helpers of the pane
-//! suite.
+//! uses. The child module `log` holds cases 15 to 17 (the log and the env), `watch` holds
+//! the watch cases, 18 to 22, which use the watch helpers of the pane suite, and `rename`
+//! holds the rename cases, 23 to 28 (#665).
 
 mod log;
+mod rename;
 mod watch;
 
 use holler_pane::{Actor, Profile, ProfileChange, ProfileLogEntry, ProfileName, ProfileStore};
@@ -65,13 +66,12 @@ pub(super) type Step = (u64, Actor, &'static str);
 const CONFLICT: &str = "generation-conflict";
 const NOT_FOUND: &str = "profile-not-found";
 const EXISTS: &str = "profile-exists";
-const NOT_IMPLEMENTED: &str = "not-implemented";
 
 /// The kinds of change a case reads in a log. The profile scope suite reuses `UPDATED`.
-const CREATED: &str = "created";
+pub(super) const CREATED: &str = "created";
 pub(super) const UPDATED: &str = "updated";
-const RENAMED: &str = "renamed";
-const DELETED: &str = "deleted";
+pub(super) const RENAMED: &str = "renamed";
+pub(super) const DELETED: &str = "deleted";
 
 /// Who makes every write of the suite.
 const ACTOR: &str = "conformance";
@@ -91,7 +91,7 @@ pub(super) const C3: &str = "demo-c3r1";
 
 /// The suite, in order: the one table that the runner iterates and
 /// [`profile_store_cases`] lists.
-const CASES: [(&str, Case); 23] = [
+const CASES: [(&str, Case); 28] = [
     ("get-missing-is-none", get_missing_is_none),
     ("list-empty", list_empty),
     ("create-at-zero-stored-at-one", create_at_zero_stored_at_one),
@@ -126,7 +126,6 @@ const CASES: [(&str, Case); 23] = [
         "log-of-never-created-is-profile-not-found",
         log::log_of_never_created_is_profile_not_found,
     ),
-    ("rename-is-not-implemented", log::rename_is_not_implemented),
     ("env-is-names-only", log::env_is_names_only),
     (
         "watch-from-zero-yields-current-state",
@@ -147,6 +146,27 @@ const CASES: [(&str, Case); 23] = [
     (
         "failed-write-changes-nothing",
         watch::failed_write_changes_nothing,
+    ),
+    ("rename-moves-the-record", rename::rename_moves_the_record),
+    (
+        "rename-logs-renamed-and-closes-the-old-log",
+        rename::rename_logs_renamed_and_closes_the_old_log,
+    ),
+    (
+        "rename-onto-a-deleted-name-continues-its-log",
+        rename::rename_onto_a_deleted_name_continues_its_log,
+    ),
+    (
+        "rename-of-one-slug-is-one-put",
+        rename::rename_of_one_slug_is_one_put,
+    ),
+    (
+        "rename-feed-is-deletion-then-put",
+        rename::rename_feed_is_deletion_then_put,
+    ),
+    (
+        "rename-refusals-change-nothing",
+        rename::rename_refusals_change_nothing,
     ),
 ];
 
@@ -172,8 +192,9 @@ pub fn profile_store_cases() -> Vec<&'static str> {
 /// // directory as the guard.
 /// ```
 ///
-/// The case `rename-is-not-implemented` pins `rename` as PROPOSED; #665 replaces it
-/// when `rename` is confirmed. The suite offers no way to skip a case.
+/// The `rename-*` cases pin the record half of `rename` (#665): a store with member panes
+/// (the hub's `profile/rename`) moves them too, which the hub's own tests pin. The suite
+/// offers no way to skip a case.
 pub fn run_profile_store_conformance<S, K, F>(fresh: F) -> Conformance
 where
     S: ProfileStore,
