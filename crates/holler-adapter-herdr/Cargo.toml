@@ -21,7 +21,8 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 # `GRID_UNREACHABLE` and `SUPPORTED_VERSIONS`, which the tests pin equal to this
-# crate's own constants (#640 part 1, AC 13). A dev-dependency only (ADR-0021 section 5).
+# crate's own constants (#640 part 1, AC 13), and `FakeHerdr`, whose split-only placement
+# a test checks against `plan_splits` (#853). A dev-dependency only (ADR-0021 section 5).
 holler-pane-testkit = { path = "../holler-pane-testkit" }
 # The scratch directory that holds each test's Unix socket (the transport tests and the
 # wire fake's `serve`, #640 part 2), and the scratch Herdr's root (`scratch_herdr`, #640

@@ -419,8 +419,8 @@ impl Rig {
 /// The health check of the every-row fixture's `pane-b`, as an argv.
 pub(crate) const PROBE: [&str; 2] = ["curl", "http://127.0.0.1:8095/v1/models"];
 
-/// One spec pane for each row of §3, in grid order, with P's specs listed in the reverse
-/// order (so a case sees that apply orders its steps itself, C6):
+/// One spec pane for each row of §3, listed below by cell, with P's specs listed in the
+/// reverse order (so a case sees that apply orders its steps itself, C6):
 ///
 /// | pane | cell | row | state |
 /// |---|---|---|---|
@@ -458,9 +458,10 @@ pub(crate) fn every_row() -> Rig {
     rig
 }
 
-/// The panes of [`every_row`], in grid order.
+/// The panes of [`every_row`] in apply's step order (#853): column 1 by row (`pane-a`,
+/// `pane-d`), then every other cell by row and column.
 pub(crate) const EVERY_ROW: [&str; 6] =
-    ["pane-a", "pane-b", "pane-c", "pane-d", "pane-e", "pane-f"];
+    ["pane-a", "pane-d", "pane-b", "pane-c", "pane-e", "pane-f"];
 
 /// The spec that matches `record` on every compared field (`diff_spec` is empty).
 pub(crate) fn spec_of(record: &Pane) -> ProfileSpec {

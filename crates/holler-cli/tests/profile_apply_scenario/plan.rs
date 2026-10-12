@@ -6,6 +6,8 @@
 //!   absent value `null`. A missing key, or an action or outcome name that production's
 //!   `holler_pane::tx_apply::{Action, Outcome}` does not print, is refused (A's W-7: the names
 //!   are production's own `as_str`, never a second list of strings). `pins.rs` pins it.
+//! - [`assert_refused_run`]: a real run that refused steps, which exits 3 and prints only the
+//!   refusal (#853), so its steps are not data; a case reads them from a dry run first.
 //! - [`assert_plan_agrees_with_show`]: a dry run's plan against `profile show`'s comparison,
 //!   with the same assertion shape as the fakes' `a_dry_run_and_profile_show_agree`.
 //! - [`Still`]: what "apply left these panes alone" measures. Built only from reads (`pane
@@ -14,6 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use holler_pane::findings::quoted;
 use holler_pane::tx_apply::{Action, Outcome};
 use holler_pane::GridPos;
 use serde_json::{json, Map, Value};
@@ -190,6 +193,34 @@ impl Step {
     pub fn row(&self) -> (Action, Outcome) {
         (self.action, self.outcome)
     }
+}
+
+/// #853 (ADR-0021 section 8, decision 33): `out` is a real apply that refused `refused` (each
+/// pane and its code, in step order) and ran `ran` other steps: exit 3, no `data`, `error.code`
+/// the first refused step's, and the message `apply refused <N> step(s): <pane> (<code>), ...;
+/// <M> other step(s) ran`. Returns the rest of the message (each refused step that had begun
+/// its act adds `; <pane>: <detail>`).
+pub fn assert_refused_run(out: &Out, refused: &[(&str, &str)], ran: usize) -> String {
+    assert_eq!(out.code, 3, "a refused step exits 3: {out:?}");
+    let envelope = out.envelope();
+    assert_eq!(envelope.data, Value::Null, "no steps: {out:?}");
+    let error = envelope.error.expect("a failure");
+    let (_, first) = refused.first().expect("a case names a refused step");
+    assert_eq!(error.code, *first, "the first refused step's code: {out:?}");
+    let named: Vec<String> = refused
+        .iter()
+        .map(|(pane, code)| format!("{} ({code})", quoted(pane)))
+        .collect();
+    let head = format!(
+        "apply refused {} step(s): {}; {ran} other step(s) ran",
+        refused.len(),
+        named.join(", ")
+    );
+    error
+        .message
+        .strip_prefix(&head)
+        .unwrap_or_else(|| panic!("starts with {head:?}: {}", error.message))
+        .to_owned()
 }
 
 /// A dry run's `plan` says what `profile show`'s `shown` says, for every spec pane but

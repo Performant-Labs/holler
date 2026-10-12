@@ -12,6 +12,7 @@ use holler_pane::PaneError;
 use holler_pane_testkit::harness::HarnessOp;
 use holler_pane_testkit::herdr::HerdrOp;
 
+use super::refused::{assert_refused, Refusal};
 use super::rig::{
     apply_argv, assert_only_observed, assert_stopped, cell, new_spec, options, outcomes,
     profile_name, request, spec_of, step, Rig, Seed, Stop, HS, P, Q,
@@ -223,7 +224,8 @@ fn row_a_health_fails() -> Rig {
 
 /// Entry 33 (C1, C7 R5 B-3): a failed `health` call for a pane that row a refuses changes
 /// nothing: its step is `refused` (`pane-in-other-profile`), not `failed`; the next step runs and
-/// is `created`; its record is never written; and the verb exits 0.
+/// is `created`; its record is never written; and the verb exits 3 for the refusal (#853), not
+/// 1 for a failure.
 #[test]
 fn a_failed_health_for_a_pane_row_a_refuses_is_not_a_failure() {
     let rig = row_a_health_fails();
@@ -248,8 +250,16 @@ fn a_failed_health_for_a_pane_row_a_refuses_is_not_a_failure() {
         .collect();
     assert_eq!(touched, vec![], "pane-a is never written");
 
-    let run = row_a_health_fails().run(&apply_argv(&HS), holler_cli::output::Format::Json);
-    assert_eq!(run.code, 0, "{run:?}");
+    let refusal = Refusal {
+        refused: &[("pane-a", "pane-in-other-profile")],
+        ran: 1,
+    };
+    let rest = assert_refused(
+        row_a_health_fails,
+        |rig, f| rig.run(&apply_argv(&HS), f),
+        &refusal,
+    );
+    assert_eq!(rest, "", "row a acted nothing");
 }
 
 /// `pane-y` and `pane-z` (r1c1 and r2c1, no record), with the next `create_session`, which

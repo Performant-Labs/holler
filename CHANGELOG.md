@@ -597,6 +597,23 @@ fills this file in at release time.
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
 
+### Bug Fixes
+- `holler profile apply` builds a whole grid from an empty workspace, and a real run with a refused step exits 3 (epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#853](https://github.com/Performant-Labs/holler/issues/853)). Apply created the missing panes in workspace, row and
+  column order, but Herdr adds a row only below a row of one pane, so for a profile of a 2-by-2 grid it created `r1c1`
+  and `r1c2`, then refused `r2c1` and `r2c2` as `grid-unreachable`. Its steps now run in creation order, the Herdr
+  adapter's own: by workspace, then the workspace's column 1 by row, then every other cell by row and column (`r1c1`,
+  `r2c1`, `r1c2`, `r2c2`), which is also the order of `steps` in the output and in a dry run's plan. One limit stays:
+  apply cannot add a row below a row that already holds two or more live panes, and it moves nothing live to make room
+  (that create is still refused, `grid-unreachable`). **Behaviour change:** a real run with a `refused` step and no
+  failed one now exits 3, not 0, and, as a failed run does, prints only one line, `apply refused <N> step(s): <pane>
+  (<code>), ...; <M> other step(s) ran`, coded as the first refused step and followed by the detail of each refused step
+  whose launch or relaunch had begun (it ends with the command that reconciles). Every step still runs and nothing is
+  rolled back. A script that needs the steps as data runs `--dry-run` first, which still exits 0 and prints the plan.
+  The test kit's split-only fake Herdr now follows the adapter's rule, and a test checks the two against each other.
+  [ADR 0021](docs/adr/ADR-0021.md) records both decisions (32 and 33).
+
 ## [0.4.0] - 2026-09-29
 
 ### Enhancements
