@@ -1,8 +1,116 @@
 # Handoff-A-dup: #831 A Claude Code harness for panes  (anti-duplication gate)
 
-Two passes, newest first: the gate after F's rework (S's REWORK), then the first pass.
+Three passes, newest first: the gate after T's test-only rework (S's second REWORK), the gate after F's rework (S's
+first REWORK), then the first pass.
 
-## Rework 1: the gate after S's REWORK (2026-10-11, 22:19 MDT)
+## Rework 2: the gate after T's test-only rework (2026-10-11, 22:53 MDT)
+
+**Date:** 2026-10-11
+**Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-claude-harness`)
+**Diff base:** `8aef610` (the previous gate's commit)   **Diff head:** `f0a3f1a`
+**Reuse map:** `docs/handoffs/831/handoff-A.md`, "Reuse map (for the Phase 7 gate)"
+**Verdict:** PASS
+
+### Summary
+
+PASS: 0 `block`, no new `warn`, and 6 `warn`s carried, one of them narrowed (W1).
+
+S's second REWORK was test-only, so F did not run. The cycle has two commits:
+
+- `a1ef88a`: S's handoff only.
+- `f0a3f1a`: T-green's two tests and its handoffs.
+
+**No production file changed.**
+
+- `git diff 8aef610 f0a3f1a -- 'crates/*/src'` is empty.
+- `origin/main` is still `037405f`, which is the merge base.
+
+So the first pass's and Rework 1's reading of the production diff still holds, and no carried warn's line number moved.
+
+**The two new tests add no helper, rig, linker or recorder, and copy none.**
+
+- **`roster_panes/registry.rs::a_claude_pane_record_fills_its_row_as_pane_list_prints_it`.**
+  - It sits beside `the_cells_are_pane_lists_cells_for_the_same_record`, where S placed it.
+  - It reuses that file's own oracle, `pane_list_cells`, and the harness's helpers: `Rig`, `pane`, `base_panes`,
+    `reply`, `BASE_ROWS`, `table`, `last_six`, `envelope_data` and `NEW_KEYS`.
+  - Its only new code is local to the test:
+    - a `without` closure that takes the six cells of every row but one. No shared helper does this:
+      `profile.rs::printed_rows` and `sessions` read row names, not cells.
+    - the `pane`-to-`name` key map for `PaneRow`'s JSON.
+- **`pane_claude/launch.rs::pane_get_of_a_claude_pane_shows_its_pid_and_no_port`.**
+  - It reuses `Rig::seed_claude`, `cell`, `Rig::run` and `data_of`.
+  - It uses the whole-line match from `pane_verbs/get.rs:88` (`out.lines().any(|l| l == line)`).
+
+**The Claude `HarnessInfo` literal in the roster test is not a finding.**
+
+- It is the fourth such literal in the tests. The others are `pane_claude/rig.rs:315`, `claude_kind_test.rs:32` and
+  `claude_kind_test.rs:161`, and the four sit in three test binaries.
+- The test kit has no Claude fixture: `fixture.rs` has `sample_pane`, which is OpenCode only.
+- A four-field struct literal is not a near-copy of a helper.
+
+**W1 is narrowed.**
+
+- `pane get`'s text line comes from `HarnessKind::as_str` (`get.rs:285`), and its JSON comes from serde.
+- The new test asserts `claude` in both. So for the `Claude` variant, `as_str` is now pinned to the serde name at the
+  CLI.
+- Two parts remain: a pin that loops over every kind, and the two serde parses.
+
+### Findings
+
+All six are carried. This cycle did not touch any file they name (`git diff 8aef610 f0a3f1a` is empty for each). I
+re-read each cited range on `f0a3f1a`.
+
+| # | Severity | File:line | Finding | Suggested fix |
+|---|---|---|---|---|
+| 1 | warn (W1, carried, narrowed) | `crates/holler-cli/src/pane/args.rs:171`, `crates/holler-pane/src/import/files.rs:115`, `crates/holler-pane/src/pane.rs:188` | <ul><li>`parse_harness` and `harness_kind` are two serde parses of the same name.</li><li>`as_str` is a hand-written list of the names.</li><li>The new `pane get` test pins `as_str(Claude)` to `claude`, next to the JSON's serde `claude`. No test pins every kind.</li></ul> | <ul><li>Pin `as_str(kind)` to the serde name in `rework_test.rs`'s `every_kind` loop. This is test-only.</li><li>Fold the two parses into one `HarnessKind` parser at item 17, after #835.</li></ul> |
+| 2 | warn (W2, carried) | `crates/holler-pane/src/reconcile/observe/process.rs:144-208` | The single-process chain repeats the server chain's mismatch and `--fix` skeleton, including the orchestrator skip predicate (`:195`). | Follow-up: one `--fix` gate helper in `observe.rs` that both `repair`s call. |
+| 3 | warn (W3, carried) | `crates/holler-cli/src/pane/doctor.rs:81-87`, `crates/holler-pane/src/tx_switch.rs:258-278`, `crates/holler-cli/src/interrupt_cmd.rs:81-84` | `relaunch_recorded`'s `Launched.pane` is unwrapped three times, twice with the same message. | Follow-up: have `relaunch_recorded` return the stored `Pane`. |
+| 4 | warn (W4, carried) | `crates/holler-cli/src/interrupt_cmd.rs:99-117` | `route` copies the `--pane` arm of `say_cmd::route_target_by`. | Follow-up: make `route_target_by` generic over the resolver's answer. |
+| 5 | warn (W5, carried) | `crates/holler-adapter-claude/src/exec.rs:1-143` | <ul><li>A third private copy of the bounded runner. It follows the documented pattern.</li><li>#696 is OPEN, and none of its comments names this file yet (checked at 22:50 MDT).</li><li>No PR is open for #831 yet.</li></ul> | At the PR step, comment on #696 to add this file to its scope. |
+| 6 | warn (W9, carried) | `crates/holler-cli/tests/pane_verbs/switch.rs` (893 lines), `crates/holler-cli/tests/pane_verbs/launch/rig.rs` (852) | Both are near `lint.sh`'s 900-line limit. This cycle did not touch either. | Name both in the PR body. The next story that touches either splits it first. |
+
+**Reviewed and accepted, no finding:**
+
+- **Where the `pane get` test lives.**
+  - `pane_claude` groups its tests by theme, not one file per verb. `lifecycle.rs`, for example, holds seven verbs.
+  - `launch.rs`'s module doc covers a pane "recorded with its pid and no port". The test reads that record back through
+    `pane get`, and `seed_claude` builds it "as a launch leaves it".
+  - `main.rs`'s module list describes `launch` as the verb and its refusals only. If the file is touched again, one
+    phrase there would cover this test.
+- **`launch.rs:444` spells `"-"`, not `list::NO_VALUE`.**
+  - The first F pass added it, and the first gate read it.
+  - The arm cannot run for a valid record, because a `claude` record always has a pid. `doctor.rs:126` (from before
+    #831) spells the dash the same way.
+  - This is a style nit, not a copy.
+- **#835 coexistence.**
+  - #835 is OPEN with no PR. Its branch is still at `f1d1bd0`, and its worktree is clean.
+  - Section 15 item 2's record of the copy still holds, and this cycle touched none of the copied files.
+
+### Notes for F
+
+Not required: the verdict is PASS. The PR-step items are unchanged from Rework 1:
+
+- post W5's comment on #696;
+- list W2 to W4 and W9 in the PR body as follow-ups, or file them.
+
+W1's pin is a test-only edit that any later T loop can make. Its shared parse belongs to item 17.
+
+### Patterns referenced
+
+1. `git diff 8aef610 f0a3f1a` over all paths, and over `crates/*/src`, where it is empty. `origin/main` and the merge
+   base are both `037405f`.
+2. `crates/holler-cli/tests/roster_panes_test.rs` (the harness and its fixtures) with `roster_panes/{registry,profile,join}.rs`;
+   `crates/holler-cli/src/roster_cmd.rs:262-267` (`Registered::of`, which this branch does not change).
+3. `crates/holler-cli/tests/pane_claude/{rig,launch,main}.rs`, `crates/holler-cli/tests/pane_verbs/get.rs:68-117`, and
+   `crates/holler-cli/src/pane/get.rs:281-290` (`harness_text`).
+4. `crates/holler-pane-testkit/src/fixture.rs` (it has no Claude fixture), and the `kind: HarnessKind::Claude` literals
+   in `crates/`.
+5. `issue-835-implementation` at `f1d1bd0`; `gh issue view` of 835 and 696; `gh pr list --head issue-831-implementation`
+   (no PR).
+
+---
+
+## Rework 1: the gate after S's first REWORK (2026-10-11, 22:19 MDT)
 
 **Date:** 2026-10-11
 **Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-claude-harness`)

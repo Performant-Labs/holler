@@ -514,3 +514,53 @@ brief, the research note's "Decisions").
   - Full workspace test: 2526 passed, 0 failed, 36 ignored. Clippy `-D warnings`, `lint.sh`, `changelog-check.sh` and
     `cargo machete` all pass.
   - `evidence.md` gained one entry: `roster_cmd.rs:262-267`.
+
+## A, anti-duplication gate after T's test-only rework: 2026-10-11T22:53-06:00 (MDT)
+
+- **Decided:** PASS: 0 `block`, no new `warn`, and 6 `warn`s carried (`docs/handoffs/831/handoff-A-dup.md`, "Rework 2").
+  The cycle is `8aef610..f0a3f1a`: S's handoff, then T-green's two tests. F did not run, because S's REWORK was
+  test-only.
+  - **No production change.** `git diff 8aef610 f0a3f1a -- 'crates/*/src'` is empty, and `origin/main` is still the
+    merge base, `037405f`. The earlier passes' reading of the production diff still holds.
+  - **The two tests reuse helpers and copy nothing.**
+    - The roster test uses `pane_list_cells` and the harness's helpers, beside the test S named.
+    - The `pane get` test uses `seed_claude`, `run` and `data_of`, and the whole-line match from `pane_verbs/get.rs`.
+    - Neither adds a rig, a linker, a recorder or a shared helper.
+  - **W1 is narrowed.** The `pane get` test pins both `as_str(Claude)` and the serde name to `claude`. The pin that
+    loops over every kind, and the shared parse, remain.
+  - **Carried:** W1 to W5 and W9, at the same line numbers.
+- **Assumed:**
+  - T's recorded runs stand (2526 passed, 0 failed, 36 ignored), and its two mutants were reverted: the tree is clean
+    and `crates/*/src` is unchanged. I re-ran no build or test, as the role says.
+  - #835's committed tip `f1d1bd0` is its current state: a local branch, a clean worktree and no PR.
+- **Hedged:**
+  - **The `pane get` test's file.** It sits in `launch.rs`, which `main.rs` describes as the launch and its refusals.
+    I accepted it rather than raise a `warn`: `pane_claude` groups by theme, and the test reads back the record a
+    launch leaves.
+  - **The Claude `HarnessInfo` literal** is the fourth in the tests, across three test binaries. The test kit has no
+    Claude fixture, and a struct literal is not a copy of a helper, so it is not a finding.
+  - **`launch.rs:444` spells `"-"` rather than `list::NO_VALUE`.** The first gate already read it. The arm cannot run
+    for a valid record, and `doctor.rs:126` (from before #831) spells the dash the same way. It is a style nit.
+- **Evidence:**
+  - Ran, all read-only:
+    - `git diff 8aef610 f0a3f1a`: the stat, `crates/*/src`, and the two test files;
+    - `git rev-parse origin/main` and `git merge-base HEAD origin/main`;
+    - `git diff origin/main...HEAD` for `roster_cmd.rs`, `pane/list.rs` and `pane/get.rs`;
+    - `git blame` of `launch.rs:440-446` and `doctor.rs:120-128`;
+    - `git rev-parse issue-835-implementation`, and `git worktree list` for the #835 worktree: clean;
+    - `gh issue view` of 835 (OPEN) and of 696 (OPEN; no comment names `holler-adapter-claude`);
+    - `gh pr list --head issue-831-implementation`: no PR;
+    - `wc -l` of the touched files, and of W5's and W9's files.
+  - Greps:
+    - `kind: HarnessKind::Claude` in `crates/`;
+    - `pub fn` in the test kit's `fixture.rs`;
+    - the helpers in `roster_panes/*.rs` and `roster_cli_test.rs`;
+    - `harness: opencode` and `port=-` in the tests;
+    - the callers of `HarnessKind::as_str`;
+    - `NO_VALUE` and `"-"` in `pane/*.rs`.
+  - Read:
+    - the handoffs: `handoff-S.md` ("Rework 1"), `handoff-T-green.md` ("Rework 2"), the prior `handoff-A-dup.md`,
+      `handoff-A.md`'s Reuse map, and the brief;
+    - the tests: `roster_panes_test.rs`, `roster_panes/{registry,profile}.rs`, `pane_claude/{rig,launch,main}.rs` and
+      `pane_verbs/get.rs:1-120`;
+    - the carried warns' cited ranges on `f0a3f1a`.
