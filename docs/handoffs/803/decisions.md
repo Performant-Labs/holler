@@ -380,3 +380,58 @@ Run handoff directory `docs/handoffs/803` Â· branch `issue-803-implementation` Â
     ADR-0021 344-370 and `pane-control.md` 118-134.
   - **Checks:** a byte compare of the copied helpers across `lib/*.sh`, a grep for bare `holler pane|profile` mentions
     in the skill, the docs and the README's wizard section, `wc -l`, and `git diff --check`.
+
+## S, spec audit (second pass, after F's rework): 2026-10-12T11:33-06:00 (MDT)
+
+- **Decided:** PASS (`docs/handoffs/803/handoff-S.md`, section "rework 1").
+  - **The four REWORK items are fixed,** each with a test that fails against the file from before the rework:
+    - **Item 1.** The user's pane verbs go through the door, and Stage 10 prints its literals.
+    - **Item 2.** `panes.sh` refuses a multi-line `layout`, so a later `workspace` can no longer be dropped.
+    - **Item 3.** The orchestrator's reset is `--as-operator`, and the text says it leaves a `stray-session`.
+    - **Item 4.** The docs no longer restate apply's creation order.
+  - **Acceptance 1 to 24** each have a proving test. D1 to D22 are built as decided, and every deviation is declared,
+    including this cycle's narrowing of `check` to a one-line `layout`.
+  - **Not REWORK** (advisory in the handoff):
+    - the one-sided socket guard;
+    - the CLI-ordering follow-up;
+    - the dry run's exit 1 on a failed observation, which the text calls exit 0. That is the brief's own wording, and it
+      fails closed;
+    - two leniencies of `instance.sh`'s grammar: a duplicate `workspace`, and a label that ends in a space, which Holler
+      trims as a profile name. Both fail closed;
+    - the "Amend first" commit order, which the squash merge hides.
+- **Assumed:**
+  - T-green's recorded runs at `43f9047` stand. After that commit, only `decisions.md` and `handoff-A-dup.md` changed.
+  - I re-ran no build or test.
+  - The script commits this handoff and this entry at the phase commit.
+- **Hedged:**
+  - **#839's PR #863 is open and `MERGEABLE`** (opened 11:01 MDT). If it merges before this PR, the REFRESH rows (Stage 9's
+    DRIVEN sentence, D13 and Acceptance 17's pin) must be patched before the merge.
+  - **#850 is open,** so D13's "no body row for a Claude Code pane" stands.
+- **Evidence:**
+  - **Live:** `origin/main` is `6eff9cc`, which is the merge base. #803 has no new comment. #839 has PR #863 open, and #842,
+    #850, #829 and #848 are open.
+  - **Read:**
+    - the brief's decision, Scope, Amendments, Acceptance, Blast radius, Depends on, Clashes, Rules and U1 to U8 sections;
+    - every handoff, `decisions.md`, and F's evidence entries;
+    - `panes.sh` and `herdr.sh` in full, and `instance.sh` in full;
+    - `SKILL.md`, Stages 1 to 3 and 6 to 11, in full;
+    - the rework diffs of `SKILL.md`, the docs, the CHANGELOG, `panes_803.rs` and `skilltext_803.rs`;
+    - the ADR-0021, `pane-control.md`, `docs/README.md` and CHANGELOG diffs on the branch.
+  - **Code checked:**
+    - `pane/args.rs` (`SpecFlags`, `ProfileOpt`), `pane/close.rs`, `pane/relaunch.rs` and `pane/reset.rs`;
+    - which verbs take `--herdr-session`;
+    - `profile/apply.rs` (the exit codes);
+    - `tx_apply.rs` (the actions, the outcomes and `dry()`);
+    - `grid.rs` (`GridPos::parse`), `profile.rs` (`ProfileName::parse`) and `profile_snapshot.rs` (the port-policy words).
+  - **Runs, read-only, on scratch configs:**
+    - S's repro and its variants: a multi-line `layout` after and before `workspace`, `plan`, and the one-line control;
+    - parser probes: `[instance]` after `[[pane]]`, `workspace` in a `[[pane]]`, a duplicate `workspace`, a label ending in a
+      space, and an `[ext.*]` table.
+  - **Diff checks:**
+    - `proof.rs` with `pub(super) ` stripped equals `main`;
+    - the five frozen helper scripts and three frozen test files are unchanged;
+    - no Rust production, protocol, golden or Cargo file changed;
+    - every touched `.rs` file is under 900 lines, and every `#![allow]` carries a link;
+    - the privacy grep of 9690 added lines is clean;
+    - `git diff --check` outside `docs/handoffs/` is clean;
+    - commit trailers and subjects match `main`'s convention.
