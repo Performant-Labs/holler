@@ -219,3 +219,30 @@
 - **Assumed:** a condition wait on the hub's own clock function (at most about 1 ms) is within the no-blind-sleeps rule, since it observes a condition rather than sleeping for a duration.
 - **Hedged:** case 23's equality cannot catch a kept `updated` on the fake (fixed clock) or reliably on `ProfileState`; H1 is the deterministic control, and `evidence.md` records why.
 - **Evidence:** `profile_verbs` 113 passed; workspace 2,435 passed, 0 failed, 32 ignored; lint, changelog-check, clippy `-D warnings` and machete clean; three mutation spot checks each fail the new assertions and were restored from saved copies.
+
+## F (rework 2, after the outside diff gate's round 2): 2026-10-11 23:10 MDT
+- **Decided:**
+  - **No production change.** Round 2's verdict is BLOCK, but its own line says "0 blocking findings", and each of its three BLOCK items concludes "no block". The pipeline's rule makes the verdict line depend on BLOCK findings only. The six needs-verification findings are answered by the diff or by evidence, and the three WARNs and three NITs are answered in `handoff-F.md`.
+  - **`evidence.md` is rewritten to fit the gate**, at 11,118 bytes against its 12,000-byte cap; round 2's 22,769 bytes reached the reviewer as fragments.
+    - It opens with where each claim can be checked, including why the excerpts of the changed hub files look cut: the brief's base citations consume the excerpt budget.
+    - It adds NV-4 (`LiveHub` is the real `holler hub serve`; `forward` sends `profile/*` to `profile::dispatch`) and NV-6 (`write_atomic`).
+    - It drops what the brief already quotes (E7, E8, E13, E20, E23, E26, E32) or a diff test pins.
+    - Every citation names its path, and T's three entries are kept word for word.
+  - **The WARNs:**
+    - W-1 (`Option<&PaneState>`) stays, because it is A's warn 3 design.
+    - W-2 (a path quoted with `{:?}`) stays: `Debug` escapes control characters, and the brief's `show::text` rule is for the success line, which export follows.
+    - W-3 (the restore re-saves memory) stays: memory is the committed state, and a test pins the previous bytes.
+- **Assumed:**
+  - Round 3 of the gate reads the same inputs: the brief, the diff, 12,000 bytes of `evidence.md`, and excerpts in order of first citation. The handoff is not among them.
+  - The workspace run of T-green on `5dbdbd9` still stands, because no compiled file changed.
+- **Hedged:**
+  - The reviewer may still write a contradictory verdict, which no change here can prevent. Three consecutive diff-gate BLOCKs escalate the run, and that is the right stop.
+  - Three pipeline issues are listed for the main session to file in Aftersight: the verdict parse, the excerpt budget, and the gate getting no handoff.
+- **Evidence:**
+  - `docs/handoffs/665-diff-result-r2.md` and its prompt.
+  - `dual-review.sh` lines 900-1245: the excerpt budget and the evidence cap.
+  - `coding-pipeline.workflow.mjs`: the Phase 7 routing and `buildDiffGateCaptureTaskPrompt`.
+  - A local `dual-review.sh --mode diff --dump-only`: the appendix is attached whole (11,687 bytes with its header), and 44 references were omitted at the excerpt cap.
+  - The check script: 13 entries, 0 mismatches.
+  - The gates: clippy `-D warnings` clean, `lint.sh` exit 0, `changelog-check` ok.
+  - The story's targets: `profile_rename_test` 10, `profile_rename_faults_test` 8, `profile_registry_test` 12, conformance 12, `findings_test` 2, `profile_verbs` 113, drift 7, `profile_io` 2, docs 18 + 3 + 3, and `pane_integration` 66. All passed, 0 failed.

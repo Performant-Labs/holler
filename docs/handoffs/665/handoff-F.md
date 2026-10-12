@@ -1,3 +1,123 @@
+# Handoff-F (rework 2): after the outside diff gate's round 2 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
+
+**Date:** 2026-10-11 (23:10 MDT)
+**Branch:** `issue-665-implementation`, on `5dbdbd9` (T-green, rework 1)
+**Issue:** #665
+**Reworks:** `docs/handoffs/665-diff-result-r2.md`, the outside diff gate's round 2. The file is gitignored, so read it in the worktree.
+- The earlier rounds' handoffs follow this section, unchanged.
+
+## What the gate said
+
+- **The verdict contradicts itself.** The verdict line reads "BLOCK — 0 blocking findings; however, there are six needs-verification findings".
+  - Its BLOCK section has three items (B-1 to B-3), and each one concludes "no block".
+  - The pipeline's own rule (`workflow-coding-pipeline.md`, "Reviewer evidence at the outside gates", item 4) bases the verdict line on BLOCK findings alone, and a needs-verification finding is never a BLOCK.
+  - The run routed the round to F because the verdict token is BLOCK. Round 1, on almost the same diff, was PASS.
+- **What remains to answer:** NV-1 to NV-6, W-1 to W-3 and NIT-1 to NIT-3. Each is answered below. None needs a production change.
+
+## What was done
+
+`docs/handoffs/665/evidence.md` is rewritten for the gate. No other file changed except this handoff and `decisions.md`.
+
+- **It now fits the gate's cap.**
+  - Round 2's file was 22,769 bytes, and the gate shows only the first 12,000. The reviewer saw the second half as broken fragments, under "[evidence appendix truncated at 12000 bytes; 10769 further bytes not shown]".
+  - The new file is 11,118 bytes. A local `dual-review.sh --dump-only` of the gate's prompt (no API call) shows all of it, with no truncation marker.
+- **It opens with "Where each claim can be checked"**, which says three things:
+  - The new code the NVs ask about is in the diff, whole: `Store::rename` and `renamed` (NV-1, NV-3), `Locked` (NV-2) and `drift.rs` (NV-5).
+  - The brief's E-numbers cite the base, `bda1069`. That explains NV-1 and NV-2. The gate fills its 24,000-byte excerpt budget with the files the brief cites first, using the brief's base line ranges. So for the hub files this story changes, the excerpts show the wrong lines, cut at 6,000 bytes a file: `store.rs` stops before the rename's body. The section lists the brief's quotes of unchanged code that still hold (E7, E8, E13, E20, E23, E26, E32), E7 being NV-3's whole `check`.
+  - The test that pins the restore's bytes (W-3).
+- **New entries:**
+  - NV-4: the process tests' `LiveHub` is the real `holler hub serve`, and the hub routes `profile/*` to `profile::dispatch` with both registries.
+  - NV-6: `write_atomic` writes a temporary file at exactly the mode, renames it over any file there, removes it on failure, and creates no directory.
+- **Every citation names its path.** Round 2's shorthand citations (`:132-139`) could not be resolved by the gate's reference extractor or by the check script.
+- **Kept, compacted:**
+  - the lock-order hook and `save_doc`;
+  - the decode and guard codes, the grid codes' quoting, and `ProfileName::parse`;
+  - `write_line`, `Finding::about` and `failed_message`;
+  - the wire client's eager first poll.
+- **Dropped, because the brief quotes them or a test in the diff pins them:** `check_membership`, `stamp`, `ProfileEntry::next`, the load check, `is_member`, `next_generation`, `insert_profile`, `show::text`, `count` and case 19's read.
+- **T's three entries are unchanged, word for word.**
+- **The check script found 0 mismatches** in 13 entries.
+
+## Responses to round 2's findings
+
+| Finding | Response |
+|---|---|
+| NV-1, NV-2 | Shown in the diff. `Store::rename` is in the `profile/store.rs` hunks: the profile lock, then the pane lock; the pane save, then the profile save; the restore; `apply` last. `Locked` is in the `panes/store.rs` hunks. The evidence's first section points there and says why the excerpts look cut. |
+| NV-3 | The brief's E7 quotes the whole `check` and `ProfileEntry::next`, and `entry.rs` is unchanged. `renamed` is in the diff. |
+| NV-4 | New evidence entry: `LiveHub` is `holler hub serve`, and `forward` sends `profile/*` to `profile::dispatch`. |
+| NV-5 | `drift.rs` is a new file in the diff. Acceptance 16's allowlist is in `doctor/drift.rs`, not `read_only.rs` (T's RED decision in `decisions.md`). The read-only rig has no profile, so its "no profile call" assertion still holds. |
+| NV-6 | New evidence entry: `write_atomic` and `fill`. |
+| W-1 (`Option<&PaneState>`) | **No change.** This is A's warn 3 design: one `Store::rename` serves the port (the record half, D3) and the transaction, so the checks, the log entries and the events are written once. `Store` is crate-private with two call sites, and `ProfileState::rename`'s doc says the hub calls it nowhere. Two entry points over one private body would work too, but that changes a surface A reviewed, to guard against a caller that does not exist. |
+| W-2 (the import path in errors) | **No change.** An error quotes a path with `{:?}`, as every error in these verbs quotes the operator's input (`ProfileNotFound`, the same-name `usage`). `Debug` escapes control characters, so none reaches a terminal. The brief's `show::text` rule is for the success line, and export follows it (`export_prints_a_control_character_in_a_path_escaped`). The path is the operator's own argument, not the file's content. |
+| W-3 (the restore re-saves memory) | **No change.** Memory is the committed state, so a file left wrong by an earlier failed restore is corrected rather than preserved. `a_failed_profile_save_puts_the_pane_file_back_and_the_same_rename_then_succeeds` pins the previous bytes, a new inode and unchanged memory. ADR-0021's "Rename as built" documents the crash window and the retry that completes it. |
+| NIT-1 (`after` twins `next_cursor`) | **No change.** Each store mirrors the other's helpers under the same names, until the follow-up makes them one generic store (`profile/store.rs` module docs). |
+| NIT-2 | Agreed. No change is asked for. |
+| NIT-3 (`metadata`, then `open`) | **No change.** Checking the metadata first keeps a FIFO or a device from blocking the read: `open` on a FIFO waits for a writer. The swap window needs another writer in the operator's own directory, and `take(1 MiB + 1)` bounds the read either way. |
+
+## Design decisions
+
+- **The answer is evidence, not code.** No finding is a BLOCK. Each NV is settled by the diff or by a quoted entry, and each WARN is answered above. A production change made only to please a reviewer that found no defect would need its own review at T-green, A-dup and S.
+- **The appendix is sized for the gate.** The diff gate is the only reader with no repo access, and it is shown only the brief, the diff, 12,000 bytes of this file, and excerpts the brief's citations mostly consume. So the file mostly quotes facts that neither the brief nor the diff shows, and points to where the rest is.
+
+## Reuse / extend-vs-new
+
+Not applicable: no code changed.
+
+## Architecture notes for A
+
+None.
+
+## Deviations from spec / wireframe
+
+None new.
+
+## Tier 1 self-check (incl. tests now GREEN)
+
+- **The diff this round:** `git status` shows only `docs/handoffs/665/` files: `evidence.md`, this handoff and `decisions.md`. No `.rs` file, manifest, guide, ADR or CHANGELOG changed.
+- **Gates:**
+  - `cargo clippy --workspace --all-targets -- -D warnings` is clean, with nothing to rebuild;
+  - `bash scripts/lint.sh` exits 0, with size warnings for other crates only;
+  - `bash scripts/changelog-check.sh` prints `changelog-check: ok`.
+- **The story's targets, re-run (23:00 to 23:07 MDT):**
+  - holler-hub: `profile_rename_test` 10 passed, `profile_rename_faults_test` 8, `profile_registry_test` 12;
+  - holler-pane-testkit: `profile_store_conformance_test` 12;
+  - holler-pane: `findings_test` 2;
+  - holler-cli:
+    - `profile_verbs` 113;
+    - `pane_verbs drift` 7;
+    - `pane_cli_process profile_io` 2;
+    - `docs_pane_control_test` 18, `docs_cli_test` 3, `cli_surface_test` 3;
+    - `pane_integration` 66 passed, 4 ignored (the wire runner of the conformance suite).
+  - 0 failed in all of them.
+- **The workspace run was not repeated.** No compiled file has changed since T-green's run on `5dbdbd9`: 154 targets, 2,435 passed, 0 failed, 32 ignored. T-green runs it again next.
+
+## Evidence appendix
+
+`docs/handoffs/665/evidence.md`, rewritten (see "What was done"): 13 entries, each checked by a script against its cited lines.
+
+## Tests that look wrong (for T)
+
+None.
+
+## Known issues
+
+- **For the main session to file in Aftersight** (pipeline issues; F files none):
+  - **The verdict parse trusts the verdict line alone.** Round 2's token is BLOCK although the same review says "0 blocking findings" and each of its BLOCK items concludes "no block". A check of the BLOCK count against the token would have made round 2 a PASS, or flagged it as unparseable.
+  - **The excerpt budget goes to the brief's base citations first.** In a file the diff changes, those excerpts show other code than the brief meant, and they crowd out the evidence file's own citations: 44 references were omitted at the cap in the local dump.
+  - **The diff gate gets no handoff file.** The capture command passes no `--handoff`, so the reviewer sees "(no handoff file)", and responses like the table above reach it only through `evidence.md`.
+- **Carried over:**
+  - S advisory 1, the rebase conflicts with `origin/main`;
+  - S advisory 2, `docs/protocol/v2.md:817`;
+  - A-dup warn 3;
+  - the README's "Debug output" table, which lists no registry fault event.
+
+## Files changed (this round)
+
+- Production: none.
+- Handoffs: `docs/handoffs/665/evidence.md`, `docs/handoffs/665/handoff-F.md`, `docs/handoffs/665/decisions.md`.
+
+---
+
 # Handoff-F (rework 1): after S REWORK - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
 
 **Date:** 2026-10-11 (22:45 MDT)
