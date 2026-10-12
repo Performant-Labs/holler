@@ -6,9 +6,10 @@
 //! `--pane NAME`, [`interrupt_pane`] reads the pane's record (the pane gates of
 //! `say_cmd::resolve_pane_record` first). A harness that aborts in place (OpenCode) is
 //! interrupted through the hub, as before. One whose abort style is a relaunch (Claude Code) has
-//! no body for the hub to reach and no in-place abort: the CLI relaunches the pane on its session
-//! of record through the pane engine (`tx_launch::relaunch_recorded`), which loses the turn in
-//! flight and keeps the session, and never types into the pane. Replacement text on such a pane
+//! no in-place abort, and its body cannot cancel a turn in a process it does not own (ADR 0014
+//! point 10, #850): the CLI relaunches the pane on its session of record through the pane engine
+//! (`tx_launch::relaunch_recorded`), which loses the turn in flight and keeps the session, and
+//! never types into the pane. Replacement text on such a pane
 //! is refused (`interrupt-text-unsupported`).
 
 use holler_pane::pane::AbortStyle;

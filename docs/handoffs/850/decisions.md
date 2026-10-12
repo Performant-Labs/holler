@@ -35,3 +35,20 @@ Run record for the build run. The brief is `docs/handoffs/850-brief.md`.
 - **Evidence:**
   - `handoff-T-red.md` for each command and result; `cargo test --workspace --no-run --no-fail-fast` shows exactly the two compile-RED targets.
   - The scratch sketch: `claude_row_test` 9/9, `claude_attach_driver_test` 13/13, `claude_session_test` 12/12 (5 repeats), `claude_attach_mode_test` 7/7 and `say_pane_scenario_test` 4/4 (3 repeats), `pane_claude` 53/53, `pane_verbs` 407/407; it broke the two existing tests above and `rebind_tests.rs`'s `Inner::new` call sites.
+
+## F (Phase 5, implementation) — 2026-10-12
+- **Decided:**
+  - Implemented against T's RED with no test edited: a `ClaudeAttachDriver` (and its `turn` child) over the injected `HarnessPort`, the row rule in `config/claude_row.rs`, `SessionManager::start_with`, the port through `connection::run` from `body_cmd`, the `PATH`-only support probe, and the drive rule for a single process (`find_driver` over an empty list, `drive` plus a second `cas_put`, reconcile's `check_driven`/`record_with`).
+  - The poll reads `session_activity` each tick and calls `locate_process` only when the turn ends or a read fails (W-3: one `claude agents --json` run a tick while a turn is in flight, none when idle).
+  - W-1: the support probe looks on `PATH` alone, by choice; the divergence from a `HOLLER_CLAUDE_BIN`-only setup is written into `docs/protocol/v2.md` 5.3 and the README recipe.
+  - Folded W-3 (point 9's last sentence), W-4 and W-5 (ADR-0021 item 19) and W-6 (ADR 0014's Consequences bullet) into the amendment; point 9 says "a permission prompt or a question", not "or a dialog".
+  - `Inner::with_claude` keeps `Inner::new`'s four arguments, so the in-crate `rebind_tests.rs` stays as T left it.
+- **Assumed:**
+  - A failed or timed-out port call ending the turn `error` (fail closed) is what the turn rule wants where it is silent; the session task's crash isolation then re-attaches at the next prompt.
+  - A dialog that a running process waits on (`harness-dialog-open`) is a failed read (`error`), not `input-required`.
+- **Hedged:**
+  - The wizard's Stage 8 still says its body config holds OpenCode rows "and nothing else", and a rerun rewrites it; where an operator's hand-written Claude row lives in a wizard-built fleet is left to O (known issue in `handoff-F.md`).
+  - The pre-existing clippy error in `token_load_test.rs` fails `--all-targets` on this toolchain; not touched.
+- **Evidence:**
+  - `handoff-F.md` (the commands and counts); `evidence.md` (eight excerpts of unchanged code).
+  - The CI command `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, 2934 passed, 0 failed; `scripts/lint.sh` and `scripts/changelog-check.sh` exit 0.

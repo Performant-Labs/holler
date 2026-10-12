@@ -110,7 +110,9 @@ pub fn local_caps(state_root: &Path, identity: Option<&BodyIdentity>, configs: &
 ///   `http_attach_driver::check_exists` uses; issue #185 originally left
 ///   this an untested "presence in config is enough" placeholder, replaced
 ///   here with the issue #195 spec's real probe), or (b) it is `spawn` mode
-///   and `command[0]` resolves on `PATH` or as an existing path.
+///   and `command[0]` resolves on `PATH` or as an existing path, or (c) it
+///   is an attach row of a Claude Code process and `claude` resolves on
+///   `PATH` ([`claude_code_support`], #850).
 /// - A **capability** id (`attach`, `opencode-http`) is always `ok:true`
 ///   (both are implemented body-side, independent of session config).
 /// - Any other **feature** id is `ok:true` (this body speaks the whole
@@ -150,6 +152,7 @@ fn harness_support(harness: &str, configs: &[SessionConfig]) -> Support {
     }
     for s in &sessions {
         match s.mode {
+            SessionMode::Attach if s.attaches_to_claude_code() => return claude_code_support(harness),
             SessionMode::Attach => {
                 let (endpoint, session_id) = (s.endpoint.as_deref(), s.session_id.as_deref());
                 let ok = match (endpoint, session_id) {
@@ -191,6 +194,24 @@ fn harness_support(harness: &str, configs: &[SessionConfig]) -> Support {
         ok: false,
         how: None,
         reason: Some("command[0] not found on PATH".to_string()),
+    }
+}
+
+/// The support rule of a harness id backed by an attach row that attaches to a Claude Code
+/// process (`docs/protocol/v2.md` section 5.3, #850): there is no endpoint to dial, so the probe
+/// is the spawn row's PATH lookup of the program, `claude`. It runs nothing and does not say
+/// whether a process holds the row's session; `holler pane doctor` reports that. It looks on
+/// `PATH` alone, never at the CLI's `HOLLER_CLAUDE_BIN` override, which only `holler body run`'s
+/// wiring reads.
+fn claude_code_support(harness: &str) -> Support {
+    let program = holler_pane::pane::CLAUDE_CODE_COMMAND;
+    let ok = resolvable(program);
+    Support {
+        feature: harness.to_string(),
+        kind: SupportKind::Harness,
+        ok,
+        how: ok.then(|| format!("attach: {program}")),
+        reason: (!ok).then(|| format!("{program} not found on PATH")),
     }
 }
 

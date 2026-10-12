@@ -18,6 +18,9 @@ path = "src/lib.rs"
 # certificate (ADR 0002) — all pinned in the root [workspace.dependencies].
 [dependencies]
 holler-proto = { path = "../holler-proto" }
+# The `HarnessPort` trait and its types (#850, ADR-0021 section 5): the attach driver of a Claude
+# Code process drives the port `holler body run` is handed, and depends on no adapter crate.
+holler-pane = { path = "../holler-pane" }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
@@ -66,10 +69,8 @@ reqwest = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 rstest = { workspace = true }
-# #850 (T, RED): the Claude Code attach driver's tests drive a `HarnessPort` (`holler-pane`) over the
-# test kit's `FakeClaude`. F makes `holler-pane` a regular dependency (ADR-0021 section 5, the crate
-# rule) and may then drop it from here; `holler-pane-testkit` stays a dev-dependency.
-holler-pane = { path = "../holler-pane" }
+# #850: the Claude Code attach driver's tests drive the `HarnessPort` over the test kit's
+# `FakeClaude`.
 holler-pane-testkit = { path = "../holler-pane-testkit" }
 
 # Workspace lints (issue #149): inherit [workspace.lints] from the root

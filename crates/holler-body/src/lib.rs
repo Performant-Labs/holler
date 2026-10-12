@@ -10,6 +10,7 @@
 pub mod acp_driver;
 pub mod admin_client;
 pub mod backoff;
+pub mod claude_attach_driver;
 pub mod config;
 pub mod confirm;
 pub mod connection;

@@ -132,10 +132,7 @@ impl Wiring {
     pub fn connect() -> Result<Self, PaneError> {
         store::reach_hub()?;
         let actor = Actor::parse(ACTOR)?;
-        let lookup = |name: &str| {
-            std::env::var_os(name).map(|value| value.into_string().unwrap_or_default())
-        };
-        Ok(Self::from_env(&lookup, actor))
+        Ok(Self::from_env(&process_env, actor))
     }
 
     /// The ports, lent for one verb.
@@ -189,6 +186,13 @@ impl Wiring {
     }
 }
 
+/// One variable of this process's environment, as [`env::Lookup`] reads it: a value that is not
+/// UTF-8 is the empty value, never unset. `connect` reads the environment through it, and so does
+/// `holler body run` when it builds the Claude Code harness (#850).
+pub(crate) fn process_env(name: &str) -> Option<String> {
+    std::env::var_os(name).map(|value| value.into_string().unwrap_or_default())
+}
+
 /// The Herdr adapter of `config` (D5), connected now: [`LazyHerdr`] calls this on its first use.
 fn connect_herdr(config: &Result<HerdrConfig, PaneError>) -> Result<Arc<dyn HerdrPort>, PaneError> {
     let adapter = HerdrAdapter::connect(config.clone()?)?;
@@ -233,8 +237,9 @@ fn opencode_harness(
 
 /// The Claude Code harness (#831): the `claude` binary, Claude Code's configuration directory
 /// and the socket directory under the Holler state directory, or the first configuration error
-/// of the three, in that order.
-fn claude_harness(env: Lookup<'_>) -> Result<Arc<dyn HarnessPort>, PaneError> {
+/// of the three, in that order. The one construction of it: the pane verbs' router holds one, and
+/// `holler body run` hands one to the body for its Claude Code rows (#850).
+pub(crate) fn claude_harness(env: Lookup<'_>) -> Result<Arc<dyn HarnessPort>, PaneError> {
     let bin = env::claude_bin(env)?;
     let config_dir = env::claude_config_dir(env)?;
     let state = holler_hub::state::resolve_state_dir().ok_or_else(|| PaneError::Unavailable {

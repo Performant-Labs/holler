@@ -10,7 +10,8 @@
 //! `shown_session` again, then one `cas_put`; the pass's one `hub.advertised` (#839) is shared
 //! by every chain. A single process's chain (#831) is the child module `process`: at most
 //! `ps`, `attached_clients`, `health`, `shown_session` and `session_activity`, then with
-//! `--fix` the caller's relaunch (a launch engine run, under its own budget) or one `cas_put`.
+//! `--fix` the caller's relaunch (a launch engine run, under its own budget) or one `cas_put`;
+//! it shares the pass's `hub.advertised` too (#850).
 
 mod agent;
 mod process;
@@ -124,7 +125,8 @@ impl Screen {
 }
 
 /// Run the chain of `pane`: observe, compare, repair, record. A single process's chain is
-/// the child module `process`'s, with `relaunch` as its repair (#831); it observes no DRIVEN.
+/// the child module `process`'s, with `relaunch` as its repair (#831); it observes DRIVEN as
+/// this chain does (#850).
 pub(super) fn check_pane(
     ports: Ports<'_>,
     request: &ReconcileRequest<'_>,
@@ -146,7 +148,7 @@ pub(super) fn check_pane(
         }
     };
     if pane.harness.kind.shape() == Shape::SingleProcess {
-        return process::check(ports, request, relaunch, pane, &at, findings);
+        return process::check(ports, request, relaunch, bodies, pane, &at, findings);
     }
     let server = observe_server(ports, pane, &at, &mut findings);
     let screen = observe_screen(ports, pane, &at, &mut findings);
@@ -492,18 +494,6 @@ fn screen_text(shown: Option<&str>) -> String {
         || "its home screen".to_owned(),
         |session| format!("session {}", quoted(session)),
     )
-}
-
-/// [`record_with`] for a chain that observes no DRIVEN, a single process's (#831): it is left
-/// as stored.
-fn record(
-    ports: Ports<'_>,
-    request: &ReconcileRequest<'_>,
-    pane: &Pane,
-    server: &Server,
-    screen: &Screen,
-) -> Option<Finding> {
-    record_with(ports, request, pane, server, screen, None)
 }
 
 /// Record what the chain observed (`harness.health`, `last_observed.shown` and, #839,

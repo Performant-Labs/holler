@@ -20,6 +20,11 @@
 //! their print+exit tail with `hub_cmd.rs`'s own versions via
 //! [`crate::query_cmd::print_and_exit_code`] (issue #229).
 
+use std::sync::Arc;
+
+use holler_body::config::SessionConfig;
+use holler_pane::HarnessPort;
+
 use crate::query_cmd::{body_local_configs, print_and_exit_code, protocol_version_from_args, FetchOutcome};
 use crate::{Cmd, Query, QueryResolution};
 
@@ -156,6 +161,7 @@ pub fn run(config_flag: Option<&str>) -> i32 {
     for w in &parsed.warnings {
         eprintln!("warn: {w}");
     }
+    let claude = claude_harness(&parsed.sessions);
     let registry = holler_body::registry::SessionRegistry::from_sessions(parsed.sessions);
 
     // Issue #190: `connection::run` now owns the registry outright — it
@@ -164,12 +170,31 @@ pub fn run(config_flag: Option<&str>) -> i32 {
     // config rows from the same registry internally, and drives every
     // `session/presence` from the manager's *live* state, not the
     // registry's own always-`idle` snapshot.
-    match holler_body::connection::run(&state.root, registry) {
+    match holler_body::connection::run(&state.root, registry, claude) {
         holler_body::connection::RunExit::Ok => 0,
         holler_body::connection::RunExit::NotJoined
         | holler_body::connection::RunExit::AuthFailed(_)
         | holler_body::connection::RunExit::Io(_) => 1,
         holler_body::connection::RunExit::LockHeld(_) => 3,
+    }
+}
+
+/// The Claude Code harness for `sessions`' rows that attach to a Claude Code process (#850, ADR
+/// 0014 point 8), built only when such a row exists, by the pane wiring's one construction from
+/// this process's environment (`HOLLER_CLAUDE_BIN` else `claude` on `PATH`, `HOME`, the state
+/// directory). One that cannot be built is a configuration error, said once on stderr, never a
+/// silent skip: the body runs without it, and each such row then fails its attach, which the
+/// session task logs as `attach_failed`.
+fn claude_harness(sessions: &[SessionConfig]) -> Option<Arc<dyn HarnessPort>> {
+    if !sessions.iter().any(SessionConfig::attaches_to_claude_code) {
+        return None;
+    }
+    match crate::pane::wiring::claude_harness(&crate::pane::wiring::process_env) {
+        Ok(harness) => Some(harness),
+        Err(error) => {
+            eprintln!("warn: the rows that attach to a Claude Code process cannot attach: {error}");
+            None
+        }
     }
 }
 
