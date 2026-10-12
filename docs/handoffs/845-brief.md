@@ -2,8 +2,11 @@
 
 Repo: Performant-Labs/holler. Issue: #845 (part of epic #633). Rigor: in-session. UI surface: no. Kind: bug.
 
-**STATUS: BLOCKED ON ONE OPERATOR DECISION (section "Open decision").** Everything else is written. The sections that depend on the
-choice give both branches; O/MO resolves the choice, deletes the losing branch, and only then does T start. No code is written until then.
+**STATUS: DECIDED, option B.** The operator decided on 2026-10-12 (issue #845, comment of 18:20Z): `select_session` in the OpenCode adapter re-sends the select
+request while the title does not show the session, within its existing bounds; no contract change. If measurement shows the 5 s `settle` window must be raised,
+that returns to the operator as a separate choice (section "Needs operator decision if measured"); the pipeline stops there and does not decide it.
+Rejected: A (`relaunch` waits until the TUI accepts select-session): it changes the `HarnessPort` contract, has no readiness signal but the select call itself,
+and spends the launch engine's 10 s budget on every launch.
 
 ## Problem
 A `holler pane switch` sent right after `holler pane relaunch` of an OpenCode pane ends `timeout` in `harness.select_session` until the
@@ -12,23 +15,15 @@ later always succeeded. `relaunch` returns once the TUI's title shows the sessio
 the TUI accepts a select-session call. A failed switch records nothing, so the operator sees a spurious `timeout` on a healthy pane.
 The #649 scenario hides it with a 20 s retry loop (`switch_once_the_tui_takes_it`).
 
-## Is it settled by an existing decision? No.
-Checked: `docs/adr/ADR-0021.md` (sections 2, 5 "Switch and reset as built (#645)", "The health wait moved into the engine", 12), `docs/protocol/v2.md`
-(no pane verbs; its only "retry" text is the body/hub reconnect rules, §3/§8, unrelated), `docs/pane-control.md` (`relaunch` and `switch` entries,
-lines 231-262), `docs/handoffs/649/decisions.md` (lines 286-295: the finding, "the scenario works around (2) with a bounded retry", filed as #845).
-What they say and do not say:
-- ADR-0021 "Switch and reset as built (#645)": the act is `select_session`; "a mismatch observed after the act is the closed failure `unavailable`".
-  It says nothing about a TUI that is not yet ready, and nothing about retrying or about relaunch waiting for the TUI.
-- The OpenCode adapter header (attach.rs:1-19) pins: one deadline per method; "an attach or a switch is trusted only once seen (I3)"; `select-session`
-  "answers `true` with no TUI at all (opencode-pane-spike.md:117-124), so its `true` proves nothing"; the pane is polled every `SETTLE_POLL` within
-  `settle`, else `timeout`. This pins that a `true` reply is not evidence, not what to do when the title does not change.
-- ADR-0021 section 12 / I5: each port call returns within its bound (10 s default) or `timeout`; each verb has its budget. `relaunch` is under the
-  launch engine's 10 s budget (`DEFAULT_BUDGET`, `TxOptions.budget`), `switch` in place makes at most eight port calls and has no budget of its own.
-- So choosing relaunch-waits versus switch-retries is a new behaviour choice. Per the task rules it is not decided here.
+## Is it settled by an existing decision? Now yes: the operator's.
+ADR-0021 ("Switch and reset as built (#645)", line 543), `docs/protocol/v2.md`, `docs/pane-control.md` (`switch`, lines 247-258) and `docs/handoffs/649/decisions.md`
+(lines 286-295) do not settle readiness or retrying; the operator did, for B. What stays pinned: the OpenCode adapter header (attach.rs:1-19) says one deadline per method,
+"an attach or a switch is trusted only once seen (I3)", and `select-session` "answers `true` with no TUI at all (opencode-pane-spike.md:117-124), so its `true` proves nothing".
+ADR-0021 section 12 / I5: each port call returns within its bound (10 s default) or `timeout`.
 
-## Evidence (verbatim, from `origin/main` at 6eff9cc)
+## Evidence (verbatim, from `origin/main` at 05471b9)
 
-The act and its watch, `crates/holler-adapter-opencode/src/attach.rs:58-90`:
+The act and its watch, `crates/holler-adapter-opencode/src/attach.rs:58-90` (doc comment 58-62, fn 63-90):
 ```
 pub(crate) fn select_session(
     harness: &OpenCodeHarness,
@@ -62,7 +57,7 @@ pub(crate) fn select_session(
 ```
 The select request is sent exactly once. The `timeout` comes from `tui.watch` (title never shows the session within `settle`), or from the request
 itself if the not-ready TUI never answers (5 s `request`). **Which of the two it is, is not established by any file in the repo** (the finding's probes
-were removed); T must establish it against the fake (below) and, if the operator wants, F against the opt-in real OpenCode, before choosing a fix shape.
+were removed); T pins it first, in a test (Work for T/F, item 2).
 
 The poll, `crates/holler-adapter-opencode/src/lib.rs:650-671`:
 ```
@@ -106,102 +101,92 @@ Existing tests the change must keep green or deliberately amend, `crates/holler-
 Spec pins: ADR-0021 "Switch and reset as built (#645)" (the act, one CAS, mismatch is `unavailable`); `docs/pane-control.md:247-258` (`switch`: "A TUI that does not
 show the session afterwards is `unavailable` (1) and records nothing"); the spike `opencode-pane-spike.md:117-124` (`true` with no TUI).
 
-## Open decision (operator), with a recommendation
+## The decided plan (B)
+`select_session` (attach.rs:63-90) sends the select request again on each poll while the title does not show the session, until `settle` or the method's `call` deadline ends it.
+- Adapter-internal (`crates/holler-adapter-opencode/src/attach.rs`). `HarnessPort::select_session` (`crates/holler-pane/src/ports.rs:479`) keeps its signature, its `Ok`-only-once-seen
+  rule (I3) and its failure set. `relaunch`, `tx_switch`, `shown_session`, the Claude adapter and the fakes are untouched.
+- The session check (`known`, one GET) stays once, before the first send. The `true` reply stays non-evidence: success is only ever the title. A re-send reuses the crate's one `poll`
+  (lib.rs:655) and `Tui::query`; add no second poll.
+- Idempotent: selecting a session the TUI already shows or will show is harmless. Cost: a switch to a not-yet-ready TUI takes up to `settle` instead of failing at once.
+- Also fixes `reset`, `reset --first` (both through `tx_switch.rs:244`) and doctor's repair (`reconcile/observe.rs:375`), which share `select_session`. The brief earlier also named `profile apply`
+  as a path; that is not re-verified (no direct call in `crates` outside the three above and `wiring/bind.rs:335`, which only forwards).
+- Docs: one sentence each in ADR-0021 "Switch and reset as built (#645)" and the adapter module doc (attach.rs:1-19): the select request is repeated every poll until seen; and in the
+  `pane-control.md` `switch` entry (note: it says an unshown session is `unavailable`, while the adapter ends `timeout` when the title never changes; state the rule as built, do not widen).
 
-**Option B, recommended: `select_session` re-sends the select request while the title does not show the session, within its existing bounds.**
-Adapter-internal (`crates/holler-adapter-opencode/src/attach.rs`). Contract: **unchanged**. `HarnessPort::select_session` keeps its signature, its
-`Ok`-only-once-seen rule (I3) and its failure set; it just tolerates the TUI's start-up window. `relaunch` is untouched. Needs only a prose edit to ADR-0021
-(a sentence in "Switch and reset as built (#645)" and the adapter's module doc: the select request is repeated every poll until seen) and the
-`pane-control.md` `switch` entry. Idempotent: selecting a session the TUI already shows or will show is harmless, and it is the same HTTP call a human operator
-could repeat. Cost: a switch to a not-yet-ready TUI can take up to `settle`/`call` (5 s/10 s) instead of failing at once; **if the measured start-up window
-exceeds 5 s (the finding saw success only 8 s after relaunch returned), the default `settle` must also be raised, which is a second, visible choice (see Risks).**
-Also fixes `reset` and `reset --first`, `pane doctor --fix`, and `profile apply`'s relaunch-then-select paths, which share `select_session`.
+## Work for T and F (open risks, kept as explicit work)
+1. **Is the 5 s `settle` window too short?** Success was seen about 8 s after `relaunch` returned, `settle` is 5 s (lib.rs:260, 269). T must measure it (the opt-in real OpenCode, `HOLLER_TEST_PANE_INTEGRATION=1`
+   on a scratch Herdr, or the recorded #649 timings) and pin the figure in its handoff, with the method. If 5 s suffices, nothing changes. If it does not, F must NOT raise `settle`
+   or `call`: stop and report under "Needs operator decision if measured".
+2. **Is the timeout the title never changing, or the request hanging?** T pins this FIRST, in a test, before F writes code: one characterisation test where the not-ready TUI answers the POST
+   `200 true` without the title changing (today: one POST, then `Timeout` at `settle`), and one where the stub delays or never answers the POST (today: `Timeout` from the 5 s `request` bound, or `unavailable`).
+   Re-sending fixes the first; it does not fix a hung request (capped by `request`, so not re-sendable inside a shorter `settle`). If the hung-request case is the real one, B as decided does not cover it:
+   T reports it to O before F starts, and that too goes under "Needs operator decision if measured" (it would need a per-send bound shorter than `request`).
 
-**Option A: `relaunch` waits until the TUI accepts select-session before it returns.**
-Contract: **changes**. A new post-condition for `relaunch`/`launch` (the TUI is ready, not merely showing), which needs either a new `HarnessPort` method
-(for example a `tui_ready`) or a stronger `attach_tui`; the port is "final" and amended only amend-first, in its own ADR PR, with `holler-pane-testkit` fakes and the
-conformance suite (`conformance/harness.rs`) updated, and the Claude adapter (`holler-adapter-claude`) given an answer too. It also has no clean readiness
-signal (there is no observable but the select call itself, so the wait would be a select-then-poll anyway), it must fit in the launch engine's 10 s budget together
-with the server boot (a measured launch near the budget is already a recorded risk, ADR-0021 line 1013), and it slows every relaunch and launch, including those no
-switch follows. It would not help a switch sent to a pane that was relaunched by someone else or earlier-but-still-warming, nor a TUI restarted by `attach_tui` alone.
-
-Recommendation: **B**. One adapter, no contract change, no cost on launches, covers every select caller. State both in the PR if the operator picks A.
-Nothing below depends on the choice except the lines marked [A] or [B].
+## Needs operator decision if measured
+Nothing is in this list yet. Entries are added only by T or F, and the pipeline stops when one is added:
+- (a) `settle` (and so the failure time of a real wedge) must be raised because the measured start-up window exceeds 5 s. The 10 s `call` bound caps any raise.
+- (b) the not-ready TUI hangs the request rather than leaving the title unchanged, so a per-send bound is needed.
 
 ## Acceptance criteria (each observable)
-1. [B] `crates/holler-adapter-opencode/tests/attach_test.rs`: a new test `ac29f_...` where the title shows the old session for the first N polls and the target after,
-   and the stub receives more than one `POST /tui/select-session`: `select_session` returns `Ok(())` and the record-side call count of POSTs is 2 or more.
-   [A] a new test where a relaunch against a fake whose select-session is refused for the first window returns only after it is accepted, and `relaunch` still ends `timeout`
-   at the budget when it never is.
-2. `ac29a` still passes unchanged (one `GET`, one `POST` when the title shows at once), `ac29b`, `ac29c`, `ac29e` pass unchanged.
-3. `ac29d` still passes: a TUI that never takes the switch ends `Err(Timeout{op: select_session})` no later than `settle` + `SLACK` ([B] unchanged bound; if `settle` is raised,
-   the test follows `quick().settle`, and the new default is named in the PR).
-4. A 404 on a re-sent select still ends `SessionNotFound`, and a dead or missing TUI between sends still ends `unavailable` ("no TUI in pane ..."), without further sends.
-5. The #649 scenario no longer needs its retry: `switch_once_the_tui_takes_it` is deleted and `scenario.rs:102` calls `scratch.json(&["pane","switch", ...], 0)` (strict), with the
-   `eprintln` race note gone. `grep -rn "TUI-readiness race\|switch_once_the_tui_takes_it" crates` returns nothing. (This test is opt-in; it is run by the operator or an
-   opted-in F, `HOLLER_TEST_PANE_INTEGRATION=1`, never in default CI.)
-6. ADR-0021 and `docs/pane-control.md` state the chosen rule in one place each; CHANGELOG `## [Unreleased]` has an entry linking #845.
-7. `cargo test -p holler-adapter-opencode`, `cargo test -p holler-pane`, `cargo test -p holler-cli --test pane_verbs`, and `cargo clippy` over the touched crates `-- -D warnings` are green
-   ([A] adds `-p holler-pane-testkit`, `-p holler-adapter-claude`); `bash scripts/lint.sh` exits 0. No workspace-wide `cargo fmt`.
+1. `crates/holler-adapter-opencode/tests/attach_test.rs`: a new test `ac29f_...` where the title shows the old session until the stub has received N select POSTs and the target after,
+   `select_session` returns `Ok(())`, and the stub saw 2 or more `POST /tui/select-session`. RED today: `Timeout` after one POST.
+2. `ac29a` (L293) passes unchanged (one `GET /session/ses_B`, one `POST` when the title shows at once); `ac29b`, `ac29c` (no request at all with no TUI), `ac29e` pass unchanged.
+3. `ac29d` (L363) passes: a TUI that never takes the switch ends `Err(Timeout{op: select_session})` no later than `quick().settle + SLACK` (SLACK 500 ms, L44). The bound is unchanged.
+4. A 404 on a re-sent select ends `SessionNotFound`; a dead or missing TUI between sends ends `unavailable` ("no TUI in pane ..."), with no further send.
+5. T's pin of risk 2 and the measurement of risk 1 are in T's handoff (RED and GREEN), before F's first edit.
+6. The #649 scenario no longer needs its retry: `switch_once_the_tui_takes_it` (`scenario.rs:42-67`, called at `scenario.rs:102`) is deleted and the call becomes
+   `scratch.json(&["pane","switch", ...], 0)` (strict), with the `eprintln` race note gone. `grep -rn "TUI-readiness race\|switch_once_the_tui_takes_it" crates` returns nothing.
+   (Opt-in; run by the operator or an opted-in F, `HOLLER_TEST_PANE_INTEGRATION=1`, never in default CI; its result is recorded.)
+7. ADR-0021 and `docs/pane-control.md` state the rule in one place each; CHANGELOG `## [Unreleased]` has an entry linking #845.
+8. `cargo test -p holler-adapter-opencode`, `cargo test -p holler-pane`, `cargo test -p holler-cli --test pane_verbs`, and `cargo clippy` over the touched crates `-- -D warnings` are green;
+   `bash scripts/lint.sh` exits 0. No workspace-wide `cargo fmt`.
+
+## Test plan (test-first)
+RED, in the default run (hermetic, no tmux, no OpenCode):
+- T first writes the two characterisation tests of risk 2 and confirms what the current code does (one POST then `Timeout`).
+- Then `ac29f`. The fake tmux answers `display-message` from a static data file (`tests/support/fake_tmux.rs`, `reply`), so a title that turns later is best made WITHOUT touching the fixture or
+  `fake_tmux.rs` (both changed by #844 PR #870): have the test, on the Nth `POST /tui/select-session` the stub receives, rewrite the `display-message` reply (`Rig::showing`, attach_test.rs:114) from a stub
+  callback or a small helper in `attach_test.rs`/`stub.rs`. If that proves impossible, T says so before changing `fake-tmux`, and the Clashes entry for #844 applies.
+- Also: 404 on the second send (`SessionNotFound`), dead pane on the second query (`unavailable`, no third send).
+- GREEN: `select_session` re-sends each poll and returns `Ok`. `ac29a`/`ac29d` are the regression pins.
+- Mutation check for the bound: remove the `settle` cap on the loop and see `ac29d` fail.
 
 ## Files
-Production: [B] `crates/holler-adapter-opencode/src/attach.rs` (the re-send loop; reuse `poll`/`SETTLE_POLL`, add no second poll); possibly `lib.rs` (`Timeouts::settle`
-default and its doc) if the measured window needs it. [A] `crates/holler-pane/src/ports.rs`, `ports/router.rs`, `tx_launch/server.rs`, the opencode and claude adapters,
-`holler-pane-testkit`.
-Tests: `crates/holler-adapter-opencode/tests/attach_test.rs` (+ a small `support/` extension so the fake tmux title can change after N queries); `crates/holler-cli/tests/pane_integration/scenario.rs`.
+Production: `crates/holler-adapter-opencode/src/attach.rs` only (the re-send; reuse `poll`/`SETTLE_POLL`/`Tui::query`). `lib.rs` (`Timeouts::settle` default) is NOT touched without the operator.
+Tests: `crates/holler-adapter-opencode/tests/attach_test.rs` (+ at most a small helper in `tests/support/stub.rs`); `crates/holler-cli/tests/pane_integration/scenario.rs`.
 Docs: `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md`.
-Reuse map (extend, do not duplicate): `poll`, `Tui::watch`, `Tui::query`, `deadline_after`, `known`; the existing stub/fake-tmux rig; `wait_healthy`/`wait_until` for [A] only.
+Reuse map (extend, do not duplicate): `poll`, `Tui::watch`, `Tui::query`, `deadline_after`, `known`; the existing stub/fake-tmux rig.
 
-## Decisions already made (MO)
+## Decisions already made
 - Rigor in-session, no UI, so D and U never run.
-- No change to what a failed switch records: nothing (ADR-0021, #645). A retry is inside the one `select_session` call; `tx_switch` is not changed and does not retry itself
-  ([B]); it must not become a verb-level retry that spans port calls.
-- The `true` reply stays non-evidence (I3, spike): success is only ever the title.
-- The branch to take: **pending the operator** (Open decision).
+- Option B (operator, 2026-10-12). The retry is inside the one `select_session` call; `tx_switch` does not change and does not retry (no verb-level retry spanning port calls).
+- A failed switch still records nothing (ADR-0021, #645). The mismatch after the act stays the closed failure `unavailable`; the re-send must not blur it with `timeout`.
+- The `true` reply stays non-evidence (I3, spike).
 
 ## Out of scope
 - The tmux UTF-8 locale bug (#844), the `LinkedHost` fold (#846), #847, #848, #696.
-- Any change to Claude Code panes (a process relaunch, no TUI to select).
-- Any change to `pane doctor`, to the reconcile step text, or to `shown_session`.
-- Measuring OpenCode's start-up time beyond what the opt-in real test shows; no live Herdr or pane is touched by the brief or by T's default-run tests.
-
-## Test plan (test-first)
-RED, in the default run (hermetic, no tmux, no OpenCode): extend the fake-tmux rig so the title query answers the old title for the first N queries, then the target's; the stub
-counts `POST /tui/select-session` and, to model "not ready", answers the first N posts `200 true` with no effect on the title. T first writes a characterisation test that shows
-the current code stops after one POST and ends `Timeout` (so which of "request hangs" or "title never changes" the not-ready TUI does is pinned in a test, not assumed; if it is
-the request that hangs, the test scripts a delayed stub reply and the fix shape changes accordingly, and T reports that to O before F starts).
-- [B] RED: `ac29f` (above) fails today with `Timeout`, one POST. GREEN: `select_session` re-sends each poll and returns `Ok`. Keep `ac29a`/`ac29d` as the regression pins; add a test that a
-  404 on the second send is `SessionNotFound` and a dead pane on the second query is `unavailable` with no third send.
-- [A] RED: the equivalent against `relaunch` plus a conformance-suite case; GREEN after the port change.
-- Opt-in: the strict scenario of acceptance 5 is run by the operator (F may run it only with `HOLLER_TEST_PANE_INTEGRATION=1` on a scratch Herdr, as in #649), and its result recorded.
-- Mutation check for the retry bound: remove the `settle` cap and see `ac29d` fail.
+- Any change to Claude Code panes, `pane doctor`, the reconcile step text, `shown_session`, `relaunch`, or the `HarnessPort` contract.
+- Raising `settle` or `call` (operator's, see above). No live Herdr or pane is touched by default-run tests.
 
 ## Blast radius
-- [B] `HarnessPort::select_session` of the OpenCode adapter only. Its callers: `tx_switch::switch_in_place` (switch, reset), doctor's repair (`reconcile/observe.rs`), `profile apply`
-  (via the same engine), and the `holler-cli` wiring (`wiring.rs`, `wiring/bind.rs`). No signature changes, no wire, no record, no exit-code change, `holler-proto` untouched. Observable change:
-  a switch to a warming TUI succeeds instead of `timeout` (exit 1); a TUI that never takes it still ends `timeout` at the same bound. The Claude adapter and the fakes are untouched.
-- [A] `HarnessPort` (a port amendment, ADR amend-first), `holler-pane-testkit` fakes and conformance, both adapters, `tx_launch`, and the budget math for every launch and relaunch.
-- Docs: ADR-0021, `pane-control.md`, CHANGELOG. Tests: one adapter test file and one opt-in scenario file.
+`HarnessPort::select_session` of the OpenCode adapter only. Callers: `tx_switch::switch_in_place` (switch, reset; tx_switch.rs:244), doctor's repair (`reconcile/observe.rs:375`), and the
+`holler-cli` forwarder (`wiring/bind.rs:335`). No signature, wire, record or exit-code change; `holler-proto` untouched. Observable change: a switch to a warming TUI succeeds instead of
+`timeout` (exit 1); a TUI that never takes it still ends `timeout` at the same bound; a real wedge now receives several idempotent selects (visible in the TUI's logs). Docs: ADR-0021,
+`pane-control.md`, CHANGELOG. Tests: one adapter test file and one opt-in scenario file.
 
-## Clashes (siblings from the #649 run)
-- **#844** (OpenCode adapter tmux UTF-8): same crate, different files. #844 changes how the adapter's tmux client runs/parses (`tui.rs`/`exec.rs`, the `query_args` path) and adds a `LANG=C` test.
-  #845 [B] edits `attach.rs::select_session` and uses `Tui::query`. A merge-time conflict is possible only if #844 also touches `attach.rs` or the shared `tests/support/fake_tmux.rs`.
-  Whoever merges second rebases; #845's new fake-title helper must not change the query argv #844 pins. Merge order: either; prefer #844 first (it is a prerequisite for any real-tmux run).
-  Independent in behaviour.
-- **#846** (fold `LinkedHost` fakes): touches `holler-cli` test rigs (`profile_verbs`, `pane_verbs`, `pane_integration`). #845 touches `pane_integration/scenario.rs` (deletes one helper and its call).
-  Likely a small textual conflict in `scenario.rs` if #846 edits that file; trivially resolved. #845 adds no `LinkedHost`, so it creates no new duplicate for #846 to fold.
-- **#847** (flaky `remote_admin_test`): no overlap (hub test). Do not read a #847 failure in the workspace run as a #845 regression; re-run it alone first.
-- **#848** (wizard rename scan skips `docs/handoffs/`): no code overlap, but this brief and any handoff under `docs/handoffs/` quote the old skill path only if they mention it; this brief does not.
-  Until #848 merges, keep the old wizard path out of every file under `docs/handoffs/845*`.
-- **#696** (shared bounded subprocess runner): it moves the adapters' private `exec` onto a `holler-pane` runner. #845 [B] calls `Tui::run` -> `exec::capture` only through the existing path and adds
-  no subprocess code, so the two do not overlap in logic; but both edit the OpenCode adapter's tmux plumbing neighbourhood, so keep #845's diff to `attach.rs` (and tests) and do not touch `exec.rs`.
-  The re-send adds no new subprocess kind, only more `query` calls inside the same deadline.
+## Clashes (checked against `git fetch origin`; this branch is rebased on origin/main 05471b9, with #847 and #848 merged)
+- **#844, PR #870** (open): changes `tmux_command -u` in `holler-adapter-opencode/src/tui.rs`, `tests/fixtures/fake-tmux`, `tests/support/fake_tmux.rs`, `tests/tui_test.rs`, `tests/utf8_locale_test.rs`,
+  `holler-cli` `pane_integration/scratch/mod.rs` and `guards.rs`, ADR-0021 and CHANGELOG. #845 does not edit `tui.rs`, the fixture or `fake_tmux.rs` (the test plan avoids them), so no code conflict is expected;
+  `Tui::query` runs through the `tmux_command` that #844 changes, so a #845 test that pins the query argv would break: pin none. Textual conflicts are likely only in ADR-0021 and CHANGELOG.
+  Whoever merges second rebases. Prefer #844 first (any real-tmux run needs its UTF-8 fix).
+- **#846, PR #868** (open): changes `holler-cli` tests `verb_harness/linked_host.rs`, `verb_harness/mod.rs`, rigs (`pane_integration/bind.rs`, `fake_hub.rs`, `main.rs`, `no_hub.rs`, `observe.rs`, `traps.rs`, `wired.rs`,
+  `wrappers.rs`, `pane_verbs/launch/rig.rs`, `profile_verbs/apply/rig.rs`, `pane_claude/rig.rs`) and scenario files. Per the file list it does not edit `pane_integration/scenario.rs`, but it edits `pane_integration/main.rs`
+  and `scratch`-neighbouring modules the scenario uses; re-check `scenario.rs` and the imports of `wait_for`/`check_envelope` after it merges (they may become unused once the helper is deleted: remove them, do not leave warnings).
+  #845 adds no `LinkedHost`.
+- **#847, #848**: merged (ef14b1a, 05471b9); no overlap. #848 means a handoff under `docs/handoffs/` may now quote the old wizard path; this brief still does not.
+- **#696** (shared bounded subprocess runner): keep the diff to `attach.rs` and tests; do not touch `exec.rs`. The re-send adds no new subprocess kind, only more `query` calls inside the same deadline.
 
 ## Risks
-- The settle window may be shorter than the start-up window (`settle` 5 s versus up to about 8 s seen). If T/F's measurement shows that, [B] alone still fails sometimes. Then a second choice is
-  needed (raise the `settle` default, which also lengthens the failure of a real wedge from 5 s to N s, or accept it): flag it to the operator, do not decide it in F. The call bound (10 s) caps any such raise.
-- Which of "title never changes" or "request hangs" the not-ready TUI does is unverified; the fix shape depends on it (see Test plan). A hung request is capped by the 5 s `request` bound and could
-  not be re-sent within `settle` without a shorter per-send bound.
-- A re-send during a real wedge sends several selects; harmless (idempotent) but visible in the TUI's logs.
-- The mismatch after the act stays the closed failure `unavailable`; the re-send must not blur it with `timeout`.
-- Risk that A's budget (10 s) is exceeded by a slow boot plus the readiness wait; the reason the recommendation is B.
+- The settle window and the hung-request case are Work for T/F items 1 and 2, with their stop conditions under "Needs operator decision if measured".
+- A re-send during a real wedge sends several selects; harmless (idempotent).
+- The re-send must not mask a dead TUI or a 404 as `timeout` (criterion 4).
