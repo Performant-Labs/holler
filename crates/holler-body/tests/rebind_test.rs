@@ -76,8 +76,18 @@ fn advertised(sm: &SessionManager, session: &str) -> Option<String> {
     Some(row.harness_session_id.unwrap_or_default())
 }
 
-/// Wait, bounded, until `session` is advertised (its first attach has succeeded).
-async fn until_attached(sm: &SessionManager, session: &str) {
+/// Wait, bounded, until `session`'s first attach of `id` has succeeded. A row is visible before
+/// its task runs (the mirror is initialised at `start`) and hidden while the first attach runs, so
+/// visibility alone is not "attached": wait for the attach's existence check (a request after
+/// `since`) first, then for the row.
+async fn until_attached(
+    sm: &SessionManager,
+    server: &FakeServer,
+    since: usize,
+    session: &str,
+    id: &str,
+) {
+    until_request(server, since, "GET", &format!("/session/{id}")).await;
     let deadline = Instant::now() + WAIT;
     while advertised(sm, session).is_none() {
         assert!(Instant::now() < deadline, "{session} never attached");
@@ -164,7 +174,7 @@ async fn prompt_reaches(sm: &Arc<SessionManager>, server: &FakeServer, id: &str)
 async fn a_rebind_re_points_the_session_and_keeps_its_name() {
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     let since = server.requests().len();
     let frame = rebind(&sm, "alpha", NEW).await;
     assert_eq!(
@@ -195,7 +205,7 @@ async fn a_rebind_re_points_the_session_and_keeps_its_name() {
 async fn the_refusals_keep_the_old_binding() {
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD), spawned("beta")]);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     assert_eq!(
         refusal(&rebind(&sm, "gamma", NEW).await),
         (-32003, None),
@@ -223,7 +233,7 @@ async fn the_refusals_keep_the_old_binding() {
 async fn a_busy_session_refuses_the_rebind() {
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     let manager = Arc::clone(&sm);
     let turn = tokio::spawn(async move {
         manager
@@ -254,7 +264,7 @@ async fn a_silent_endpoint_is_refused_in_time_and_a_late_attach_is_never_swapped
     );
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     server.set_stall_exists(true);
     let started = Instant::now();
     let frame = rebind(&sm, "alpha", NEW).await;
@@ -288,7 +298,7 @@ async fn a_silent_endpoint_is_refused_in_time_and_a_late_attach_is_never_swapped
 async fn the_re_attach_after_an_error_follows_the_new_id() {
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     rebind(&sm, "alpha", NEW).await;
     let since = server.requests().len();
     let manager = Arc::clone(&sm);
@@ -347,7 +357,7 @@ async fn query_support_probes_the_live_id() {
     let server = FakeServer::start().await;
     let configs = [attach("alpha", &server.endpoint(), OLD)];
     let sm = start(&configs);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     rebind(&sm, "alpha", NEW).await;
     let live = sm.live_configs(&configs);
     assert_eq!(live[0].session_id.as_deref(), Some(NEW));
@@ -378,7 +388,7 @@ async fn a_restart_reverts_to_the_configured_id() {
     let server = FakeServer::start().await;
     let configs = [attach("alpha", &server.endpoint(), OLD)];
     let sm = start(&configs);
-    until_attached(&sm, "alpha").await;
+    until_attached(&sm, &server, 0, "alpha", OLD).await;
     rebind(&sm, "alpha", NEW).await;
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(NEW));
     Arc::try_unwrap(sm)
@@ -386,8 +396,9 @@ async fn a_restart_reverts_to_the_configured_id() {
         .expect("the only handle")
         .shutdown()
         .await;
+    let since = server.requests().len();
     let restarted = start(&configs);
-    until_attached(&restarted, "alpha").await;
+    until_attached(&restarted, &server, since, "alpha", OLD).await;
     assert_eq!(advertised(&restarted, "alpha").as_deref(), Some(OLD));
 }
 

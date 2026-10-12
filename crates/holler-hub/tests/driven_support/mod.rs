@@ -210,6 +210,9 @@ impl TestHub {
             .insert(&client_id, label, &token_id, "127.0.0.1:1")
             .await;
         self.registry.update_presence(&client_id, ads.clone()).await;
+        // As `circuit::handle_authenticated` does before any presence: rows are `<label>/<name>`.
+        self.roster.set_token(&token_id, &client_id);
+        self.roster.set_label(&token_id, label);
         self.roster.advertise(
             &token_id,
             &Presence {

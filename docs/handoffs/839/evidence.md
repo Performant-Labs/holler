@@ -174,3 +174,30 @@ T appends its own at Phase 7.
   >     inode_before,
   >     "the pane document is saved before the profile document"
   > );
+
+## What T's test repairs (T-green) rely on
+
+Added by T in Phase 7, excerpts copied from source by T.
+
+- **Fact:** the hub binds a token's client id and label in the roster at authentication, before any
+  presence, so every row is `<label>/<session>` from the first frame. `driven_support::TestHub::body`
+  now does the same two calls before `advertise` (T-1).
+  **Source:** `crates/holler-hub/src/circuit.rs:306-307`
+  **Verbatim excerpt:**
+  > roster.set_token(&params.token_id, &client_id);
+  > roster.set_label(&params.token_id, &record.label);
+
+- **Fact:** an attach's existence check asks `GET {endpoint}/session/{id}` first, so a test can see the
+  first attach start on the fake server's request log. `rebind_test::until_attached` now waits for
+  that request (after the row is hidden, `task.rs:168-172` above) and only then for the row (T-5).
+  **Source:** `crates/holler-body/src/http_attach_driver.rs:376, 386-391`
+  **Verbatim excerpt:**
+  > /// The fail-closed existence check — `GET {endpoint}/session/{id}` first,
+  > ...
+  > async fn check_exists(
+  >     client: &reqwest::Client,
+  >     endpoint: &str,
+  >     session_id: &str,
+  > ) -> Result<(), DriverError> {
+  >     let base = endpoint.trim_end_matches('/');
+  >     let v1_url = format!("{base}/session/{session_id}");

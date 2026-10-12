@@ -149,3 +149,21 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
     - The temporary-edit runs: `check_only_test` 4, `driven_resolve_test` 11, `offline_reason_test` 3, `cli_invocation_test` 14, `driven_e2e_test` 11 and `hold_single_path_test` 5, all passed. The edits were restored, and `git status` on `crates/*/tests` is clean.
   - Files read: the brief (its decisions, where the code goes, Reuse, Acceptance and Blast radius), `handoff-A.md`, `handoff-T-red.md`, and every test target named in it.
   - Source facts F relies on are in `docs/handoffs/839/evidence.md`.
+
+## T (Phase 7, verify GREEN), 2026-10-12 09:41 MDT
+
+- **Decided:**
+  - **All six of F's "tests that look wrong" (T-1 to T-6) were T's errors, repaired in the tests alone.** Each diagnosis was checked against the source (`circuit.rs:306-307`, `support/mod.rs:259-261`, `task.rs:168-172`, `hold_single_path_test.rs:35`) and, for T-6, against the brief's P3 text. No production file was edited.
+  - **T-3 skips `tests.rs` and `*_tests.rs` in `sources()`** rather than rewriting the expected values in `panes/gate/tests.rs`: the scan's intent is non-test code, and the filter also covers the other out-of-line test modules.
+  - **T-5 waits for the first attach's `GET /session/{id}`, then for the row.** This keeps the guard that the row is visible before the task runs.
+  - **Verdict PASS:** the workspace is green (2721 passed, 0 failed) and Tier 2 has no blocking finding.
+- **Assumed:**
+  - Whether a grant spent on a prompt the pane gate then refuses (a race only) matters is O's to judge; it is advisory.
+- **Hedged:**
+  - The `rebind_test` race fix is shown by 15 clean runs alone, not a proof; the full-suite run was also clean.
+  - `profile_rename_faults_test` was not re-run alone; it passed in the full suite.
+- **Evidence:**
+  - `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`: 2721 passed, 0 failed, 36 ignored.
+  - Clippy `-D warnings`, `scripts/lint.sh`, `scripts/changelog-check.sh origin/main`, `cargo machete`, `scripts/test-hooks.sh`, `docs_cli_test`, `docs_pane_control_test`, `wire_selftest`: all pass.
+  - Eight production mutations, each failing its test (table in `handoff-T-green.md`), each restored.
+  - Two evidence entries appended to `evidence.md`.

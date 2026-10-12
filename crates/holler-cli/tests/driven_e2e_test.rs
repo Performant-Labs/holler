@@ -63,7 +63,12 @@ impl Rig {
     async fn start(sessions: &[(&str, &str)], hub_args: &[&str]) -> Rig {
         let server = FakeServer::start().await;
         let state = StateDir::new();
-        let hub = Hub::start_with_args(&state, &[], hub_args);
+        // `serve_args` is the hub's whole argument list: bind an ephemeral port, never the default.
+        let args: Vec<&str> = ["--listen", "127.0.0.1:0"]
+            .into_iter()
+            .chain(hub_args.iter().copied())
+            .collect();
+        let hub = Hub::start_with_args(&state, &[], &args);
         let (token, secret) = mint_token(&state, "kiwi");
         support::join(&state, &state, &hub.ws_url(), &token, &secret);
         let blocks: String = sessions

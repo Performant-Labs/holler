@@ -32,7 +32,12 @@ fn talklog_exists(label: &str, session: &str) -> bool {
 /// The error a reply carries, without its message (holds and refusals word theirs alike).
 fn error_shape(reply: &Value) -> Value {
     let error = error_of(reply);
-    json!({"code": error["code"], "data": error["data"]})
+    // A hold's `since` is when this iteration's hub set it, so two hubs never agree on it.
+    let mut data = error["data"].clone();
+    if let Some(d) = data.as_object_mut() {
+        d.remove("since");
+    }
+    json!({"code": error["code"], "data": data})
 }
 
 /// An admitted check answers `{admitted: true}` and changes nothing anywhere.

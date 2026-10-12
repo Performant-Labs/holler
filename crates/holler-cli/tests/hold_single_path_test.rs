@@ -92,6 +92,13 @@ fn sources(name: &str) -> Vec<(String, String)> {
     let root = crate_src(name);
     let mut files = Vec::new();
     rust_files(&root, &mut files);
+    // An out-of-line test module (`holds/tests.rs`, `panes/gate/tests.rs`, `rebind_tests.rs`)
+    // has no `#[cfg(test)]` line of its own for `code_of` to cut at: it is test code, not a copy.
+    files.retain(|f| {
+        f.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n != "tests.rs" && !n.ends_with("_tests.rs"))
+    });
     files.sort();
     files
         .iter()
