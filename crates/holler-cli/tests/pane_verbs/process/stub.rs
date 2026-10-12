@@ -24,10 +24,7 @@ pub const STUBS: &[(&str, &str, u32)] = &[
     // #650
     // #662
     // #664
-    // #665 (proposed: the operator confirms it)
-    ("profile", "rename", 665),
-    ("profile", "export", 665),
-    ("profile", "import", 665),
+    // #665
 ];
 
 /// The refusal of `roster --profile`, until story #648.
@@ -210,15 +207,11 @@ fn a_bad_debug_value_is_still_a_policy_refusal_before_dispatch() {
 /// asserted through the checker.
 #[test]
 fn a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope() {
-    // Any stub verb answers the same not-implemented envelope; one stub stands in for the
-    // table (the whole-table runs are the two tests above). The last pane stub, `pane
-    // import`, became a verb in #650, so the first stub of either namespace stands in.
-    let &(namespace, verb, _) = STUBS
-        .first()
-        .expect("a stub exists while this test lives (#660)");
+    // The last stubs, #665's profile verbs, became verbs, so a built verb that fails on an
+    // empty hub stands in: `profile show` of a missing profile, one refusal envelope (exit 3).
     let hub = LiveHub::start();
-    let out = hub.holler(&[namespace, verb, "--debug", "noisy", "--format=json"]);
-    assert_eq!(out.code, 1, "the stub still exits 1: {out:?}");
+    let out = hub.holler(&["profile", "show", "hlr660", "--debug", "noisy", "--format=json"]);
+    assert_eq!(out.code, 3, "a refusal exits 3: {out:?}");
     assert!(
         out.stderr.contains("logging_started level=noisy"),
         "the forced diagnostic (the banner at the forced level) is on stderr: {out:?}"
@@ -227,7 +220,7 @@ fn a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope() {
         .unwrap_or_else(|f| panic!("stdout is still one envelope: {f}: {out:?}"));
     assert_eq!(
         envelope.error.map(|e| e.code),
-        Some("not-implemented".to_string()),
+        Some("profile-not-found".to_string()),
         "{out:?}"
     );
 }

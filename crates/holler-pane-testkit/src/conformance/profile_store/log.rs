@@ -1,12 +1,12 @@
-//! Cases 15 to 18 of the `ProfileStore` suite, in a file of their own so that no file
+//! Cases 15 to 17 of the `ProfileStore` suite, in a file of their own so that no file
 //! of the suite nears the 600-line lint: the change log (it only grows, oldest first,
-//! and is `profile-not-found` only for a name never created), `rename` while it is
-//! PROPOSED (#665), and an environment of names only.
+//! and is `profile-not-found` only for a name never created) and an environment of names
+//! only. The rename cases, which read the log too, are in `rename` (#665).
 
 use holler_pane::{EnvVarName, Profile, ProfileLogEntry, ProfileSpec, ProfileStore};
 
-use super::{actor, entries, history, put, revised, sample, shown, stored_as, unchanged};
-use super::{ALPHA, BETA, C1, DELETED, NOT_FOUND, NOT_IMPLEMENTED};
+use super::{actor, entries, history, put, revised, sample, stored_as};
+use super::{ALPHA, C1, DELETED, NOT_FOUND};
 use crate::conformance::pane_store::profile_name;
 use crate::conformance::{expect_code, expect_eq, succeeds};
 use crate::fixture::sample_spec;
@@ -14,7 +14,7 @@ use crate::fixture::sample_spec;
 const SECRET_REFUSED: &str = "profile-secret-refused";
 const NAME_INVALID: &str = "env-name-invalid";
 
-/// The env names case 18 stores: names only, one of them in lower case with a dot.
+/// The env names case 17 stores: names only, one of them in lower case with a dot.
 const ENV_NAMES: [&str; 3] = ["ANTHROPIC_API_KEY", "TOKEN", "lower.dotted"];
 
 /// Case 15: the log only grows, oldest first: a later read starts with every entry of
@@ -57,26 +57,7 @@ pub(super) fn log_of_never_created_is_profile_not_found(
     expect_code("log of a name never stored", store.log(&missing), NOT_FOUND)
 }
 
-/// Case 17: `rename` is PROPOSED (#665) and answers `not-implemented`, changing
-/// nothing: the profile, its log and the absence of the new name. #665 replaces this
-/// case.
-pub(super) fn rename_is_not_implemented(store: &dyn ProfileStore) -> Result<(), String> {
-    let who = actor()?;
-    let p = sample(ALPHA, &[C1])?;
-    put(store, &p, 0, &who)?;
-    let before = shown(store, &p.name)?;
-    let q = profile_name(BETA)?;
-    let call = "rename(p, q, 1) while rename is PROPOSED (#665)";
-    expect_code(call, store.rename(&p.name, &q, 1, &who), NOT_IMPLEMENTED)?;
-    unchanged(store, &p.name, &before, call)?;
-    expect_eq(
-        "get of q after the refused rename",
-        succeeds("get", store.get(&q))?,
-        None,
-    )
-}
-
-/// Case 18: an env entry is a name, and the one guard is the type: `EnvVarName`
+/// Case 17: an env entry is a name, and the one guard is the type: `EnvVarName`
 /// refuses a value (`profile-secret-refused`) and a blank name (`env-name-invalid`).
 /// The store adds no check of its own, so a spec's env names are stored and read back
 /// verbatim.

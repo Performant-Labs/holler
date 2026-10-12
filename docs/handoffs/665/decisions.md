@@ -32,3 +32,29 @@
   - **Tests:** `pane_integration/{main,no_hub,clients}.rs`, `hub/tests/{profile_registry,pane_dispatch,profile_handlers}_test.rs`, `pane_support/mod.rs`, `doctor/{rig,read_only}.rs`, `process/{stub,flags}.rs`, `docs_pane_control_test.rs`, `findings_test.rs`.
   - **Docs and config:** ADR-0021 sections 1-3 and 5-9 and "Decisions taken"; `Cargo.toml`; `scripts/lint.sh`; `.aftersight/pipeline.config.json`.
   - **Commands:** `cargo tree -e features -i serde_json --offline`; `git fetch` and `git diff HEAD...origin/main` (#851 merged at 20:07 MDT, in different hunks); and greps for `PROPOSED`, `#665`, `rename`, `not-implemented` and the conformance case-count pins.
+
+## T (Phase 4, author tests / RED): 2026-10-11 20:45 MDT
+- **Decided:**
+  - **The contract amendment (D1).** T made it first, as A's notes propose: ADR-0003's three rows, and every ADR-0021 edit of the brief. The "on its own" sentence uses A's warn-3 wording.
+  - **What stays F's.** The guide, the CHANGELOG and the `src/` doc comments. `docs_pane_control_test` is RED until the guide edits land.
+  - **The hub's tests are split in two targets**, `profile_rename_test.rs` (the outcome) and `profile_rename_faults_test.rs` (faults, restart, retry, races), each under 600 lines (A warn 6). They share `pane_support::{request, rename_params}`.
+  - **The conformance rename cases are a new child**, `conformance/profile_store/rename.rs`: six cases, 23 to 28, at the end of the table, so the cases after them did not move. The env case is now 17 and the watch cases are 18 to 22.
+  - **`rename-is-not-implemented` is gone.** Case 22's fifth refused write is a stale rename. The suite has 28 cases (`profile_registry_test` and `DOCUMENTED_CASES`).
+  - **Three rename mutants** were added to the conformance test.
+  - **The import tests are split** into `import.rs` and `import/refusals.rs` (A warn 6).
+  - **The D7 document is pinned byte for byte**, the brief's own acceptance. This forces A warn 4 option (a), or an equivalent guarantee of the order.
+  - **Panes-first is pinned** by the inode of `panes.json` after a failed profile save: the old bytes, in a new file. It is the only observable of the order.
+  - **The member-write race uses an update of an existing member** (compare-and-swap at generation 1), so its outcome is one of exactly three, never the documented check-then-write gap of a new join. Moved with the edit, refused `generation-conflict`, or refused `profile-not-found`.
+  - **Acceptance 16's allowlist is in `drift.rs`, not `read_only.rs`.** It is scoped to whole-fleet and `--pane` passes, per A warn 1. The every-incident rig still has no profile, so `read_only.rs` is unchanged.
+  - **`STUBS` is now empty**, so `a_forced_diagnostic_in_json_mode_leaves_stdout_one_envelope` uses `profile show` of a missing profile on a live hub.
+- **Assumed:**
+  - The CLI-verb REDs fail at clap's parse (`unexpected argument`). The verbs' positionals are part of the feature, and this is not a harness fault.
+  - A spelling-only rename of OLD to its own stored name is `usage` even when OLD is spelled differently in the request (`demo` to `Demo`).
+  - `--name` taken in another spelling (`copy` against `Copy`) is `profile-exists`.
+- **Hedged:**
+  - The races run 20 rounds each. They prove no interleaving exhaustively.
+  - The canary for export sets a process environment variable with a unique name, `HOLLER_T665_EXPORT_CANARY`, as `interrupt_test.rs` does.
+  - **A tooling slip, fixed.** T's own `cargo fmt -p holler-cli` and `-p holler-hub` reformatted about 130 files that are not this story's. They were reverted with `git checkout`, and T's edits to `no_hub.rs` and `docs_pane_control_test.rs` were reapplied by hand. F is told not to run `cargo fmt -p`.
+- **Evidence:**
+  - **Gates:** `cargo clippy --workspace --all-targets -- -D warnings` is clean, and `bash scripts/lint.sh` exits 0.
+  - **The RED run:** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`. The targeted runs are recorded in `handoff-T-red.md`.

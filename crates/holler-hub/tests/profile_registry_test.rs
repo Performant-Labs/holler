@@ -56,8 +56,8 @@ fn shape(log: &[ProfileLogEntry]) -> Vec<(u64, &'static str)> {
 fn the_registry_passes_the_profile_store_conformance_suite() {
     assert_eq!(
         profile_store_cases().len(),
-        23,
-        "the suite is the 23-case one"
+        28,
+        "the suite is the 28-case one (#665's six rename cases)"
     );
     let result = run_profile_store_conformance(|| {
         let (dir, state) = temp_state();

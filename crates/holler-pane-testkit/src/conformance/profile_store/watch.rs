@@ -1,4 +1,4 @@
-//! The watch cases of the `ProfileStore` suite (cases 19 to 23): the current state
+//! The watch cases of the `ProfileStore` suite (cases 18 to 22): the current state
 //! from `Cursor(0)`, one change per write, a resume with no gap and no repeat, idle as
 //! `Ok(None)`, and no event for a refused write.
 //!
@@ -9,13 +9,11 @@
 use holler_pane::{Cursor, ProfileEvent, ProfileStore, Watch};
 
 use super::{actor, put, revised, sample, shown, unchanged};
-use super::{
-    ALPHA, ALPHA_SHOUTED, BETA, C1, C2, C3, CONFLICT, EXISTS, GAMMA, NOT_FOUND, NOT_IMPLEMENTED,
-};
+use super::{ALPHA, ALPHA_SHOUTED, BETA, C1, C2, C3, CONFLICT, EXISTS, GAMMA, NOT_FOUND};
 use crate::conformance::pane_store::{changes, cursors, expect_change, increasing, profile_name};
 use crate::conformance::{drain, expect_code, expect_eq, next_item, succeeds};
 
-/// Case 19: a watch from `Cursor(0)` yields a put of each profile held now, keyed by
+/// Case 18: a watch from `Cursor(0)` yields a put of each profile held now, keyed by
 /// slug and equal to the stored record, with increasing cursors, and nothing for a
 /// profile deleted before it; then it goes idle. The delete is the last write, so a
 /// store that replays the history after the current state fails.
@@ -40,7 +38,7 @@ pub(super) fn watch_from_zero_yields_current_state(store: &dyn ProfileStore) -> 
     )
 }
 
-/// Case 20: on an empty store, a watch from `Cursor(0)` goes idle. Then after each
+/// Case 19: on an empty store, a watch from `Cursor(0)` goes idle. Then after each
 /// write, one `next()` yields exactly that change: the stored record for a put, no
 /// record for the delete, with increasing cursors.
 pub(super) fn watch_follows_each_change(store: &dyn ProfileStore) -> Result<(), String> {
@@ -62,7 +60,7 @@ pub(super) fn watch_follows_each_change(store: &dyn ProfileStore) -> Result<(), 
     increasing(&[first, second, third])
 }
 
-/// Case 21: a watch resumed from the cursor of the last change seen yields exactly the
+/// Case 20: a watch resumed from the cursor of the last change seen yields exactly the
 /// changes made since, with no gap and no repeat.
 pub(super) fn watch_resumes_without_gap_or_repeat(store: &dyn ProfileStore) -> Result<(), String> {
     let who = actor()?;
@@ -78,7 +76,7 @@ pub(super) fn watch_resumes_without_gap_or_repeat(store: &dyn ProfileStore) -> R
     )
 }
 
-/// Case 22: an idle watch yields `Ok(None)`, neither ending nor failing, and the same
+/// Case 21: an idle watch yields `Ok(None)`, neither ending nor failing, and the same
 /// iterator then yields the next write.
 pub(super) fn watch_idle_is_ok_none_and_stays_usable(
     store: &dyn ProfileStore,
@@ -94,7 +92,7 @@ pub(super) fn watch_idle_is_ok_none_and_stays_usable(
     Ok(())
 }
 
-/// Case 23: a refused write (a stale `cas_put`, a stale `delete`, a `delete` of a
+/// Case 22: a refused write (a stale `cas_put`, a stale `delete`, a `delete` of a
 /// missing name, a create of another name with the profile's slug, a `rename`) changes
 /// nothing, the log included, and publishes no event.
 pub(super) fn failed_write_changes_nothing(store: &dyn ProfileStore) -> Result<(), String> {
@@ -118,9 +116,9 @@ pub(super) fn failed_write_changes_nothing(store: &dyn ProfileStore) -> Result<(
     let shouted = sample(ALPHA_SHOUTED, &[C1])?;
     expect_code(call, store.cas_put(&shouted, 0, &who), EXISTS)?;
     unchanged(store, &p.name, &before, call)?;
-    let call = "rename(p, q, 2) while rename is PROPOSED (#665)";
-    let renamed = store.rename(&p.name, &missing, 2, &who);
-    expect_code(call, renamed, NOT_IMPLEMENTED)?;
+    let call = "rename(p, q, 1) of a profile at 2";
+    let renamed = store.rename(&p.name, &missing, 1, &who);
+    expect_code(call, renamed, CONFLICT)?;
     unchanged(store, &p.name, &before, call)?;
     expect_eq(
         "next() after five refused writes",
@@ -131,12 +129,12 @@ pub(super) fn failed_write_changes_nothing(store: &dyn ProfileStore) -> Result<(
 
 // --- helpers ---
 
-fn open(store: &dyn ProfileStore, since: Cursor) -> Result<Watch<ProfileEvent>, String> {
+pub(super) fn open(store: &dyn ProfileStore, since: Cursor) -> Result<Watch<ProfileEvent>, String> {
     succeeds(&format!("watch(Cursor({}))", since.0), store.watch(since))
 }
 
 /// The cursor of the last change a watch from `Cursor(0)` yields before it goes idle.
-fn last_cursor(store: &dyn ProfileStore) -> Result<Cursor, String> {
+pub(super) fn last_cursor(store: &dyn ProfileStore) -> Result<Cursor, String> {
     let seen = drain(&mut open(store, Cursor(0))?)?;
     seen.last()
         .map(|event| event.cursor)
