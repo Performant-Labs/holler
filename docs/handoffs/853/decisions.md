@@ -54,3 +54,63 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     - every statement of the old order and the old exit rule (`grep` over `crates`, `docs`, `scripts` and `CHANGELOG.md`);
     - consumers of `profile apply` in `scripts/` and `docs/`: none;
     - golden files holding apply output: none.
+
+## A, up-front plan review, round 2 (fresh run on the amended brief `05d8e6a`): 2026-10-12T05:17-06:00
+
+- **Decided:** PASS, with 0 blocks and 9 warns (see handoff-A.md, which replaces round 1's; round 1's is in git at `eb29e7f`).
+  - **Round 1's blocks are resolved.**
+    - Block 1: an acted refused step's `detail`, which ends with the reconcile step, now travels in the one line. The ADR,
+      the guide and Acceptance 4 say so, and `rows.rs:544` is listed as a test that changes.
+    - Block 2: `SplitOnly` is extended to section 10's rule, with a cross-check against `plan_splits`; no new double.
+  - **Warns:**
+    1. The fake's change is F's, because `holler-pane-testkit/src` is a production path. T carries Acceptance 2's RED with
+       the cross-check, the fake's tests and `rows.rs:182`. The apply 2x2 test passes at Phase 4 and is shown to depend
+       on the order at Phase 6, by reverting `cell_key`.
+    2. Acceptance 1's in-file `#[cfg(test)]` option is not open to T. This corrects my round-1 warn 6.
+    3. A create's `grid-unreachable` is an acted refusal, so its one line carries the detail.
+    4. A take-over note on a relaunch refused before its act is not carried, though the ADR says it is.
+    5. `pane-control.md:424-429` still states both old rules.
+    6. Four more tests that run the verb with a refused step and assert exit 0, plus their doc comments.
+    7. One refused-form test helper, the twin of `assert_stopped`. `refused()` is built like `stopped()`.
+    8. The cross-check goes in `plan_splits_test.rs`, and three stale comments get updated.
+    9. The overlap paragraph has two errors: #835 does not touch the apply `rig.rs`, and both branches add ADR-0021
+       decisions 30 and 31.
+- **Assumed:**
+  - T reads handoff-A.md before authoring, as #808's T did. Warns 1 to 3 stand in for a brief amendment.
+  - #853 lands before #835 (it gates the release), so #835 renumbers its decisions.
+  - The local `issue-835-implementation` (`6787d99`, in worktree `0835-import-leave-alone`) is that branch's current
+    state.
+- **Hedged:**
+  - **Finding 4.** Narrowing the ADR's claim and carrying every refused step's detail are both acceptable; the choice is
+    O's, or F's under the standing orders. A new `Step` field is not.
+  - **The cross-check's scope.** It covers only states without holes. The fake's rule for holes (after `close` or
+    `vanish`) stays an `ASSUMPTION (#640)`.
+- **Evidence:**
+  - **Read:**
+    - the round-2 diffs (`git show 05d8e6a`, `git show 1f4ab40`) and the brief;
+    - ADR-0021 lines 636-760 and 921-958;
+    - `pane-control.md` lines 160-170, 405-430, 622-632 and 690-731;
+    - `tx_apply.rs`, `tx_apply/run.rs` and `profile/apply.rs`;
+    - in `tx_launch.rs`: lines 180-235, 400-470 and 560-720;
+    - `error.rs:266-303` and the `ports.rs` `PaneStore` doc;
+    - `plan.rs`, the adapter's `lib.rs`, and `plan_splits_test.rs` (head, 300-352);
+    - the test kit's `herdr.rs`, the conformance suite's `herdr.rs`, `fake_herdr_test.rs:180-250` and
+      `herdr_conformance_test.rs`;
+    - the apply tests: `rows.rs`, `failures.rs:215-292`, `takeover.rs:120-316`, `rig.rs:410-640`, `observe.rs:33-65` and
+      `apply.rs:95-130`;
+    - the scratch rig: `scratch/mod.rs:85-110` and `470-500`, `profile_apply_scenario/main.rs`, and the `probe.rs` and
+      `scenario.rs` greps;
+    - `.aftersight/pipeline.config.json`, `tester.md`, and `docs/handoffs/{0646-implementation,808}/handoff-T-red.md`.
+  - **Ran on this branch (warm build), all ok:**
+    - `apply::rows::row_b_missing_panes_are_created_by_splits_in_grid_order`: r1c1, r1c2 and r2c1 are all `created` on the
+      loose `SplitOnly`;
+    - `apply::rows::a_refusal_after_the_act_began_names_the_reconcile_step`: C25 holds, at exit 0;
+    - `apply::rows::a_failing_probe_refuses_that_pane_and_the_others_proceed`: exit 0 beside a refused step;
+    - `fake_herdr_test split_only` (4 tests).
+  - **Searched:**
+    - every user of `SplitOnly` and `set_placement` (`rows.rs:184`, `herdr_conformance_test.rs:95`, `fake_herdr_test.rs`);
+    - every test that runs the verb with a refused step and asserts exit 0;
+    - consumers of `profile apply` in `crates/*/src`, `scripts` and `plugins`: none;
+    - pins of `WORKSPACES`: none;
+    - for the active branches (#803, #831, #835, #839, #850, #647, #828, #832, #655), their changes to #853's files.
+      Only #835's docs overlap: #831's apply files are identical to `origin/main`, and #832's merged as #840.
