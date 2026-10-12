@@ -167,3 +167,48 @@ Run handoff directory `docs/handoffs/839` Â· branch `issue-839-implementation` Â
   - Clippy `-D warnings`, `scripts/lint.sh`, `scripts/changelog-check.sh origin/main`, `cargo machete`, `scripts/test-hooks.sh`, `docs_cli_test`, `docs_pane_control_test`, `wire_selftest`: all pass.
   - Eight production mutations, each failing its test (table in `handoff-T-green.md`), each restored.
   - Two evidence entries appended to `evidence.md`.
+
+## A, anti-duplication gate (Phase 7): 2026-10-12T09:55-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 6 `warn` findings (`docs/handoffs/839/handoff-A-dup.md`). The diff is
+  `4e691d9..8d3e7fa`; F's change set is `949115e..d480424`.
+  - **F extended every object the Reuse map named:**
+    - `say`'s prelude moved into `talk::admit`, and `query`'s send-and-wait moved into the one private `forward`;
+    - the hub's and the CLI's pane predicates were replaced by `holler_pane::gate`, and `first_refusal` is shared with
+      `FakeHub`;
+    - `activity_refusal` was extracted from `check_idle`, and `tx_switch/plan.rs` is a move;
+    - `control_say.rs` is a whole move with one mapping, and `control_rebind.rs` follows `control_hold.rs`;
+    - `wiring/hub.rs` reuses `store.rs`'s four items and the accept rule;
+    - `FakeHub` runs over `FaultSwitch`, and `live/tests.rs` is a pure move.
+  - **The warns:**
+    1. `resolve_prompt_target`'s id branch copies `resolve_session`'s scan-and-classify scaffolding (and
+       `offline_advertises` copies `matches_offline`).
+    2. `FakeHub::why` and its messages copy the hub's `pane_state_refusal` words and the client's `session-held` text.
+    3. The fast-path order (hold, then pane gate) is spelled in both `talk::admit` and `interrupt`.
+    4. `wiring/hub.rs::failed` repeats `store.rs::call`'s failed-exchange closure.
+    5. `driven_support::id` re-types `fixture::session_id`, and the observed-pane fixture builder is written seven times.
+    6. The test kit's `hub.rs` is 317 lines against the brief's "under 250".
+- **Assumed:**
+  - A justified new object whose internals copy a neighbour's scaffolding is a `warn`, not a `block`. The rule
+    blocks a parallel path that the brief did not justify, and the brief justified `resolve_prompt_target` and
+    `FakeHub` in writing (D1, D10).
+  - Copying small test helpers across test binaries is the repo's own habit (`attach_mode_test::join_fresh` says so).
+    So those copies are warns, except where a shared helper was already reachable (`session_id`).
+- **Hedged:**
+  - I ran no build or test: T-green's full run (2721 passed, 0 failed) is the runtime evidence, and this gate reviews
+    structure.
+  - Finding 4's fix needs `store.rs` changed beyond visibility, which the brief ruled out for this story. So it is
+    offered as a follow-up.
+- **Evidence:**
+  - **Read:** the brief's decision text, "Where the code goes", "Reuse", Acceptance and Blast radius; `handoff-A.md`,
+    `handoff-F.md`, `handoff-T-green.md` and this journal.
+  - **The diff:** every production file of `4e691d9..8d3e7fa`, in full or as a diff. The neighbours: `live.rs`,
+    `roster.rs`'s forward-fills, `control_hold.rs`, `store.rs`, `say_cmd::run`, the body's `handle_answer` and
+    `busy_ages`, the test kit's `fixture.rs`, `pane_store.rs` and `harness.rs`, and the test support of the CLI and
+    the hub.
+  - **Commands:**
+    - `git diff`, `git show --stat` and `git merge-base`;
+    - `grep -rn` for the copies above, and `wc -l`;
+    - `diff -w` of the moved `live` tests against the removed block;
+    - a scan of the added lines for personal infrastructure names (none);
+    - the overlap of `origin/main`'s `6eff9cc` with this branch: five files, and no `Ports` literal.
