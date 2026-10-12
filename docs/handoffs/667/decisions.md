@@ -146,3 +146,39 @@
     - M6: `scenario.rs:474`
     - M7: `scratch/mod.rs:448`, "Herdr put the new pane ... at r1c2, not at r2c1"
   - **After each mutant:** `git diff --stat -- crates/` was empty.
+
+## A (Phase 7 anti-duplication; the script's Phase 8): 2026-10-11T20:32-06:00 (MDT)
+- **Decided:** PASS on `bda1069..367e921`, with no block, two low warns and one nit, none binding. The detail is in `handoff-A-dup.md`.
+  - **The diff extends the analogous objects the map named:**
+    - `Scratch` gained a second `impl` in `scratch/verbs.rs` holding the six moved helpers, plus `launch_argv`;
+    - the guards gained `check_herdr_session_args`, called from `Scratch::holler`;
+    - `launch_args` is the one argv builder;
+    - `Out` has one home, `out.rs`.
+  - **The new target builds only decision 2's "Built new":** `Applied`, `Still`, `assert_plan_agrees_with_show` and the A12 pin. F's diff is documentation only.
+  - **W-1:** `assert_on_binary_path` is a fourth PATH lookup, and it belongs in `scratch/mod.rs` for later scenarios to find.
+  - **W-2:** `plan.rs`'s hand-listed `Action`/`Outcome` variants are a follow-up for production `ALL` tables (`FindingKind::ALL`'s pattern).
+  - **W-3 (nit):** `Run::port` and the spec-only launch wrapper are each written twice in the new target.
+- **Assumed:**
+  - The moved helpers behave as before. I compared them by reading, not by running. T-red's opted-in #649 run (4 of 4 after the moves) is the runtime evidence.
+  - The trial merge with `origin/main` stands for the eventual merge. Only `CHANGELOG.md` conflicts (with #851).
+- **Hedged:**
+  - **W-2 is a warn, not a block.** The copy is forced by the brief's no-production-code scope, and it parses through production's own `as_str`.
+  - **W-3 is a nit.** Both wrappers go through the shared `launch_argv`, so no second argv builder exists.
+  - **My Phase-3 expectation 1** ("every operation ... is a `Scratch` method") is read in its intent. The target's `Run` methods are bound to each test's state and return the target's own `Applied`, so moving them onto the shared `Scratch` would invert the dependency.
+- **Evidence:**
+  - **Diffs and files read in full:**
+    - `git diff bda1069 HEAD` for every changed file under `crates/`, plus `CHANGELOG.md` and `docs/pane-control.md`;
+    - `scratch/verbs.rs`, `scratch/mod.rs` (195-540), and the target's `main.rs`, `plan.rs`, `pins.rs`, `scenario.rs` and `probe.rs`;
+    - `profile_verbs/apply/dry_run.rs`, `profile_verbs/apply/rig.rs` (400-640) and `tx_apply.rs` (76-225);
+    - all of this run's handoffs.
+  - **Searches:**
+    - `struct Out` (four before, four after);
+    - PATH lookups (`rig::on_path`, `tmux_on_path`, `wizard/proof.rs` `find_on_path`);
+    - readers of `show`'s `["comparison"]`;
+    - source-scanning tests;
+    - `pub const ALL` in `holler-pane/src`;
+    - the overlay's Phase-7 candidates in the new code (none);
+    - personal infrastructure names in the code diff (none).
+  - **Merge state:**
+    - `git merge-tree --write-tree HEAD origin/main`: conflict in `CHANGELOG.md` only;
+    - per-branch `git diff --name-only <merge-base> <branch>` over the shared scratch files: only #649's merged branch.
