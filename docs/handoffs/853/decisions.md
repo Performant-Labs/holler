@@ -466,3 +466,50 @@ Run handoff directory `docs/handoffs/853` Â· branch `issue-853-implementation` Â
     `fake_herdr_test` 25, `herdr_conformance_test` 22 and `plan_splits_test` 20.
   - Clippy `-D warnings`: exit 0. `lint.sh`: exit 0. `changelog-check`: ok. `cargo machete`: clean.
     `git diff --check`: clean.
+
+## A, anti-duplication gate (Phase 7), cycle 2, after S's REWORK: 2026-10-12T07:33-06:00 (MDT)
+
+- **Decided:** PASS, with 0 blocks and 6 warns (see handoff-A-dup.md, which replaces cycle 1's).
+  - This cycle's own edits are text only. F renumbered 6 cites and the two decisions, and applied S's advisory-2
+    sentence. T renumbered 7 test comments. Nothing was added, so nothing is duplicated.
+  - #853's code is byte-identical to cycle 1's, apart from 2 doc-comment lines.
+  - The merge of #835 overlaps #853 only in four docs, at different paragraphs. #835's test helpers (import's harness
+    detection, `LostChain`, `run_with_host`, the `pane list` chain pin) repeat none of #853's, and #835 adds no config
+    builder, refusal helper or exit decision.
+  - Against the new `main`, the PR diff is the same 23 files with the same line counts, except ADR-0021 (one line
+    fewer).
+  - Cycle 1's warn 6 (decision numbers) is resolved.
+  - **Warns:**
+    1. New, but from the amendment (`1f4ab40`), not this cycle: ADR-0021 `:765` cites "section 14" for `pane import`'s
+       dry-run rule, which is in section 13. It is a one-word doc fix, and no test pins it.
+    2. to 6. Cycle 1's warns 1 to 5, unchanged. #835 touched none of their files.
+- **Assumed:**
+  - The clean merge tree `c2941f8` (`git merge-tree --write-tree 21b29a0 4e691d9`) is the baseline for the merge's
+    content. Diffed against `0330fa0`, it differs only in `CHANGELOG.md`, `profile/apply.rs`, ADR-0021 and three
+    handoff files.
+  - `origin/main` is still `4e691d9`. I checked with `git ls-remote`, not a fetch.
+- **Hedged:**
+  - I ran no tests. No code changed this cycle, and T-green's full run on the merged tree (2,606 passed) covers it.
+  - Warn 1's fix is a doc edit that S's REWORK did not ask for. Whether it rides this PR is the next phase's call.
+- **Evidence:**
+  - **Read:**
+    - handoff-S, handoff-F and handoff-T-green (cycle 2), cycle 1's handoff-A-dup, and the brief;
+    - `profile/apply.rs` in full, and `tx_apply.rs:338-363`;
+    - ADR-0021 `:706-770` and `:1580-1610`, and its headings on the merged tree and on `b76f4d2`;
+    - the guide's `profile apply` reference (`:683-745`) and the merged cutover steps;
+    - #835's diffs of `pane/import.rs`, `pane_integration/observe.rs`, `ports.rs` (the method lines) and ADR-0003, and
+      its guide hunks.
+  - **Ran (read-only git and one check):**
+    - `git merge-tree --write-tree 21b29a0 4e691d9`, which gives `c2941f8`;
+    - `git diff c2941f8 0330fa0`, `git diff 0330fa0 c39699c`, and `git diff c1f7deb HEAD` over #853's code;
+    - `git diff --numstat`, before the merge against after;
+    - `git ls-remote origin refs/heads/main`;
+    - `scripts/changelog-check.sh`: ok.
+  - **Searched:**
+    - for new `fn`, `struct` and `const` definitions in both branches' test diffs;
+    - for Herdr-config builders and `label=RxC` parsers on the merged tree;
+    - for old-order phrases, and for "refused ... exit 0" statements, on the merged tree;
+    - with S's decision-number grep (no match), and for duplicate numbers in ADR-0021's list (none);
+    - for every "section 14" cite in ADR-0021, and for tests that pin `:765`'s text (none);
+    - for the overlay's Phase 7 candidates in the PR's added crate lines (none);
+    - for private-name patterns in this cycle's added lines (none).

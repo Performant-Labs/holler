@@ -1,57 +1,71 @@
-# Handoff-A-dup: Phase 7 - `profile apply` creates column 1 first, and a real run with a refused step exits 3  (anti-duplication gate)
+# Handoff-A-dup: Phase 7 - `profile apply` creates column 1 first, and a real run with a refused step exits 3  (anti-duplication gate, cycle 2)
 
-**Date:** 2026-10-12
+**Date:** 2026-10-12, 07:33 MDT
 **Branch:** issue-853-implementation
-**Diff base:** `ff981f1` (A's round-2 PASS; merge base with `main` is `b76f4d2`)   **Diff head:** `a8b3048` (T-green)
-**Reuse map:** `docs/handoffs/853/handoff-A.md`, "Reuse & Analogous-Feature map" (A-derived; no O survey in this automated run)
+**Diff base:** `c1f7deb` (cycle 1's A-dup PASS)   **Diff head:** `c39699c` (cycle 2's T-green)
+**Reuse map:** `docs/handoffs/853/handoff-A.md`, "Reuse & Analogous-Feature map" (unchanged; F's cycle-2 handoff names no new object)
 **Verdict:** PASS
+
+This replaces cycle 1's handoff, which is in git at `c1f7deb`. This cycle's own edits are measured against the clean merge
+tree `c2941f8` (`git merge-tree --write-tree 21b29a0 4e691d9`), so #835's merged content is kept apart from F's and T's
+edits.
 
 ## Summary
 
-PASS: 0 blocks, 6 warns. F extended every object the map named, and built no parallel path.
+PASS: 0 blocks, 6 warns (1 new, 5 carried over unchanged). Cycle 1's warn 6 is resolved. This cycle built no object, so
+it has nothing to duplicate, and the merge brought in nothing that #853 now duplicates.
 
-- **The order.** `cell_key` is still the only place the order lives, and it stays private. Its key is now
-  `(workspace, col != 1, row, col)`. There is no second order function and no public order API.
-- **The exit decision.** `refused()` sits beside `stopped()`. It reuses the details `reconciled()` already built, plus
-  `quoted` and `ErrorCode::from`. `reconcile_step` is still called only from `reconciled()`. The verb holds no exit
-  table, and the 3 comes from `class_of`. `tx_apply::Step` gets no new field.
-- **The fake.** `check_split` is tightened in place, using two private helpers on the fake's private `Workspace`
-  (`last_row`, `end_of`). There is no new double. The test kit's `Cargo.toml` is unchanged, and the adapter's
-  `Cargo.toml` change is a comment only.
-  - The fake's rule restates the planner's rule on purpose: the brief's Acceptance 2 asks for it, and ADR-0021
-    section 5 bars the test kit from depending on the adapter.
-  - `the_split_only_fake_accepts_a_cell_exactly_when_the_planner_plans_it` ties the two together over every grid with
-    no hole, up to 3 by 3. That makes the copy a reviewed decision, not drift.
-- **T's tests.**
-  - There is one refused-form helper in `profile_verbs`: `assert_refused`, `Refusal` and `assert_carries` in
-    `refused.rs`. It is `pub(crate)`, built on `envelope_of`, and called from 8 tests.
-  - C25 was moved out of `rows.rs`, not copied.
-  - The cross-check reuses `plan_splits_test.rs`'s `map_of` and `target`. `order.rs`'s `spec_in` builds on `new_spec`.
+- **This cycle's own edits are text only.** On top of the clean merge tree:
+  - F renumbered 6 cites: `profile/apply.rs:12` and `:150`, ADR-0021 `:742`, `:744` and `:860`, and `CHANGELOG.md:615`.
+    F also renumbered the decisions `30.` and `31.` to `32.` and `33.`, removed the blank line the merge left in the
+    list, and applied S's advisory-2 sentence at ADR-0021 `:713`.
+  - T renumbered 7 test comments: `order.rs` three times, `refused.rs` three times, and the scenario's `plan.rs` once.
+  - No function, type, helper, flag or test was added or renamed.
+- **#853's code is byte-identical to what cycle 1 passed.** `git diff c1f7deb HEAD` over `profile/`, `tx_apply.rs`,
+  `tx_apply/`, the test kit and the adapter shows only the 2 doc-comment lines in `profile/apply.rs`. `cell_key` is
+  still the only order function, and it is still private. `refused()` still sits beside `stopped()`, and `check_split`
+  is still tightened in place.
+- **The merge (#835, `4e691d9`) and #853 do not overlap in code.**
+  - Both touch only four docs, and in different paragraphs (I compared the hunks). #835's merged version does not touch
+    `profile_verbs/apply/rig.rs`, which the brief expected from the parked branch.
+  - #835's new test helpers serve `pane import` and `pane list`: import's harness detection in
+    `pane_verbs/import/harness.rs`, the `LostChain` host wrapper, `run_with_host`, and `pane_integration/observe.rs`'s
+    `list_over_the_chain`, `unmanaged` and `text_row`. None repeats one of #853's (`assert_refused`, `Refusal`,
+    `assert_carries`, `spec_in`, `assert_refused_run`, `listed`, `workspace_extents`, `split_only_fake`, `grids_up_to`,
+    `fake_spec`), and none could replace one.
+  - #835 adds no Herdr-config builder, no refusal-form helper and no exit decision. Its only CLI change near this code
+    refuses `--adopt-claude-code` as `usage`, through the existing `not_implemented_message`.
+  - #835 made `HerdrPort::observe_pane` required and left `ensure_pane` alone, the method #853's docs name.
+- **Against the new `main`, the PR diff is #853's alone.** It covers the same 23 files outside `docs/handoffs/`, with
+  the same per-file line counts as before the merge, except ADR-0021: 58 lines added instead of 59 (the blank line).
 - **No drift in rework.**
-  - No new public item in production code.
-  - No wire, protocol or golden-file change.
-  - ADR-0021, ADR-0003 and the guide change in the same branch.
-  - Every touched source file is under 800 lines. The largest is `rig.rs` at 776, and only 4 of its lines changed.
-  - None of the overlay's Phase 7 candidates (token store, `Lockout`, `Roster`, `log`, `Hub`/`Body`/`mint_token`/
-    `join`/`wait_for`/`StateDir`) is touched or copied.
-
-The warns are small repeats on the test side, plus one merge-order carry-over (warn 6), which the merging agent needs
-to know about.
+  - ADR-0021's decisions run 1 to 33, each once: 30 and 31 are #835's, 32 and 33 are #853's.
+  - Its section headings did not move, so every section cite points where it did before the merge.
+  - The guide's `profile apply` reference and #835's cutover text do not contradict each other.
+  - The CHANGELOG has one `[Unreleased]`, with #835 under Enhancements and #853 under Bug Fixes.
+  - No wire, golden or `holler-proto` change.
+  - No touched file is over 800 lines. The largest is `rig.rs` at 776, and this cycle does not touch it.
+  - None of the overlay's Phase 7 candidates appears in the PR's added lines, and this cycle's added lines hold no
+    personal infrastructure name.
 
 ## Findings
 
 | # | Severity | File:line | Finding | Suggested fix |
 |---|---|---|---|---|
-| 1 | warn | `crates/holler-cli/tests/pane_integration/scratch/mod.rs:102` | `workspace_extents()` is a second parser of the `label=RxC` grammar. The rig passes the same `WORKSPACES` constant to the binary as `HOLLER_HERDR_WORKSPACES` (`:263`), and the binary parses it with `holler_cli::pane::wiring::env::herdr_config`. That function is public and already called from tests (`pane_integration/env.rs:118`), and it returns the same `HerdrConfig` type. So `herdr_snapshot` (`:498`) builds its Herdr config one way and the binary under test builds it another. This is not a block: the brief said "parse it from `WORKSPACES`", and #649's code already parsed the labels locally. | Build `herdr_snapshot`'s config with `env::herdr_config`, over a lookup that answers the scratch session, socket and `WORKSPACES`, then drop `workspace_extents()`. This can be a quick in-PR fold or a follow-up. |
-| 2 | warn | `crates/holler-cli/tests/profile_apply_scenario/plan.rs:203` | `assert_refused_run` restates the JSON half of `assert_refused` (`profile_verbs/apply/refused.rs:37`): exit 3, `data` null, the first refused step's code, and the head `apply refused <N> step(s): ...; <M> other step(s) ran`. The map called for one refused-form helper, and there are now two, one per test binary. Accepted: the `profile_apply_scenario` binary includes only `support`, `pane_integration/out.rs` and `scratch` by `#[path]`, and `refused.rs` depends on the fake `Rig`. #667 set this pattern: `assert_plan_agrees_with_show` mirrors the fakes' `a_dry_run_and_profile_show_agree` in the same `plan.rs`. Each binary defines its helper once, and no test copies it. | No action. If the head form changes, update both helpers. |
-| 3 | warn | `crates/holler-cli/tests/profile_apply_scenario/grid.rs:30,76-86` | `listed()` and the `recorded` list repeat the projection that `Scratch::assert_end_state` computes inline (`scratch/verbs.rs:105-120`): Herdr's snapshot as `(pane id, cell)` for some workspaces, and the records read the same way. The equality at `:86` is the same claim `assert_end_state` makes at `:98`. This is not a parallel path: the test needs the reading at three points (empty, then after each apply), and `assert_end_state` does not expose it. | Optional: add a `Scratch::herdr_cells(workspaces)` accessor and use it in both places. |
-| 4 | warn | `crates/holler-cli/tests/profile_verbs/apply/rows.rs:189-194` | In the row-a test (`:174`), the `seed` closure repeats the fixture already built at `:175-177`. The sibling `a_failing_probe_...` (`:286-301`) defines `seed` once and then calls `let rig = seed()`. | Fold it the same way, and read `pane-a`'s record from the seeded rig. |
-| 5 | warn | `crates/holler-adapter-herdr/tests/plan_splits_test.rs:394` | `fake_spec` is the third `HerdrSpec` builder written per file in the adapter's tests (the others are `adapter_test.rs:62` and `adapter_messages_test.rs:32`). `tests/common/mod.rs` has `cell` but no spec builder. Writing it per file is the crate's existing pattern. | No action now. Later, a `common::spec(workspace, row, col)` could replace all three. |
-| 6 | warn | `docs/adr/ADR-0021.md:1538,1544` | Carried over from handoff-A warn 9, with a larger scope. #835's PR #860 is open, has passed S and is mergeable, and it also adds ADR-0021 decisions **30** and **31**. #853 now cites its two numbers in 11 places: ADR-0021 `:739`, `:741` and `:857`, `CHANGELOG.md:599`, `profile/apply.rs:12,150`, `order.rs:2,28,95`, `refused.rs:2` and `plan.rs:198`. #835 cites its numbers nowhere outside the list itself. | Land #853 first (it gates the release) and have #835 renumber its two headings. If #860 merges first, renumber all 11 cites here and re-run the `docs_*` tests. |
+| 1 | warn | `docs/adr/ADR-0021.md:765` | New in this review, but older than this cycle: the amendment (`1f4ab40`) cites "(section 14)" for "`pane import` exits 0 on a dry run and refuses only its real run". Section 14 is "Unmanaged panes". The rule is in section 13, "Migration from the launcher's files" (`:1088-1093`), and section 9's `pane import` row holds the codes (`:854`). Every other "section 14" cite in the ADR means unmanaged panes or `observe_pane`. The merge did not cause it: the headings are the same on `b76f4d2` and on the merged tree. A's two rounds, cycle 1's A-dup and S all passed it. It is a cross-reference slip, not duplication or drift. | Change "section 14" to "section 13" at `:765`. No test or script pins this text. It is one word in a doc, so it can ride the PR, or go to a follow-up if S's "nothing else has changed" is held to strictly. |
+| 2 | warn | `crates/holler-cli/tests/pane_integration/scratch/mod.rs:102` | Cycle 1's warn 1, unchanged: `workspace_extents()` is a second `label=RxC` parser beside the public `wiring::env::herdr_config`. #835 touched neither file. | As in cycle 1: an optional fold, or a follow-up. |
+| 3 | warn | `crates/holler-cli/tests/profile_apply_scenario/plan.rs:203` | Cycle 1's warn 2, unchanged: `assert_refused_run` is the scratch binary's twin of `assert_refused`. Accepted, because of the binary boundary and #667's precedent. Its doc comment now cites decision 33. | No action. |
+| 4 | warn | `crates/holler-cli/tests/profile_apply_scenario/grid.rs:30,76-86` | Cycle 1's warn 3, unchanged: `listed()` repeats `assert_end_state`'s projection. | Optional: a `Scratch::herdr_cells` accessor. |
+| 5 | warn | `crates/holler-cli/tests/profile_verbs/apply/rows.rs:189-194` | Cycle 1's warn 4, unchanged: the row-a test's `seed` repeats its own fixture. | Optional fold. |
+| 6 | warn | `crates/holler-adapter-herdr/tests/plan_splits_test.rs:394` | Cycle 1's warn 5, unchanged: `fake_spec` is the third per-file `HerdrSpec` builder. #835 added none. | No action now. |
 
-No duplication of production code, and the extensions are clean.
+**Resolved:** cycle 1's warn 6, the decision numbers that collided with #835's. The list reads 1 to 33, each once.
+All 13 of S's cites name 32 or 33, and S's grep finds nothing.
+
+No duplication. The cycle's edits are text, and the merge is clean.
 
 ## Notes for F
 
-None required: the verdict is PASS. Warns 1, 3 and 4 are optional test-side folds, which T can make before the PR or
-file as follow-ups. Warn 6 is for whoever merges.
+None required: the verdict is PASS.
+- Warn 1 is a one-word doc fix. Whoever runs the next cycle or the PR can take it.
+- Warns 2 to 6 carry over as cycle 1 left them. S's advisory 5 already lists warns 2, 4 and 5 as follow-ups.
