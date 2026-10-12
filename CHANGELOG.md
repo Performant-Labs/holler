@@ -8,6 +8,11 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
+  `holler-pane` (`holler_pane::bounded`) instead of four private copies
+  ([#696](https://github.com/Performant-Labs/holler/issues/696), epic
+  [#633](https://github.com/Performant-Labs/holler/issues/633)). Nothing a user sees changes: each keeps its own output
+  caps, stderr handling, kill reach, poll and error texts. [ADR 0021](docs/adr/ADR-0021.md) section 5 records it.
 - Pane control, the setup wizard (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the wizard
   (`/herdr-setup`) builds its Herdr workspace out of Holler registry panes
   ([#803](https://github.com/Performant-Labs/holler/issues/803)), a grid of OpenCode and Claude Code panes with one or

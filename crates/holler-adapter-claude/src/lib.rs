@@ -51,7 +51,6 @@
 
 mod agents;
 mod argv;
-mod exec;
 mod inbox;
 mod seams;
 

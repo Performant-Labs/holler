@@ -10,7 +10,8 @@
 //! inheritance. Nothing is added to it: a tmux client's environment reaches every pane
 //! started after it. Each port call has one deadline, the configured bound (I5, default
 //! 10 s), and every subprocess it spawns gets the time left. A subprocess still running
-//! at the deadline is killed and reaped, and the call is `timeout`.
+//! at the deadline is killed and reaped, and the call is `timeout`. Every subprocess, tmux
+//! and `kill` alike, is run by the shared bounded runner of `holler-pane` (#696).
 //!
 //! **Exact targets.** `has-session` takes `-t =NAME`, and every other command that names
 //! the session takes `-t =NAME:`. tmux matches a bare name by prefix, and `=NAME` on a

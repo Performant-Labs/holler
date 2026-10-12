@@ -2,8 +2,8 @@
 //! socket, and `claude auth status`. Each returns the raw I/O; the adapter parses it, so the
 //! hermetic tests fake exactly these.
 //!
-//! Both `claude` runs go through [`crate::exec::capture`], never a shell, each within its own
-//! bound, with every variable that changes the login removed from their environment
+//! Both `claude` runs go through [`capture`], over the shared bounded runner of `holler-pane`
+//! (#696), never a shell, each within its own bound, with every variable that changes the login removed from their environment
 //! (`HarnessKind::login_variables`), so `auth status` answers for the login the panes' processes
 //! use, which their argv's `env -u` gives them. Nothing either prints is logged; only the
 //! adapter's parse reads it, and only what it needs.
@@ -12,13 +12,13 @@ use std::io::{Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
+use holler_pane::bounded::{self, Capture, KillScope, Over, RunError, Spec};
 use holler_pane::pane::HarnessKind;
 use holler_pane::PaneError;
 
-use crate::exec::capture;
 use crate::{AgentsList, InboxWrite, LoginCheck};
 
 /// The `op` of a `claude agents --json` run that timed out.
@@ -71,6 +71,55 @@ impl LoginCheck for ClaudeLogin {
             });
         }
         Ok(ran.stdout)
+    }
+}
+
+/// How `claude` is run: stdin null, stdout kept up to 1 MiB (a fleet's `agents --json` is far
+/// below it) with the rest read and dropped, stderr discarded and never quoted (it could carry
+/// anything the program prints), the child alone killed and reaped at the deadline, and its
+/// exit polled every 5 ms.
+const CLAUDE_RUN: Spec = Spec {
+    stdout: Capture::Keep {
+        cap: 1 << 20,
+        over: Over::Truncate,
+    },
+    stderr: Capture::Discard,
+    kill: KillScope::Child,
+    poll: Duration::from_millis(5),
+};
+
+/// A `claude` run that ended: its status, and its stdout, decoded lossily.
+struct Ran {
+    status: ExitStatus,
+    stdout: String,
+}
+
+/// Run `command` to its exit before `deadline`, under [`CLAUDE_RUN`]. Nothing is started once
+/// `deadline` has passed; that, a child still running at `deadline`, and a stdout still open at
+/// `deadline` (something the child started holds it) are `timeout` with `op`. A program that
+/// cannot be run is `unavailable`, naming it and none of its arguments.
+fn capture(mut command: Command, op: &str, deadline: Instant) -> Result<Ran, PaneError> {
+    let program = Path::new(command.get_program()).display().to_string();
+    let ran = bounded::run(&mut command, &CLAUDE_RUN, deadline).map_err(|error| match error {
+        RunError::Expired => PaneError::Timeout { op: op.to_owned() },
+        RunError::Spawn(error) => cannot("run", &program, &error),
+        RunError::ReaderFailed(error) => cannot("read the output of", &program, &error),
+        RunError::WaitFailed(error) => cannot("wait for", &program, &error),
+        // `Overflow` cannot happen: stdout is truncated, never failed.
+        RunError::OutputLost | RunError::Overflow => PaneError::Unavailable {
+            what: format!("cannot read the output of {program}: it was lost"),
+        },
+    })?;
+    Ok(Ran {
+        status: ran.status,
+        stdout: String::from_utf8_lossy(&ran.stdout).into_owned(),
+    })
+}
+
+/// `unavailable`: the adapter cannot do `doing` with `program`, for `error` (its kind alone).
+fn cannot(doing: &str, program: &str, error: &std::io::Error) -> PaneError {
+    PaneError::Unavailable {
+        what: format!("cannot {doing} {program}: {}", error.kind()),
     }
 }
 

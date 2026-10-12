@@ -16,13 +16,19 @@
 //!   live attach to that server whose title shows the session; otherwise the answer is
 //!   `timeout`.
 //! - **No keystroke is ever sent** (I4): the TUI is switched only over the API.
+//! - **Every tmux call is run by the shared bounded runner** of `holler-pane` (#696), never
+//!   through a shell, as [`TMUX_RUN`] says; [`capture`] maps its answer to this adapter's
+//!   errors, naming the program and none of its arguments.
 
+use std::fmt::Display;
+use std::path::Path;
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
+use holler_pane::bounded::{self, Capture, KillScope, Over, RunError, Spec};
 use holler_pane::{PaneError, PaneId, PaneName};
 use serde_json::{json, Value};
 
-use crate::exec;
 use crate::tui::{self, Query, Refusal, TitleShows};
 use crate::{deadline_after, json_of, known, one_line, poll, session_path, session_reply};
 use crate::{string_at, Call, OpenCodeHarness, TmuxConfig, GET_SESSION, SELECT};
@@ -214,7 +220,7 @@ impl<'a> Tui<'a> {
     /// its pane or the server is missing. Any other failure is `unavailable` with tmux's
     /// first stderr line, never one of the call's arguments.
     fn run(&self, args: &[String], until: Instant) -> Result<Option<String>, PaneError> {
-        let ran = exec::capture(tui::tmux_command(self.tmux, args), self.op, until)?;
+        let ran = capture(tui::tmux_command(self.tmux, args), self.op, until)?;
         if ran.status.success() {
             return Ok(Some(ran.stdout));
         }
@@ -236,5 +242,71 @@ impl<'a> Tui<'a> {
         PaneError::Unavailable {
             what: format!("no TUI in pane {}", self.pane),
         }
+    }
+}
+
+/// How a tmux call is run: stdin null, each output kept up to 64 KiB with the rest read and
+/// dropped (so a child that writes more than a pipe holds cannot block), the child alone
+/// killed and reaped at the deadline, and its exit polled every 5 ms.
+const TMUX_RUN: Spec = Spec {
+    stdout: KEPT,
+    stderr: KEPT,
+    kill: KillScope::Child,
+    poll: Duration::from_millis(5),
+};
+
+/// One output of a tmux call: its first 64 KiB.
+const KEPT: Capture = Capture::Keep {
+    cap: 64 << 10,
+    over: Over::Truncate,
+};
+
+/// A tmux call that ran to its exit: its status, and what it printed, decoded lossily.
+struct Ran {
+    status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+impl Ran {
+    /// Why a call that failed failed, on one line: its first non-empty stderr line, or its
+    /// exit status when it printed nothing there.
+    fn reason(&self) -> String {
+        self.stderr
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map_or_else(|| self.status.to_string(), one_line)
+    }
+}
+
+/// Run `command` to its exit before `deadline`, under [`TMUX_RUN`]. Nothing is started once
+/// `deadline` has passed; that, a child still running at `deadline`, and outputs still open
+/// at `deadline` (something the child started holds them) are `timeout` with `op`. A program
+/// that cannot be run is `unavailable`, naming it and none of its arguments.
+fn capture(mut command: Command, op: &str, deadline: Instant) -> Result<Ran, PaneError> {
+    let program = Path::new(command.get_program()).display().to_string();
+    let ran = bounded::run(&mut command, &TMUX_RUN, deadline).map_err(|error| match error {
+        RunError::Expired => PaneError::Timeout { op: op.to_owned() },
+        RunError::Spawn(error) => cannot("run", &program, &error),
+        RunError::ReaderFailed(error) => cannot("read the output of", &program, &error),
+        RunError::WaitFailed(error) => cannot("wait for", &program, &error),
+        // `Overflow` cannot happen: the outputs are truncated, never failed.
+        RunError::OutputLost | RunError::Overflow => PaneError::Unavailable {
+            what: format!("cannot read the output of {program}: it was lost"),
+        },
+    })?;
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    Ok(Ran {
+        status: ran.status,
+        stdout: text(&ran.stdout),
+        stderr: text(&ran.stderr),
+    })
+}
+
+/// `unavailable`: the adapter cannot do `doing` with `program`, for `error`.
+fn cannot(doing: &str, program: &str, error: &dyn Display) -> PaneError {
+    PaneError::Unavailable {
+        what: one_line(&format!("cannot {doing} {program}: {error}")),
     }
 }

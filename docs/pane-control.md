@@ -1076,6 +1076,5 @@ Deferred, so not documented here as existing; none of them is available:
   `--adopt-claude-code` is refused);
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
-- the shared subprocess runner of the adapters and the probe (#696);
 - recreating the Herdr workspace from the stored profiles (#666);
 - a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet).

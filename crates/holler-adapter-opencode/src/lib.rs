@@ -146,7 +146,6 @@ use crate::http::{HttpError, Reply};
 
 mod agents;
 mod attach;
-mod exec;
 pub mod http;
 mod prompt;
 mod server;
