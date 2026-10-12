@@ -1,3 +1,94 @@
+# Handoff-T-green (rework 1): after S REWORK and F rework 1 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
+
+**Date:** 2026-10-11 (22:55 MDT)
+**Branch:** `issue-665-implementation`, on `ccbcbc5` (F rework 1)
+**Issue:** #665
+**Handoff-F reviewed:** `docs/handoffs/665/handoff-F.md`, section "Handoff-F (rework 1)"
+**Handoff-S:** `docs/handoffs/665/handoff-S.md` (REWORK: items 1 and 2 production, items 3 and 4 test-only)
+**Handoff-T-red:** `docs/handoffs/665/handoff-T-red.md`
+
+The first round's handoff follows this section, unchanged.
+
+## Test repair (T's items)
+
+F changed no test. T made these changes; no production file was changed in this phase.
+
+1. **S item 1 (three pinned strings).** `1 specs` is now `1 spec`, matching F's `count(n, "spec")`:
+   - `crates/holler-cli/tests/profile_verbs/import.rs`, in two tests: `import_creates_a_detached_profile_at_generation_one_in_both_formats` and `import_name_overrides_the_files_name_and_is_parsed`;
+   - `crates/holler-cli/tests/profile_verbs/export.rs`: `export_out_writes_the_file_at_0600_and_replaces_one_that_exists`.
+2. **S item 2(b) pinned** in `crates/holler-cli/tests/profile_verbs/import/refusals.rs`:
+   - `a_bad_position_is_its_grid_code` gains three cases, each refused with its code at exit 3, writing nothing, with `CANARY` never printed: a text position `r1<CANARY>` (`grid-ambiguous`), an object form whose `pos` label is `CANARY` (`grid-ambiguous`), and an object zero cell (`grid-out-of-range`).
+   - New test `a_refused_position_is_named_by_its_spec_number_not_quoted`: a two-spec document with the canary position in spec 2. It is `grid-ambiguous`, never prints the canary, and both formats' message contains `herdr.grid of spec 2` (the shared `assert_message_contains` helper).
+3. **S item 3 (spec-level `usage` redaction).** `a_document_of_another_shape_is_usage_and_never_quoted` gains two members of the wrong type holding `CANARY`, which serde's own message would quote: `context.soft = CANARY` (`invalid type: string ..., expected u32`) and `role = CANARY` (`unknown variant ...`). Each is `usage`, exit 2, never printed.
+4. **S item 4 (`updated` is the rename's stamp).**
+   - H1 (`crates/holler-hub/tests/profile_rename_test.rs`, `the_record_moves_to_the_new_name_and_the_reply_is_the_stored_record`) now asserts `stored.updated == the at of "Day Shift"'s one log entry`. Before the rename it waits, on the observed condition `now_millis() > old.updated` (the hub's own clock function, reused from `holler_proto::clock`), so the check is deterministic: a rename that kept the old `updated` can never equal its new stamp. This is a condition wait, not a fixed sleep, and lasts at most about one millisecond.
+   - Conformance case 23 (`crates/holler-pane-testkit/src/conformance/profile_store/rename.rs`) replaces its `>=` check with equality: `renamed.updated` equals the `at` of the new name's one log entry. The case's doc comment says so.
+5. **Optional item 5, taken:** `refusals.rs`'s module doc now states the narrower rule, "never quotes what a spec holds (a bad position or member is named by the spec's number)". S advisory 3 (the process test's name) is not taken; it is a naming nit and coverage holds.
+
+All five touched files pass `rustfmt --edition 2021 --check`. Sizes: `refusals.rs` 183 lines, `profile_rename_test.rs` 478, `rename.rs` 292.
+
+## GREEN confirmation
+
+| Target | Command | Result |
+|---|---|---|
+| CLI verbs | `cargo test -p holler-cli --test profile_verbs` | **113 passed**, 0 failed (F's 109 + the 3 repaired pins + 1 new test) |
+| Hub rename | `cargo test -p holler-hub --test profile_rename_test` | 10 passed |
+| Conformance on the fake | `cargo test -p holler-pane-testkit --test profile_store_conformance_test` | 12 passed |
+| Conformance on `ProfileState` | `cargo test -p holler-hub --test profile_registry_test` | 12 passed |
+| Conformance on the wire | `pane_integration` :: `clients::the_profile_client_passes_the_profile_store_conformance_suite`, in the workspace run | ok |
+
+**Spot checks: each new assertion fails when the behaviour is removed.** Each mutation was applied to a copy-saved source file, run, and restored from the copy; `git diff -- crates/*/src` shows only T's conformance case edit afterwards.
+1. **No grid redaction** (`spec_refused`'s two grid arms disabled with `if false`): `a_bad_position_is_its_grid_code` and `a_refused_position_is_named_by_its_spec_number_not_quoted` fail with `the file's content was printed: error: ambiguous grid position: "r1t665-import-canary-..."`.
+2. **No `usage` redaction** (`spec_refused`'s `Usage` arm disabled): `a_document_of_another_shape_is_usage_and_never_quoted` fails with `invalid type: string "t665-import-canary-...", expected u32`. Before this round, removing the arm left every test green (S item 3).
+3. **A rename that keeps the old `updated`** (both the hub's `renamed` and the fake's `move_record` set `updated: stored.updated`): H1 fails, 3 runs of 3, with "`updated` is the rename's one stamp". Case 23 still passes on the fake (its clock is fixed at 0, so a kept `updated` equals the stamp) and on `ProfileState` (create and rename in the same millisecond). Case 23 pins the invariant on every runner; H1 is the deterministic control. `evidence.md` records why.
+
+## Tier 1 results
+
+| Check | Command | Expected | Actual | Result |
+|---|---|---|---|---|
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 (size warnings on other crates only) | PASS |
+| CHANGELOG | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | PASS |
+| Workspace tests | `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load` (finished 22:49 MDT) | all pass | 154 targets, **2,435 passed, 0 failed, 32 ignored**, exit 0 | PASS |
+| Docs CLI | `docs_cli_test`, in the workspace run | pass | pass | PASS |
+| Canary | `wire_selftest`, in the workspace run | pass | pass | PASS |
+| Unused deps | `cargo machete` | none | none | PASS |
+
+**Cross-check with F.** F reported `profile_verbs` 109 passed and 3 failed (the three `1 specs` pins), and the workspace 2,431 passed, 3 failed. Here the same three pass after the repair and one test is added: 2,431 + 3 + 1 = 2,435. No discrepancy. #693 did not recur.
+
+## Tier 2 results
+
+| Check | Method | Result |
+|---|---|---|
+| Coverage of S's REWORK | Items 1 to 4 each have a test that fails without the behaviour (spot checks 1 to 3; item 1 by the three exact strings) | PASS |
+| Test quality | The new cases sit in the existing refusal tests at the in-process verb tier, the cheapest with the real import path. One new test, because spec numbering needs a two-spec document and a message check that `refused` does not make. H1's wait is a condition wait on the hub's own clock function, not a sleep. No duplicate. | PASS |
+| Type safety | Clippy clean; no new `#[allow]` in this round | PASS |
+| Error handling | Every redaction path of `spec_refused` (two grid codes, `usage`) is now pinned with a canary | PASS |
+| Security | The canary is asserted absent from text out/err and JSON out/err in every new case | PASS |
+| Data integrity / migration | Unchanged from round 1 | PASS |
+| File size | Largest touched test file 478 lines | PASS |
+| Evidence appendix | Three entries added under "T rework" in `evidence.md` (the hub's clock, the one-stamp rule, the fake's fixed clock), each excerpt diffed against source: 0 mismatches | PASS |
+| Browser / Playwright | N/A (no UI surface) | N/A |
+
+## Acceptance criteria status
+
+Unchanged from round 1 (below), with S's two PARTIAL rows now met:
+- **1. The record:** PASS. H1 now pins `updated` as the stamp (spot check 3); case 23 pins the same invariant on all three runners.
+- **CLI `profile import`:** PASS. The refused value is never printed, now pinned for the grid codes (text and `pos` label) and for spec-level `usage` (spot checks 1 and 2), and the count is `1 spec`.
+- **CLI `profile export`:** PASS. The count is `1 spec`.
+
+## Blocking issues
+
+None.
+
+## Advisory notes
+
+- Round 1's advisories still apply: the `unavailable` file-error half is unpinned (root in CI), and #693 can flake CI.
+- S advisory 1 (the conflict with `origin/main`) is for the rebase before merge; re-run the workspace suite after it.
+- S advisory 3 (`rename_on_an_empty_hub_reaches_the_real_handler` overstates its name) is left; coverage holds through the round-trip test.
+
+---
+
 # Handoff-T-green: Phase 6 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
 
 **Date:** 2026-10-11 (21:40 MDT)

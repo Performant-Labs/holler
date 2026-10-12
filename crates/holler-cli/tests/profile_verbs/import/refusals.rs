@@ -1,12 +1,15 @@
 //! What `holler profile import` refuses (story #665, D8): each refusal answers its code in
-//! both formats, writes nothing, and never prints what the file holds. The typed guards do
-//! the validation (`EnvVarName`, `Argv`, `GridPos`), so there is no second scan of the text.
+//! both formats, writes nothing, and never quotes what a spec holds (a bad position or member
+//! is named by the spec's number). The typed guards do the validation (`EnvVarName`, `Argv`,
+//! `GridPos`), so there is no second scan of the text.
 
 use serde_json::{json, Value};
 
 use super::{assert_no_profile_write, full_document, path_text, write_document, write_file};
 use crate::export::FULL_DOCUMENT;
-use crate::list::rig::{assert_failure, profile, run_both_with, Both, Rig};
+use crate::list::rig::{
+    assert_failure, assert_message_contains, profile, run_both_with, Both, Rig,
+};
 
 /// A made-up secret: it must never appear in any output.
 const CANARY: &str = "t665-import-canary-not-a-secret-51c7";
@@ -90,6 +93,32 @@ fn a_bad_position_is_its_grid_code() {
     refused(empty, &ambiguous, &[], "grid-ambiguous", 3);
     let out_of_range = with_spec(|spec| spec["herdr"]["grid"] = json!("r0c1"));
     refused(empty, &out_of_range, &[], "grid-out-of-range", 3);
+    // `GridPos` quotes a refused text and a disagreeing `pos` label; import must not.
+    let quoted_text = with_spec(|spec| spec["herdr"]["grid"] = json!(format!("r1{CANARY}")));
+    refused(empty, &quoted_text, &[], "grid-ambiguous", 3);
+    let label =
+        with_spec(|spec| spec["herdr"]["grid"] = json!({"row": 2, "col": 1, "pos": CANARY}));
+    refused(empty, &label, &[], "grid-ambiguous", 3);
+    let zero_cell = with_spec(|spec| spec["herdr"]["grid"] = json!({"row": 0, "col": 1}));
+    refused(empty, &zero_cell, &[], "grid-out-of-range", 3);
+}
+
+#[test]
+fn a_refused_position_is_named_by_its_spec_number_not_quoted() {
+    let mut document = full_document();
+    let mut second = document["panes"][0].clone();
+    second["pane"] = json!("demo-c1r1");
+    second["herdr"]["grid"] = json!(format!("r1{CANARY}"));
+    document["panes"].as_array_mut().unwrap().push(second);
+    let dir = tempfile::tempdir().unwrap();
+    let file = write_document(dir.path(), &document);
+    let ran = run_both_with(empty, &["profile", "import", &file], Rig::run);
+    assert_failure(&ran.both, "grid-ambiguous", 3);
+    assert_never_printed(&ran.both, CANARY);
+    assert_message_contains(&ran.both, "herdr.grid of spec 2");
+    for rig in ran.rigs() {
+        assert_no_profile_write(rig);
+    }
 }
 
 #[test]
@@ -120,7 +149,12 @@ fn a_document_of_another_shape_is_usage_and_never_quoted() {
     no_name.as_object_mut().unwrap().remove("name");
     let unknown_in_spec = with_spec(|spec| spec["colour"] = json!(CANARY));
     let record_field = with_spec(|spec| spec["generation"] = json!(3));
+    // A value of the wrong type, which serde's own message would quote.
+    let wrong_type = with_spec(|spec| spec["context"]["soft"] = json!(CANARY));
+    let unknown_variant = with_spec(|spec| spec["role"] = json!(CANARY));
     for document in [
+        wrong_type,
+        unknown_variant,
         unknown_top,
         wrong_format,
         newer,

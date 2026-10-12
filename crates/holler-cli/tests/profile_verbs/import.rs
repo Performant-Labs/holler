@@ -77,7 +77,7 @@ fn import_creates_a_detached_profile_at_generation_one_in_both_formats() {
     assert!(both.text.err.is_empty(), "{:?}", both.text);
     assert_eq!(
         both.text.out,
-        "imported profile Fleet (fleet): 1 specs, generation 1\n"
+        "imported profile Fleet (fleet): 1 spec, generation 1\n"
     );
     assert_eq!(
         both.envelope.data["profile"],
@@ -156,7 +156,7 @@ fn import_name_overrides_the_files_name_and_is_parsed() {
     );
     assert_eq!(
         ran.both.text.out,
-        "imported profile Fleet Copy (fleet-copy): 1 specs, generation 1\n"
+        "imported profile Fleet Copy (fleet-copy): 1 spec, generation 1\n"
     );
     for rig in ran.rigs() {
         assert!(stored(rig, "Fleet Copy").is_some());

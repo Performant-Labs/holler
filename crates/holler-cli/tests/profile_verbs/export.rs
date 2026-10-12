@@ -315,7 +315,7 @@ fn export_out_writes_the_file_at_0600_and_replaces_one_that_exists() {
     assert_eq!(both.text.code, 0, "{:?}", both.text);
     assert_eq!(
         both.text.out,
-        format!("exported profile Fleet (fleet) to {out_text}: 1 specs\n")
+        format!("exported profile Fleet (fleet) to {out_text}: 1 spec\n")
     );
     let data = &both.envelope.data;
     assert_eq!(data["out"], json!(out_text));

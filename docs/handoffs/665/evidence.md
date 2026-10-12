@@ -438,3 +438,41 @@ Written by F (Phase 6 of the script, implement). Line numbers are the worktree's
   >                 message: format!("invalid profile name {}: {rule}", excerpt(text)),
   >             }),
   > ```
+
+## T rework (Phase 7, after S REWORK items 3 and 4)
+
+Facts from unchanged code that T's repaired tests rely on. Each excerpt was copied by T from source.
+
+- **Fact:** the hub's profile registry stamps by the wall clock, in milliseconds since the Unix epoch. H1 (`the_record_moves_to_the_new_name_and_the_reply_is_the_stored_record`) waits on the same function until it has passed the create's stamp, so a rename that kept the old `updated` cannot equal its own stamp.
+  **Source:** `crates/holler-proto/src/clock.rs:35-40`
+  **Verbatim excerpt:**
+  > ```rust
+  > pub fn now_millis() -> i64 {
+  >     std::time::SystemTime::now()
+  >         .duration_since(std::time::UNIX_EPOCH)
+  >         .map(|d| d.as_millis() as i64)
+  >         .unwrap_or(0)
+  > }
+  > ```
+
+- **Fact:** a hub write's stamp is `now`, or later if the entry already holds a later `at` or `updated`; it is the log entry's `at` and the record's `updated` alike. So "the record's `updated` equals the `at` of the new name's one entry" is the hub's own rule, which H1 and conformance case 23 assert.
+  **Source:** `crates/holler-hub/src/profile/entry.rs:172-178`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// record's `updated`. The one stamp is the log entry's `at`, the record's `updated`, and a
+  > /// create's `created`, so a log's `at` never decreases and a record's `updated` never goes
+  > /// backwards, even when the clock steps back.
+  > pub(crate) fn stamp(entry: Option<&ProfileEntry>, now: i64) -> i64 {
+  >     entry.map_or(now, |entry| {
+  >         let logged = entry.log.last().map_or(now, |last| last.at);
+  >         let updated = entry.profile().map_or(now, |record| record.updated);
+  > ```
+
+- **Fact:** the fake's clock is 0 unless a test sets it. Conformance case 23's `updated` check therefore holds on the fake but cannot tell a kept `updated` from a new stamp there; H1 is the control for that.
+  **Source:** `crates/holler-pane-testkit/src/profile_store.rs:91-93`
+  **Verbatim excerpt:**
+  > ```rust
+  > /// - The clock ([`FakeProfileStore::set_now`], 0 by default): a create stamps
+  > ///   `created` and `updated`, an update keeps `created` and stamps `updated`, and each
+  > ///   log entry's `at` is the time of its write.
+  > ```

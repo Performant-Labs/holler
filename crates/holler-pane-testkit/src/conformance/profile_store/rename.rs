@@ -31,8 +31,8 @@ const BETA_SHOUTED: &str = "DEMO-BETA";
 
 /// Case 23: a rename moves the record: `get` finds it under the new name, and under any
 /// spelling of the new slug, and no longer under the old one; it has the new name and slug,
-/// the generation + 1, the old `created` and the same specs, and the reply is the stored
-/// record.
+/// the generation + 1, the old `created`, the same specs and, as `updated`, the stamp of the
+/// new name's one log entry, and the reply is the stored record.
 pub(super) fn rename_moves_the_record(store: &dyn ProfileStore) -> Result<(), String> {
     let who = actor()?;
     let p = sample(ALPHA, &[C1, C2])?;
@@ -53,12 +53,12 @@ pub(super) fn rename_moves_the_record(store: &dyn ProfileStore) -> Result<(), St
             ..before.clone()
         },
     )?;
-    if renamed.updated < before.updated {
-        return Err(format!(
-            "the renamed record's `updated` ({}) is before the last write's ({})",
-            renamed.updated, before.updated
-        ));
-    }
+    // `updated` is the rename's one stamp: the `at` of the new name's one log entry.
+    expect_eq(
+        "the renamed record's `updated` and the `at` of the new name's one log entry",
+        Some(renamed.updated),
+        entries(store, &q)?.first().map(|entry| entry.at),
+    )?;
     for spelling in [BETA, BETA_SHOUTED] {
         expect_eq(
             &format!("get({spelling}) after the rename"),

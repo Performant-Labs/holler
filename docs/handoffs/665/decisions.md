@@ -208,3 +208,14 @@
   - **The control:** with the two new arms removed, the text position and the `pos` label both printed the canary. The arms were then restored.
   - **The workspace run:** 154 targets, 2,431 passed, 3 failed (the three pins), 32 ignored.
   - **The evidence check:** a script checked the eight new `evidence.md` entries against their cited lines: 0 mismatches.
+
+## T (Phase 7, rework 1, after S REWORK and F rework 1): 2026-10-11 22:55 MDT
+- **Decided:**
+  - Updated the three `1 specs` pins to `1 spec` (S item 1, F's `count`).
+  - Pinned F's option (b) with `CANARY` in a text position, a `pos` label and a zero cell, plus one new two-spec test that the message names `herdr.grid of spec 2`.
+  - Pinned spec-level `usage` redaction with two wrong-type members holding `CANARY` (S item 3).
+  - Pinned `updated` as the rename's one stamp in H1 and conformance case 23 (S item 4). H1 waits on `now_millis() > old.updated` first, so the check is deterministic.
+  - Narrowed `refusals.rs`'s module doc to the rule now stated (F's optional item 5).
+- **Assumed:** a condition wait on the hub's own clock function (at most about 1 ms) is within the no-blind-sleeps rule, since it observes a condition rather than sleeping for a duration.
+- **Hedged:** case 23's equality cannot catch a kept `updated` on the fake (fixed clock) or reliably on `ProfileState`; H1 is the deterministic control, and `evidence.md` records why.
+- **Evidence:** `profile_verbs` 113 passed; workspace 2,435 passed, 0 failed, 32 ignored; lint, changelog-check, clippy `-D warnings` and machete clean; three mutation spot checks each fail the new assertions and were restored from saved copies.

@@ -21,6 +21,7 @@ use holler_pane::{
     Actor, Pane, PaneError, PaneStore, Profile, ProfileChange, ProfileLogEntry, ProfileName,
     ProfileStore,
 };
+use holler_proto::clock::now_millis;
 use pane_support::{
     drain, head, load, load_profiles, outcome, profile_head, profiles_file, registry_file,
     rename_params, request, sample_pane, temp_state,
@@ -134,6 +135,11 @@ fn assert_non_decreasing(what: &str, log: &[ProfileLogEntry]) {
 async fn the_record_moves_to_the_new_name_and_the_reply_is_the_stored_record() {
     let rig = Rig::new();
     let old = rig.profile("Night Shift", &["hj-c1r1", "hj-c1r2"]);
+    // The hub stamps by the wall clock in milliseconds: wait until it has passed the
+    // create's stamp, so a rename that kept the old `updated` cannot equal its own stamp.
+    while now_millis() <= old.updated {
+        std::thread::yield_now();
+    }
 
     let renamed = rig.rename("Night Shift", "Day Shift", 1).await.unwrap();
 
@@ -146,6 +152,11 @@ async fn the_record_moves_to_the_new_name_and_the_reply_is_the_stored_record() {
     assert_eq!(stored.generation, 2, "the generation + 1");
     assert_eq!(stored.created, old.created, "the old `created`");
     assert!(stored.updated >= old.updated, "stamped: {stored:?}");
+    assert_eq!(
+        Some(stored.updated),
+        rig.log("Day Shift").first().map(|entry| entry.at),
+        "`updated` is the rename's one stamp, the `at` of the new name's one entry"
+    );
     assert_eq!(stored.panes, old.panes, "the same specs");
     assert_eq!(rig.profiles.list().unwrap(), vec![stored]);
 }
