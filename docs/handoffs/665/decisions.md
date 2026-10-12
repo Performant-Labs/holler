@@ -246,3 +246,15 @@
   - The check script: 13 entries, 0 mismatches.
   - The gates: clippy `-D warnings` clean, `lint.sh` exit 0, `changelog-check` ok.
   - The story's targets: `profile_rename_test` 10, `profile_rename_faults_test` 8, `profile_registry_test` 12, conformance 12, `findings_test` 2, `profile_verbs` 113, drift 7, `profile_io` 2, docs 18 + 3 + 3, and `pane_integration` 66. All passed, 0 failed.
+
+## T (Phase 7, rework 2, after F rework 2): 2026-10-11 23:17 MDT
+- **Decided:**
+  - GREEN on `2ed6ac0` with no test repair. F changed only handoff files, flagged no test, and no round 2 gate finding asks for a test change.
+  - Re-ran the whole workspace rather than relying on F's assumption that `5dbdbd9`'s run still stands.
+- **Assumed:** the earlier rounds' mutation spot checks still hold, since no `.rs` file changed between `5dbdbd9` and `2ed6ac0`.
+- **Hedged:** the rebase onto `origin/main` (S advisory 1) will change compiled code. The suite must be re-run after it, and this GREEN does not cover the rebased tree.
+- **Evidence:**
+  - The workspace: 154 targets, 2,435 passed, 0 failed, 32 ignored (23:09 to 23:15 MDT).
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean.
+  - T's own check of the rewritten `evidence.md`: 13 entries, 0 mismatches, 11,118 bytes.
+  - The quoted ranges of the dropped E-numbers are unchanged since `bda1069`.

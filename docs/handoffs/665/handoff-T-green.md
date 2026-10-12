@@ -1,3 +1,80 @@
+# Handoff-T-green (rework 2): after F rework 2, the outside diff gate's round 2 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
+
+**Date:** 2026-10-11 (23:17 MDT)
+**Branch:** `issue-665-implementation`, on `2ed6ac0` (F rework 2)
+**Issue:** #665
+**Handoff-F reviewed:** `docs/handoffs/665/handoff-F.md`, section "Handoff-F (rework 2)"
+**Handoff-T-red:** `docs/handoffs/665/handoff-T-red.md`
+
+The earlier rounds' handoffs follow this section, unchanged.
+
+## What changed since the last T-green
+
+- **No compiled file.** `git diff 5dbdbd9 2ed6ac0` touches only `docs/handoffs/665/`: `evidence.md` (rewritten), `handoff-F.md` and `decisions.md`. No `.rs` file, manifest, guide, ADR or CHANGELOG changed.
+- **No test repair.** F lists no "Tests that look wrong (for T)", and no finding in `docs/handoffs/665-diff-result-r2.md` asks for a test change: NIT-2 (`process/profile_io.rs`) asks for none, and NV-4 is answered by the new `LiveHub` evidence entry. T changed no file but this handoff and `decisions.md`.
+
+## GREEN confirmation
+
+The full workspace suite was re-run from scratch on `2ed6ac0`, 23:09 to 23:15 MDT, with the configured command: `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`.
+- **154 targets, 2,435 passed, 0 failed, 32 ignored, exit 0.** This is the same as T-green rework 1 on `5dbdbd9`, as it must be with no compiled change.
+- **The story's targets, from that run, match F's counts exactly:**
+
+| Target | Passed | Failed | Ignored |
+|---|---|---|---|
+| holler-hub `profile_rename_test` | 10 | 0 | 0 |
+| holler-hub `profile_rename_faults_test` | 8 | 0 | 0 |
+| holler-hub `profile_registry_test` (conformance on `ProfileState`) | 12 | 0 | 0 |
+| holler-pane-testkit `profile_store_conformance_test` (on the fake) | 12 | 0 | 0 |
+| holler-pane `findings_test` | 2 | 0 | 0 |
+| holler-cli `profile_verbs` | 113 | 0 | 0 |
+| holler-cli `pane_verbs` (includes the 7 drift tests) | 340 | 0 | 0 |
+| holler-cli `pane_cli_process` (includes the 2 `profile_io` tests) | 38 | 0 | 0 |
+| holler-cli `pane_integration` (includes the wire conformance runner) | 66 | 0 | 4 |
+| holler-cli `docs_pane_control_test`, `docs_cli_test`, `cli_surface_test` | 18, 3, 3 | 0 | 0 |
+| holler-cli `wire_selftest` (canary) | 3 | 0 | 0 |
+
+**Spot checks.** Not repeated: no production or test code changed, so the mutation spot checks of the earlier rounds still hold. They are spot checks 1 to 3 of rework 1 and the drift check of round 1's re-verification.
+
+## Tier 1 results
+
+| Check | Command | Expected | Actual | Result |
+|---|---|---|---|---|
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0. Size warnings only, none on a file this story touches, none at 900 lines | PASS |
+| CHANGELOG | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | PASS |
+| Workspace tests | as above | all pass | 2,435 passed, 0 failed, 32 ignored | PASS |
+| Docs CLI | `docs_cli_test`, in the workspace run | pass | 3 passed | PASS |
+| Canary | `wire_selftest`, in the workspace run | pass | 3 passed | PASS |
+| Unused deps | `cargo machete` | none | none | PASS |
+
+**Cross-check with F.** F re-ran the gates and the story's targets, not the workspace. Every count F reports (10, 8, 12, 12, 2, 113, 7, 2, 18 + 3 + 3, 66) agrees with this run. F assumed the 2,435 of `5dbdbd9` still stood. This run confirms it. No discrepancy.
+
+## Tier 2 results
+
+| Check | Method | Result |
+|---|---|---|
+| Evidence appendix | T's own script compared every excerpt line of the rewritten `evidence.md` with the lines its `Source:` cites. The result was 13 entries, 0 mismatches. The file is 11,118 bytes, under the gate's 12,000-byte cap. | PASS |
+| T's entries kept | The "T rework" section matches `5dbdbd9`'s text word for word: `now_millis`, `stamp` and the fake's clock. | PASS |
+| Dropped facts still sourced | F dropped the entries that the brief quotes: E7 and E8 (`entry.rs`), E13 (`pane_dispatch.rs`), E20 (`reply.rs`), E23 (`argv.rs`), E26 (`create.rs`) and E32 (`profile_diff.rs`). `git diff bda1069 HEAD` leaves those quoted ranges unchanged. `create.rs` changes only `taken`'s visibility and doc, and `reply.rs` only a doc comment at line 192, both outside the quotes. | PASS |
+| Coverage, test quality, type safety, error handling, security, data integrity | Unchanged from rework 1, since no code changed | PASS |
+| Browser / Playwright | N/A (no UI surface) | N/A |
+
+## Acceptance criteria status
+
+Unchanged from rework 1 (below): every criterion PASS, each backed by the test named there.
+
+## Blocking issues
+
+None.
+
+## Advisory notes
+
+- **F's three gate-pipeline issues (the verdict parse, the excerpt budget, no handoff at the diff gate) are for the main session.** T confirms the round 2 verdict line: it reads "BLOCK — 0 blocking findings", and every B item concludes "no block".
+- **S advisory 1:** after the rebase onto `origin/main`, re-run the workspace suite. `origin/main` has moved a long way (roster panes, build version), so expect conflicts in `cli.rs`, `main.rs` and the test manifests.
+- Earlier advisories still apply: the `unavailable` file-error half is unpinned, and #693 can flake CI. #693 did not recur in this run.
+
+---
+
 # Handoff-T-green (rework 1): after S REWORK and F rework 1 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
 
 **Date:** 2026-10-11 (22:55 MDT)
