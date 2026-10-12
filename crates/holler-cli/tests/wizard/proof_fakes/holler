@@ -1,8 +1,21 @@
 #!/bin/bash
-# Fake holler: hub serve|status|token mint, body join|run, roster. Everything a hub keeps (its
-# info, identity key, token store, roster) lives under HOLLER_STATE_DIR; when it is unset the
+# Fake holler: hub serve|status|token mint, body join|run, roster, and (#803) the pane and
+# profile verbs the setup wizard runs. Everything a hub keeps (its info, identity key, token
+# store, roster, pane registry and profiles) lives under HOLLER_STATE_DIR; when it is unset the
 # default is $HOME/.holler, which the scenario asserts is never created. Every call is logged
 # with the state directory it carried, so the scenario can check that none went without one.
+#
+# herdr.sh's `holler` verb runs this in a scrubbed environment (no FAKE_ROOT, no HERDR_*), so the
+# fake finds its registry and the real ps from its own path, never from a test-only variable.
+here="$(cd "$(dirname "$0")" && pwd)"
+FAKE_ROOT="${FAKE_ROOT:-$here/../fake}"
+if [ -z "${FAKE_REAL_PS:-}" ]; then
+  IFS=: read -r -a dirs <<<"${PATH:-/usr/bin:/bin}"
+  for d in "${dirs[@]}" /bin /usr/bin; do
+    if [ "$d" != "$here" ] && [ -x "$d/ps" ]; then FAKE_REAL_PS="$d/ps"; break; fi
+  done
+fi
+export FAKE_ROOT FAKE_REAL_PS
 . "$FAKE_ROOT/common.sh"
 echo "state=${HOLLER_STATE_DIR:-} args=$*" >>"$FAKE_ROOT/calls"
 sd="${HOLLER_STATE_DIR:-$HOME/.holler}"
@@ -56,6 +69,251 @@ roster() {
   done <"$sd/roster"
 }
 
+# ---- The pane and profile verbs (#803). Only what the wizard runs, with the real shapes:
+# the envelope (crates/holler-cli/src/output.rs), apply's steps, rows a to f and exit codes
+# (holler-pane tx_apply.rs, holler-cli profile/apply.rs), `pane get` (get.rs), `pane list`
+# (list.rs), `pane doctor`'s data.findings (doctor.rs), `profile list` (profile/list.rs).
+# Registry: $sd/fake-panes/{profiles,specs,records,unhealthy}. A spec is the TSV line
+# `profile name workspace row col harness role port`, a record `name profile workspace row col
+# harness role port` (its profile may be empty); `unhealthy` names panes whose health is off.
+TAB="$(printf '\t')"
+reg="$sd/fake-panes"
+json=""
+case " $* " in *" --format=json "* | *" --format json "*) json=1 ;; esac
+
+js() { local s="${1//\\/\\\\}"; printf '"%s"' "${s//\"/\\\"}"; }
+# fail CODE EXIT MESSAGE: JSON prints the failure envelope on stdout, text one error: line.
+fail() {
+  if [ -n "$json" ]; then
+    printf '{"schema_version":1,"ok":false,"data":null,"error":{"code":%s,"message":%s}}\n' \
+      "$(js "$1")" "$(js "$3")"
+  else
+    echo "error: $3" >&2
+  fi
+  exit "$2"
+}
+ok_json() { printf '{"schema_version":1,"ok":true,"data":%s,"error":null}\n' "$1"; }
+pane_hub() {
+  local pid listen
+  read -r pid listen <"$sd/hub.info" 2>/dev/null && alive "$pid" && return 0
+  fail unavailable 1 "no live hub reachable"
+}
+# A verb that reaches Herdr: --herdr-session must equal HOLLER_HERDR_SESSION (E32).
+session_flag() {
+  local s
+  s="$(flag_value --herdr-session "$@")" || return 1
+  [ "$s" = "${HOLLER_HERDR_SESSION:-}" ] ||
+    fail usage 2 "--herdr-session $s does not match HOLLER_HERDR_SESSION '${HOLLER_HERDR_SESSION:-}'"
+  return 0
+}
+has_profile() { grep -qxF -- "$1" "$reg/profiles" 2>/dev/null; }
+# rows FILE FIELD VALUE: the TSV lines of FILE whose field FIELD is VALUE
+rows() { awk -F'\t' -v f="$2" -v v="$3" '$f == v' "$1" 2>/dev/null; }
+drop() { awk -F'\t' -v f="$2" -v v="$3" -v g="${4:-0}" -v w="${5:-}" \
+  '!($f == v && (g == 0 || $g == w))' "$1" >"$1.new" 2>/dev/null; mv "$1.new" "$1"; }
+record_of() { rows "$reg/records" 1 "$1"; }
+
+profile_create() {
+  pane_hub
+  case " $* " in *" --from"*) fail usage 2 "fake holler: --from and --from-current are not faked" ;; esac
+  mkdir -p "$reg"
+  has_profile "$3" && fail profile-exists 3 "profile \"$3\" exists"
+  echo "$3" >>"$reg/profiles"
+  echo "created profile \"$3\""
+}
+
+# pane launch NAME --profile P --spec-only <flags>: writes P's spec for NAME, touches nothing
+# live. A live launch (no --spec-only) is not part of the wizard's sequence (D9).
+pane_launch() {
+  local name="$3" p ws grid proj model effort role soft hard pol harness port agent f
+  pane_hub
+  case " $* " in *" --spec-only "*) ;; *) fail usage 2 "fake holler: a live pane launch is not faked: the wizard runs only --spec-only launches" ;; esac
+  p="$(flag_value --profile "$@")" || fail usage 2 "--spec-only requires --profile"
+  has_profile "$p" || fail profile-not-found 3 "profile \"$p\" not found"
+  for f in --workspace --grid --project --model --effort --role --ctx-soft --ctx-hard --port-policy; do
+    flag_value "$f" "$@" >/dev/null || fail usage 2 "a new spec needs $f"
+  done
+  ws="$(flag_value --workspace "$@")"; grid="$(flag_value --grid "$@")"
+  proj="$(flag_value --project "$@")"; role="$(flag_value --role "$@")"
+  soft="$(flag_value --ctx-soft "$@")"; hard="$(flag_value --ctx-hard "$@")"
+  pol="$(flag_value --port-policy "$@")"; harness="$(flag_value --harness "$@" || echo opencode)"
+  agent="$(flag_value --agent "$@" || true)"
+  case "$name" in *[!a-z0-9-]* | -* | *- | '') fail usage 2 "pane name $name is not valid" ;; esac
+  case "$grid" in r[1-9]*c[1-9]*) ;; *) fail usage 2 "--grid $grid is not rRcC" ;; esac
+  case "$proj" in /*) ;; *) fail usage 2 "--project must be absolute: $proj" ;; esac
+  case "$role" in agent | orchestrator) ;; *) fail usage 2 "--role $role" ;; esac
+  [ "$soft" -le "$hard" ] 2>/dev/null || fail usage 2 "--ctx-soft above --ctx-hard"
+  case "$harness:$pol" in
+    opencode:fixed:[0-9]*) port="${pol#fixed:}" ;;
+    claude:none) port="-" ;;
+    *) fail port-policy-unsupported 3 "port policy $pol is not supported by harness $harness" ;;
+  esac
+  [ "$harness" = claude ] && [ -n "$agent" ] && fail agent-unsupported 3 "a claude pane takes no --agent"
+  row="${grid#r}"; row="${row%%c*}"; col="${grid##*c}"
+  drop "$reg/specs" 1 "$p" 2 "$name"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$p" "$name" "$ws" "$row" "$col" "$harness" "$role" "$port" >>"$reg/specs"
+  echo "spec $name written to profile \"$p\""
+}
+
+# The Herdr adapter's split rule (holler-adapter-herdr plan.rs, E40), one pane per call:
+# r1c1 is the root; a new row is a down split of the last row's only pane; a new column a
+# right split of the cell to its left. Prints the refusal code, or nothing when it can be made.
+cell_refusal() {
+  local ws="$1" r="$2" c="$3"
+  awk -F'\t' -v w="$ws" -v r="$r" -v c="$c" '
+    $3 == w { at[$4 "," $5] = 1; n[$4]++ }
+    END {
+      if ((r "," c) in at) { print "grid-occupied"; exit }
+      if (r == 1 && c == 1) exit
+      if (c == 1) { if (!(((r - 1) "," 1) in at) || n[r - 1] != 1) print "grid-unreachable"; exit }
+      if (!((r "," (c - 1)) in at)) print "grid-unreachable"
+    }' "$reg/records" 2>/dev/null
+}
+
+step_json() { printf '{"pane":%s,"action":"%s","outcome":"%s","code":%s,"diff":null,"detail":null}' \
+  "$(js "$1")" "$2" "$3" "$([ -n "$4" ] && js "$4" || echo null)"; }
+
+# profile apply P [--dry-run] [--herdr-session S]: one step per spec in creation order,
+# cell_key = (workspace, column != 1, row, column) (tx_apply.rs, #853), rows a to f.
+profile_apply() {
+  local p="$3" dry="" specs ord pr nm ws r c h ro po rec rprof rws rr rc rh code steps="" n=0 refused="" first="" nref=0 creates=0 lines=""
+  pane_hub
+  case " $* " in *" --dry-run "*) dry=1 ;; esac
+  has_profile "$p" || fail profile-not-found 3 "profile \"$p\" not found"
+  specs="$(rows "$reg/specs" 1 "$p")"
+  ord="$(printf '%s\n' "$specs" | awk -F'\t' 'NF { print $3 "\t" ($5 != 1) "\t" $4 "\t" $5 "\t" NR "\t" $0 }' |
+    sort -t "$TAB" -k1,1 -k2,2n -k3,3n -k4,4n -k5,5n | cut -f6-)"
+  while IFS="$TAB" read -r pr nm ws r c h ro po; do
+    [ -n "$nm" ] && [ -z "$(record_of "$nm")" ] && creates=$((creates + 1))
+  done <<<"$ord"
+  if session_flag "$@"; then :; elif [ "$creates" -gt 0 ]; then
+    fail usage 2 "a create needs --herdr-session"
+  fi
+  while IFS="$TAB" read -r pr nm ws r c h ro po; do
+    [ -n "$nm" ] || continue
+    n=$((n + 1)); code=""
+    IFS="$TAB" read -r _ rprof rws rr rc rh _ _ <<<"$(record_of "$nm")"
+    if [ -n "$(record_of "$nm")" ] && [ -n "$rprof" ] && [ "$rprof" != "$p" ]; then
+      act=refuse; out=refused; code=pane-in-other-profile
+    elif [ -n "$(record_of "$nm")" ] && [ "$rh" != "$h" ]; then
+      act=refuse; out=refused; code=harness-change-refused
+    elif [ -z "$(record_of "$nm")" ]; then
+      act=create; out=planned
+      if [ -z "$dry" ]; then
+        code="$(cell_refusal "$ws" "$r" "$c")"
+        if [ -n "$code" ]; then out=refused; else
+          out=created
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$nm" "$p" "$ws" "$r" "$c" "$h" "$ro" "$po" >>"$reg/records"
+        fi
+      fi
+    elif grep -qxF -- "$nm" "$reg/unhealthy" 2>/dev/null; then
+      if [ "$ro" = orchestrator ]; then act=refuse; out=refused; code=orchestrator-not-relaunched
+      else act=relaunch; out=planned; [ -z "$dry" ] && out=relaunched; fi
+    elif [ "$rws" = "$ws" ] && [ "$rr" = "$r" ] && [ "$rc" = "$c" ]; then
+      act=adopt; out=planned
+      if [ -z "$dry" ]; then
+        out=adopted; drop "$reg/records" 1 "$nm"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$nm" "$p" "$ws" "$r" "$c" "$h" "$ro" "$po" >>"$reg/records"
+      fi
+    else
+      act=report; out=reported
+    fi
+    if [ "$out" = refused ]; then refused="$refused${refused:+, }$nm ($code)"; nref=$((nref + 1)); first="${first:-$code}"; fi
+    steps="$steps${steps:+,}$(step_json "$nm" "$act" "$out" "$code")"
+    lines="$lines$nm: $act, $out${code:+ ($code)}"$'\n'
+  done <<<"$ord"
+  if [ -z "$dry" ] && [ "$nref" -gt 0 ]; then
+    fail "$first" 3 "apply refused $nref step(s): $refused; $((n - nref)) other step(s) ran"
+  fi
+  if [ -n "$json" ]; then
+    ok_json "{\"profile\":$(js "$p"),\"dry_run\":$([ -n "$dry" ] && echo true || echo false),\"steps\":[$steps]}"
+  else
+    echo "profile $p: $n steps, $([ -n "$dry" ] && echo 'planned (dry run; nothing changed)' || echo applied)"
+    printf '%s' "$lines"
+  fi
+}
+
+profile_show() {
+  pane_hub
+  has_profile "$3" || fail profile-not-found 3 "profile \"$3\" not found"
+  echo "profile $3"
+  rows "$reg/specs" 1 "$3" | awk -F'\t' '{ print "  " $2 " r" $4 "c" $5 " " $6 " " $7 }'
+}
+
+profile_list() {
+  local p items="" specs live
+  pane_hub
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    specs="$(rows "$reg/specs" 1 "$p" | grep -c .)"; live="$(rows "$reg/records" 2 "$p" | grep -c .)"
+    items="$items${items:+,}{\"name\":$(js "$p"),\"slug\":$(js "$p"),\"panes\":$specs,\"live\":$live,\"generation\":1}"
+    [ -n "$json" ] || echo "$p ($p): $specs panes, $live live, generation 1"
+  done <<<"$(cat "$reg/profiles" 2>/dev/null)"
+  if [ -n "$json" ]; then ok_json "[$items]"; elif [ -z "$items" ]; then echo "no profiles"; fi
+}
+
+profile_delete() {
+  pane_hub
+  has_profile "$3" || fail profile-not-found 3 "profile \"$3\" not found"
+  [ -z "$(rows "$reg/records" 2 "$3")" ] || fail profile-has-live-panes 3 "profile \"$3\" has live panes"
+  drop "$reg/profiles" 1 "$3"
+  drop "$reg/specs" 1 "$3"
+  echo "deleted profile \"$3\""
+}
+
+pane_close() {
+  local name="$3" p
+  pane_hub
+  if p="$(flag_value --profile "$@")"; then
+    has_profile "$p" || fail profile-not-found 3 "profile \"$p\" not found"
+    [ -n "$(rows "$reg/specs" 1 "$p" | awk -F'\t' -v n="$name" '$2 == n')" ] ||
+      fail pane-not-in-profile 3 "pane $name is not in profile \"$p\""
+  fi
+  case " $* " in *" --spec-only "*)
+    drop "$reg/specs" 1 "$p" 2 "$name"; echo "removed $name from profile \"$p\""; return ;;
+  esac
+  [ -n "$(record_of "$name")" ] || fail pane-not-found 3 "pane $name not found"
+  [ -n "${p:-}" ] && drop "$reg/specs" 1 "$p" 2 "$name"
+  drop "$reg/records" 1 "$name"
+  echo "closed $name"
+}
+
+pane_get() {
+  local nm prof ws r c h ro po port sess
+  pane_hub
+  IFS="$TAB" read -r nm prof ws r c h ro po <<<"$(record_of "$3")"
+  [ -n "$nm" ] || fail pane-not-found 3 "pane $3 not found"
+  port=""; [ "$po" != "-" ] && port=",\"port\":$po"
+  sess="ses_${nm}"; [ "$h" = claude ] && sess="00000000-0000-4000-8000-$(printf '%012d' "${#nm}")"
+  prof="$([ -n "$prof" ] && js "$prof" || echo null)"
+  ok_json "{\"pane\":{\"name\":$(js "$nm"),\"herdr\":{\"workspace\":$(js "$ws"),\"grid\":{\"row\":$r,\"col\":$c}},\"harness\":{\"kind\":\"$h\"$port,\"health\":\"healthy\"},\"session_of_record\":$(js "$sess"),\"role\":\"$ro\",\"profile\":$prof},\"profile\":$prof,\"spec\":null,\"sync\":\"ok\"}"
+}
+
+pane_list() {
+  local nm prof ws r c h ro po items=""
+  pane_hub
+  while IFS="$TAB" read -r nm prof ws r c h ro po; do
+    [ -n "$nm" ] || continue
+    items="$items${items:+,}{\"name\":$(js "$nm"),\"pos\":{\"row\":$r,\"col\":$c,\"pos\":\"r${r}c${c}\"},\"profile\":$([ -n "$prof" ] && js "$prof" || echo null),\"sync\":\"ok\",\"hold\":\"none\"}"
+    [ -n "$json" ] || printf '%s\tr%sc%s\t%s\tok\n' "$nm" "$r" "$c" "${prof:--}"
+  done <<<"$(sort -t "$TAB" -k1,1 "$reg/records" 2>/dev/null)"
+  [ -n "$json" ] && ok_json "{\"panes\":[$items]}"
+  return 0
+}
+
+# One finding kind only: `profile-drift` for a spec whose pane is not a member of its profile.
+pane_doctor() {
+  local pr nm items=""
+  pane_hub
+  while IFS="$TAB" read -r pr nm _; do
+    [ -n "$nm" ] || continue
+    [ -n "$(rows "$reg/records" 1 "$nm" | awk -F'\t' -v p="$pr" '$2 == p')" ] && continue
+    items="$items${items:+,}{\"kind\":\"profile-drift\",\"pane\":$(js "$nm"),\"message\":\"spec without its pane\"}"
+  done <<<"$(cat "$reg/specs" 2>/dev/null)"
+  if [ -n "$json" ]; then ok_json "{\"herdr\":{\"version\":\"0.9.1\"},\"findings\":[$items]}"
+  else echo "herdr 0.9.1"; [ -z "$items" ] && echo "no findings" || echo "findings: $items"; fi
+}
+
 case "$1 ${2:-}" in
   "hub serve") hub_serve "$@" ;;
   "hub status") need_hub; echo "listening: $HUB_LISTEN pid $HUB_PID" ;;
@@ -66,5 +324,15 @@ case "$1 ${2:-}" in
   "body join") body_join "$@" ;;
   "body run") body_run "$@" ;;
   "roster ") roster ;;
+  "profile create") profile_create "$@" ;;
+  "profile apply") profile_apply "$@" ;;
+  "profile show") profile_show "$@" ;;
+  "profile list") profile_list "$@" ;;
+  "profile delete") profile_delete "$@" ;;
+  "pane launch") pane_launch "$@" ;;
+  "pane close") pane_close "$@" ;;
+  "pane get") pane_get "$@" ;;
+  "pane list") pane_list "$@" ;;
+  "pane doctor") pane_doctor "$@" ;;
   *) echo "fake holler: unsupported: $*" >&2; exit 2 ;;
 esac

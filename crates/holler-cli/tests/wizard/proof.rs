@@ -40,7 +40,7 @@ const FAKES: [(&str, &str); 9] = [
 // The host: one temp directory, the fakes, and the processes this test started.
 // ---------------------------------------------------------------------------------------------
 
-struct Host {
+pub(super) struct Host {
     root: tempfile::TempDir,
     real_ps: PathBuf,
     ports: RefCell<Vec<u16>>,
@@ -48,7 +48,7 @@ struct Host {
 }
 
 impl Host {
-    fn new() -> Host {
+    pub(super) fn new() -> Host {
         let root = tempfile::tempdir().unwrap();
         for d in ["bin", "fake", "home", "tmp", "scratch"] {
             fs::create_dir_all(root.path().join(d)).unwrap();
@@ -72,21 +72,21 @@ impl Host {
         }
     }
 
-    fn path(&self, rel: &str) -> PathBuf {
+    pub(super) fn path(&self, rel: &str) -> PathBuf {
         self.root.path().join(rel)
     }
 
-    fn bin(&self, name: &str) -> PathBuf {
+    pub(super) fn bin(&self, name: &str) -> PathBuf {
         self.path("bin").join(name)
     }
 
-    fn take_port(&self) -> u16 {
+    pub(super) fn take_port(&self) -> u16 {
         self.ports.borrow_mut().pop().unwrap()
     }
 
     /// A command with a hermetic environment: fakes first on PATH, a temp HOME, and none of the
     /// variables that would tie it to the operator's real Herdr, hub or wizard run.
-    fn cmd<S: AsRef<OsStr>>(&self, program: S) -> Command {
+    pub(super) fn cmd<S: AsRef<OsStr>>(&self, program: S) -> Command {
         let path = format!(
             "{}:{}",
             self.path("bin").display(),
@@ -111,17 +111,17 @@ impl Host {
         c
     }
 
-    fn script(&self, name: &str) -> Command {
+    pub(super) fn script(&self, name: &str) -> Command {
         let mut c = self.cmd("bash");
         c.arg(lib_dir().join(name));
         c
     }
 
-    fn fake_file(&self, name: &str) -> String {
+    pub(super) fn fake_file(&self, name: &str) -> String {
         fs::read_to_string(self.path("fake").join(name)).unwrap_or_default()
     }
 
-    fn running(&self, pid: u32) -> bool {
+    pub(super) fn running(&self, pid: u32) -> bool {
         let o = self
             .cmd(&self.real_ps)
             .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -142,7 +142,7 @@ impl Host {
 
     /// Wait until the pid shows the fake's final command line (a `sleep` renamed by `exec -a`),
     /// then remember it so a failed test still cleans up its own processes by pid.
-    fn adopt(&self, pid: u32, prefix: &str) {
+    pub(super) fn adopt(&self, pid: u32, prefix: &str) {
         let end = Instant::now() + Duration::from_secs(10);
         loop {
             let cmd = self.command_of(pid);
@@ -172,7 +172,7 @@ impl Drop for Host {
     }
 }
 
-fn lib_dir() -> PathBuf {
+pub(super) fn lib_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../agent-skills/herdr-setup/lib")
 }
 
@@ -194,7 +194,7 @@ fn free_ports(n: usize) -> Vec<u16> {
         .collect()
 }
 
-fn text(o: &Output) -> String {
+pub(super) fn text(o: &Output) -> String {
     format!(
         "{}{}",
         String::from_utf8_lossy(&o.stdout),
@@ -202,11 +202,11 @@ fn text(o: &Output) -> String {
     )
 }
 
-fn stdout(o: &Output) -> String {
+pub(super) fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).to_string()
 }
 
-fn ok(o: Output) -> Output {
+pub(super) fn ok(o: Output) -> Output {
     assert!(o.status.success(), "{}", text(&o));
     o
 }
@@ -215,18 +215,18 @@ fn ok(o: Output) -> Output {
 // An instance: the values the `[instance]` table would hold, and where its files live.
 // ---------------------------------------------------------------------------------------------
 
-struct Inst {
-    name: String,
-    session: String,
-    hub_port: u16,
-    serve_port: u16,
-    backend_port: u16,
-    herdr_session: String,
-    state: PathBuf,
+pub(super) struct Inst {
+    pub(super) name: String,
+    pub(super) session: String,
+    pub(super) hub_port: u16,
+    pub(super) serve_port: u16,
+    pub(super) backend_port: u16,
+    pub(super) herdr_session: String,
+    pub(super) state: PathBuf,
 }
 
 impl Inst {
-    fn new(host: &Host, name: &str, session: &str, serve_port: u16) -> Inst {
+    pub(super) fn new(host: &Host, name: &str, session: &str, serve_port: u16) -> Inst {
         Inst {
             name: name.to_string(),
             session: session.to_string(),
@@ -238,23 +238,23 @@ impl Inst {
         }
     }
 
-    fn first(host: &Host) -> Inst {
+    pub(super) fn first(host: &Host) -> Inst {
         Inst::new(host, "inst-a", "alpha", 8444)
     }
 
-    fn second(host: &Host) -> Inst {
+    pub(super) fn second(host: &Host) -> Inst {
         Inst::new(host, "inst-b", "gamma", 8443)
     }
 
-    fn logs(&self) -> PathBuf {
+    pub(super) fn logs(&self) -> PathBuf {
         self.state.join("logs")
     }
 
-    fn ledger_file(&self) -> PathBuf {
+    pub(super) fn ledger_file(&self) -> PathBuf {
         self.state.join("herdr/setup/wizard-ledger.toml")
     }
 
-    fn config(&self, host: &Host) -> PathBuf {
+    pub(super) fn config(&self, host: &Host) -> PathBuf {
         host.path("scratch")
             .join(format!("{}-sessions.toml", self.name))
     }
@@ -279,7 +279,7 @@ impl Inst {
     }
 
     /// The contract values as the skill exports them for `collide.sh` and `herdr.sh`.
-    fn plan_env(&self, c: &mut Command) {
+    pub(super) fn plan_env(&self, c: &mut Command) {
         c.env("WIZARD_INSTANCE_NAME", &self.name)
             .env("WIZARD_INSTANCE_PREFIX", &self.name)
             .env("WIZARD_HUB_PORT", self.hub_port.to_string())
@@ -334,7 +334,7 @@ fn stage3_preflight(host: &Host, i: &Inst, inventory: &Path) -> Output {
 
 /// Start a program the way the skill does (`nohup ... > log 2>&1 & echo $!`), returning its pid
 /// once it has become the fake's final process.
-fn start_detached(host: &Host, state: Option<&Path>, log: &Path, argv: &[&str]) -> u32 {
+pub(super) fn start_detached(host: &Host, state: Option<&Path>, log: &Path, argv: &[&str]) -> u32 {
     let mut c = host.cmd("bash");
     c.args([
         "-c",
@@ -359,7 +359,7 @@ fn argv_prefix(argv: &[&str]) -> String {
     }
 }
 
-fn record(host: &Host, i: &Inst, pid: u32, role: &str, stage: u32, session: &str) {
+pub(super) fn record(host: &Host, i: &Inst, pid: u32, role: &str, stage: u32, session: &str) {
     let mut c = host.script("ledger.sh");
     c.env("HOLLER_STATE_DIR", &i.state).args([
         "record",
@@ -376,7 +376,7 @@ fn record(host: &Host, i: &Inst, pid: u32, role: &str, stage: u32, session: &str
 }
 
 /// `stop-owned.sh check-port` must say FREE before a planned port is used.
-fn check_port_free(host: &Host, i: &Inst, port: u16) {
+pub(super) fn check_port_free(host: &Host, i: &Inst, port: u16) {
     let mut c = host.script("stop-owned.sh");
     c.args(["check-port"]).arg(&i.state).arg(port.to_string());
     let out = ok(c.output().unwrap());
@@ -480,7 +480,7 @@ fn stage8_herdr(host: &Host, i: &Inst) {
     record(host, i, pid, "herdr", 8, &i.herdr_session);
 }
 
-fn herdr_sh(host: &Host, i: &Inst, args: &[&str]) -> Output {
+pub(super) fn herdr_sh(host: &Host, i: &Inst, args: &[&str]) -> Output {
     let mut c = host.script("herdr.sh");
     i.plan_env(&mut c);
     c.args(args);
@@ -511,12 +511,12 @@ fn find_herdr_pid(host: &Host, i: &Inst) -> u32 {
 }
 
 /// Client commands: always with the instance's own `HOLLER_STATE_DIR`.
-fn client(host: &Host, i: &Inst, args: &[&str]) -> Output {
+pub(super) fn client(host: &Host, i: &Inst, args: &[&str]) -> Output {
     client_with(host, i, args, "")
 }
 
 /// Like `client`, with one more argument (a token) when it is not empty.
-fn client_with(host: &Host, i: &Inst, args: &[&str], extra: &str) -> Output {
+pub(super) fn client_with(host: &Host, i: &Inst, args: &[&str], extra: &str) -> Output {
     let mut c = host.cmd(host.bin("holler"));
     c.env("HOLLER_STATE_DIR", &i.state).args(args);
     if !extra.is_empty() {
@@ -541,7 +541,7 @@ fn build(host: &Host, i: &Inst) -> Result<(), String> {
     Ok(())
 }
 
-fn teardown(host: &Host, i: &Inst) -> Output {
+pub(super) fn teardown(host: &Host, i: &Inst) -> Output {
     let mut c = host.script("stop-owned.sh");
     c.arg("teardown").arg(&i.state).arg("--purge-state");
     c.output().unwrap()
@@ -552,7 +552,7 @@ fn teardown(host: &Host, i: &Inst) -> Output {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq)]
-struct Snap {
+pub(super) struct Snap {
     ledger: String,
     roster: String,
     procs: String,
@@ -560,13 +560,13 @@ struct Snap {
     state: BTreeMap<String, String>,
 }
 
-fn ledger_list(host: &Host, i: &Inst) -> String {
+pub(super) fn ledger_list(host: &Host, i: &Inst) -> String {
     let mut c = host.script("ledger.sh");
     c.env("HOLLER_STATE_DIR", &i.state).arg("list");
     stdout(&ok(c.output().unwrap()))
 }
 
-fn ledger_pids(listing: &str) -> Vec<u32> {
+pub(super) fn ledger_pids(listing: &str) -> Vec<u32> {
     listing
         .lines()
         .filter_map(|l| l.split('\t').next()?.parse().ok())
@@ -630,7 +630,7 @@ fn collect_digest(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
     }
 }
 
-fn snapshot(host: &Host, i: &Inst) -> Snap {
+pub(super) fn snapshot(host: &Host, i: &Inst) -> Snap {
     let ledger = ledger_list(host, i);
     let pids = ledger_pids(&ledger);
     Snap {
@@ -647,7 +647,7 @@ fn snapshot(host: &Host, i: &Inst) -> Snap {
 // ---------------------------------------------------------------------------------------------
 
 /// The first instance, built and snapshotted.
-fn first_up(host: &Host) -> (Inst, Snap) {
+pub(super) fn first_up(host: &Host) -> (Inst, Snap) {
     let a = Inst::first(host);
     build(host, &a).unwrap();
     let snap = snapshot(host, &a);
@@ -754,7 +754,7 @@ fn neither_instance_writes_under_the_default_state_directory() {
 }
 
 /// Every `holler` call the fakes saw: (state directory it carried, arguments).
-fn holler_calls(host: &Host) -> Vec<(String, String)> {
+pub(super) fn holler_calls(host: &Host) -> Vec<(String, String)> {
     host.fake_file("calls")
         .lines()
         .filter_map(|l| {

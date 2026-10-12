@@ -5,17 +5,21 @@
 //! Run one with `cargo test -p holler-cli --test wizard_scripts <module>::`.
 
 mod herdr;
+mod herdr_803;
 mod instance;
 mod ownership;
+mod panes_803;
+mod panes_803_plan;
 mod preflight;
 mod proof;
+mod proof_803;
 mod skilltext;
+mod skilltext_803;
 mod skilltext_772b;
 mod skilltext_772a;
 mod skilltext_772c;
 mod skilltext_w3_stage1;
 mod skilltext_w3_stage8;
-mod skilltext_w4_stage2;
 mod skilltext_838;
 mod skilltext_w3_stage3;
 mod skilltext_w4_stage8;

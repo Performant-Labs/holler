@@ -779,6 +779,12 @@ One step per spec pane, in creation order (below); the first matching row applie
 - `orchestrator-not-relaunched` and `spec-not-launchable` are open codes of apply: refusals, exit 3, not in the closed
   list of section 9.
 
+**The setup wizard builds its panes this way** ([#803](https://github.com/Performant-Labs/holler/issues/803)): one
+`holler profile create NAME`, one `holler pane launch PANE --profile NAME --spec-only` per pane of its config, then
+`holler profile apply NAME --dry-run` and one `holler profile apply NAME`, with no other launch. The creation order,
+the exit codes and the refusals it relies on are the ones above; why the wizard builds that way, the order of its
+stages and its config are in [setup-wizard.md](setup-wizard.md), section "How the wizard builds panes".
+
 ## 7. Grid notation
 
 Positions are 1-based and written row first. Text prints `r2c1` (row 2, column 1); JSON prints

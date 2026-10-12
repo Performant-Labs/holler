@@ -18,17 +18,17 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn script() -> PathBuf {
+pub(super) fn script() -> PathBuf {
     repo_root().join("agent-skills/herdr-setup/lib/herdr.sh")
 }
 
 /// A scratch directory holding the fake `herdr`, its argv log, its session list and a ledger.
-struct Env {
+pub(super) struct Env {
     dir: tempfile::TempDir,
 }
 
 impl Env {
-    fn new(sessions: &[&str]) -> Env {
+    pub(super) fn new(sessions: &[&str]) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         fs::create_dir(&bin).unwrap();
@@ -56,7 +56,7 @@ impl Env {
         Env { dir }
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         self.dir.path()
     }
 
@@ -65,7 +65,7 @@ impl Env {
     }
 
     /// Every command the fake `herdr` was given, one per line.
-    fn recorded(&self) -> Vec<String> {
+    pub(super) fn recorded(&self) -> Vec<String> {
         fs::read_to_string(self.log_file())
             .unwrap_or_default()
             .lines()
@@ -82,7 +82,7 @@ impl Env {
 
     /// A `herdr.sh <args>` command with the fake first on `PATH`; `instance` of `None` leaves
     /// `WIZARD_INSTANCE_NAME` unset. No log directory or state directory is set.
-    fn base(&self, instance: Option<&str>, session: &str, args: &[&str]) -> Command {
+    pub(super) fn base(&self, instance: Option<&str>, session: &str, args: &[&str]) -> Command {
         let old_path = std::env::var("PATH").unwrap_or_default();
         let mut c = Command::new("bash");
         c.arg(script())
@@ -117,7 +117,7 @@ impl Env {
     }
 
     /// `herdr.sh <args>` for the instance `<instance>` / Herdr session `<session>` (empty = none).
-    fn run(&self, instance: &str, session: &str, args: &[&str]) -> Output {
+    pub(super) fn run(&self, instance: &str, session: &str, args: &[&str]) -> Output {
         self.base(Some(instance), session, args)
             .env("WIZARD_LOG_DIR", self.path())
             .output()
@@ -134,7 +134,7 @@ impl Env {
     }
 }
 
-fn text(o: &Output) -> String {
+pub(super) fn text(o: &Output) -> String {
     format!(
         "{}{}",
         String::from_utf8_lossy(&o.stdout),
@@ -259,34 +259,12 @@ fn a_fresh_session_name_is_accepted() {
 #[test]
 fn every_stage_command_carries_the_session_and_no_bare_server_stop_is_issued() {
     let env = Env::new(&[]);
-    // The stage's command list, in order, as the skill runs it.
+    // The stage's command list, in order, as the skill runs it: since #803 only the read-only
+    // words reach Herdr (D16); every pane is Holler's.
     let stage: &[&[&str]] = &[
         &["run", "status"],
-        &["run", "pane", "list"],
+        &["run", "session", "list"],
         &["run", "workspace", "list"],
-        &[
-            "run",
-            "pane",
-            "split",
-            "--pane",
-            "p1",
-            "--direction",
-            "right",
-        ],
-        &[
-            "run",
-            "pane",
-            "split",
-            "--pane",
-            "p2",
-            "--direction",
-            "down",
-        ],
-        &["run", "pane", "run", "p2", "cd /x && cmd"],
-        &["run", "pane", "send-keys", "p2", "enter"],
-        &["run", "pane", "read", "p2"],
-        &["run", "server", "stop"],
-        &["run", "session", "attach"],
     ];
     for args in stage {
         let out = env.run("second", "second", args);
@@ -304,8 +282,6 @@ fn every_stage_command_carries_the_session_and_no_bare_server_stop_is_issued() {
     for c in &cmds {
         assert!(c.starts_with("--session second "), "no session on: {c}");
     }
-    assert!(cmds.contains(&"--session second server stop".to_owned()));
-    assert!(cmds.contains(&"--session second session attach".to_owned()));
     assert!(
         cmds.contains(&"--session second server".to_owned()),
         "{cmds:?}"
@@ -482,9 +458,9 @@ fn a_non_default_instance_without_a_session_name_is_refused() {
 #[test]
 fn the_default_instance_runs_commands_as_before() {
     let env = Env::new(&[]);
-    let out = env.run("default", "", &["run", "pane", "list"]);
+    let out = env.run("default", "", &["run", "workspace", "list"]);
     assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(env.recorded(), vec!["pane list".to_owned()]);
+    assert_eq!(env.recorded(), vec!["workspace list".to_owned()]);
 }
 
 #[test]
@@ -504,32 +480,13 @@ fn an_invalid_session_name_is_refused() {
 }
 
 #[test]
-fn a_pane_of_a_different_session_stops_before_any_split() {
+fn a_pane_of_a_different_session_is_refused_by_check_pane() {
     let env = Env::new(&["other"]);
     let check = env.run_in_pane("second", "other", &["check-pane"]);
     assert!(!check.status.success(), "{}", text(&check));
     let t = text(&check);
     assert!(t.contains("other") && t.contains("second"), "{t}");
-    // The stage's split goes through the same gate and is refused.
-    let split = env.run_in_pane(
-        "second",
-        "other",
-        &[
-            "run",
-            "pane",
-            "split",
-            "--pane",
-            "p1",
-            "--direction",
-            "right",
-        ],
-    );
-    assert!(!split.status.success(), "{}", text(&split));
-    assert!(
-        env.recorded().iter().all(|c| !c.contains("split")),
-        "{:?}",
-        env.recorded()
-    );
+    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
 }
 
 #[test]
@@ -672,20 +629,22 @@ fn the_server_log_is_named_for_the_instance() {
 }
 
 #[test]
-fn the_skill_runs_stages_8_and_9_through_the_wrapper_and_forbids_a_bare_server_stop() {
+fn the_skill_runs_stages_5_to_9_through_the_wrapper_and_forbids_a_bare_server_stop() {
     let skill = fs::read_to_string(repo_root().join("agent-skills/herdr-setup/SKILL.md")).unwrap();
-    let start = skill.find("## Stage 8 ").expect("stage 8");
+    let start = skill.find("## Stage 5 ").expect("stage 5");
     let end = skill.find("## Stage 10 ").expect("stage 10");
     let section = &skill[start..end];
     for (i, line) in section.lines().enumerate() {
         let l = line.trim_start();
         assert!(
             !(l.starts_with("herdr ") || l.starts_with("nohup herdr")),
-            "bare herdr command in Stage 8/9 (line {i}): {line}"
+            "bare herdr command in Stages 5 to 9 (line {i}): {line}"
         );
     }
     assert!(section.contains("herdr.sh"));
-    assert!(section.contains("bare `herdr server stop`"));
+    let stage5 = &skill[start..skill.find("## Stage 6 ").expect("stage 6")];
+    assert!(stage5.contains("Start the Herdr server"), "{stage5}");
+    assert!(stage5.contains("bare `herdr server stop`"));
     let docs = fs::read_to_string(repo_root().join("docs/setup-wizard.md")).unwrap();
     assert!(docs.contains("## Herdr session"));
 }
@@ -721,53 +680,6 @@ fn the_server_starts_in_a_scrubbed_environment() {
         assert!(names.contains(&kept), "{kept} dropped: {seen}");
     }
     assert_eq!(env.recorded(), vec!["--session second server".to_owned()]);
-}
-
-#[test]
-fn label_renames_the_pane_with_the_session_flag_first() {
-    let env = Env::new(&[]);
-    let out = env.run("second", "second", &["label", "w1:p3", "r1c2"]);
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(
-        env.recorded(),
-        vec!["--session second pane rename w1:p3 r1c2".to_owned()]
-    );
-}
-
-#[test]
-fn label_without_a_session_runs_a_bare_rename() {
-    let env = Env::new(&[]);
-    let out = env.run("default", "", &["label", "w1:p3", "a.b_c-1"]);
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(env.recorded(), vec!["pane rename w1:p3 a.b_c-1".to_owned()]);
-}
-
-#[test]
-fn label_refuses_empty_and_malformed_labels_without_a_call() {
-    let env = Env::new(&[]);
-    let long = "a".repeat(33);
-    for bad in [
-        "",
-        "-x",
-        ".x",
-        "_x",
-        "a b",
-        "a/b",
-        "a;b",
-        "é",
-        long.as_str(),
-    ] {
-        let out = env.run("second", "second", &["label", "w1:p3", bad]);
-        assert!(!out.status.success(), "{bad:?} accepted");
-    }
-    let out = env.run("second", "second", &["label", "w1:p3"]);
-    assert!(!out.status.success());
-    let out = env.run("second", "second", &["label"]);
-    assert!(!out.status.success());
-    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
-    let ok = "a".repeat(32);
-    let out = env.run("second", "second", &["label", "w1:p3", ok.as_str()]);
-    assert!(out.status.success(), "{}", text(&out));
 }
 
 /// The session variables an interactive pane needs (story #785), with a value each.
@@ -820,41 +732,6 @@ fn the_server_keeps_the_session_variables_a_pane_needs_and_still_drops_the_rest(
     for gone in ["CLAUDE_CODE_FOO", "ANTHROPIC_API_KEY", "SECRET_X"] {
         assert!(!names.contains(&gone), "{gone} leaked: {seen}");
     }
-}
-
-#[test]
-fn label_from_a_pane_of_another_session_is_refused_without_a_rename() {
-    let env = Env::new(&["other"]);
-    let out = env.run_in_pane("second", "other", &["label", "w1:p3", "r1c2"]);
-    assert!(!out.status.success(), "{}", text(&out));
-    let t = text(&out);
-    assert!(t.contains("other") && t.contains("second"), "{t}");
-    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
-}
-
-#[test]
-fn label_from_a_pane_of_the_own_session_is_accepted() {
-    let env = Env::new(&[]);
-    let out = env.run_in_pane("second", "second", &["label", "w1:p3", "r1c2"]);
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(
-        env.recorded(),
-        vec!["--session second pane rename w1:p3 r1c2".to_owned()]
-    );
-}
-
-#[test]
-fn a_label_with_a_non_ascii_letter_is_refused_under_a_utf8_locale() {
-    let env = Env::new(&[]);
-    for bad in ["é", "aé", "éa", "ñandú"] {
-        let mut c = env.base(Some("second"), "second", &["label", "w1:p3", bad]);
-        c.env("LC_ALL", "C.UTF-8")
-            .env("LANG", "C.UTF-8")
-            .env("WIZARD_LOG_DIR", env.path());
-        let out = c.output().unwrap();
-        assert!(!out.status.success(), "{bad:?} accepted: {}", text(&out));
-    }
-    assert!(env.recorded().is_empty(), "{:?}", env.recorded());
 }
 
 #[test]
