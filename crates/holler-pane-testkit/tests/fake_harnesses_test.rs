@@ -138,3 +138,21 @@ fn a_call_reaches_the_fake_its_endpoint_or_its_shape_names() {
         "the process endpoint and the process methods go to Claude Code"
     );
 }
+
+/// #647 part 2: `agent_view` is keyed by an endpoint, so it reaches the fake the endpoint names:
+/// a port the server fake, a process the Claude fake, each recording its own op.
+#[test]
+fn agent_view_reaches_the_fake_its_endpoint_names() {
+    let h = FakeHarnesses::new();
+    let _ = h.agent_view(&HarnessEndpoint::Port(48100), "ses_1", 3);
+    let _ = h.agent_view(
+        &HarnessEndpoint::Process {
+            pane: name("demo-c2r1"),
+            pid: 1,
+        },
+        "s-1",
+        3,
+    );
+    assert_eq!(h.opencode().faults().calls(), vec![HarnessOp::AgentView]);
+    assert_eq!(h.claude().faults().calls(), vec![ClaudeOp::AgentView]);
+}

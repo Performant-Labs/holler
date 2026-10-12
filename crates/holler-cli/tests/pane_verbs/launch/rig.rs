@@ -33,9 +33,9 @@ use holler_pane::pane::{
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::profile_snapshot::spec_from_pane;
 use holler_pane::{
-    Actor, AgentKey, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec,
-    HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, Profile, ProfileLogEntry,
-    ProfileName, ProfileScope, ProfileSpec, ProfileStore, ServeSpec,
+    Actor, AgentKey, AgentView, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSpec, HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, Profile,
+    ProfileLogEntry, ProfileName, ProfileScope, ProfileSpec, ProfileStore, ServeSpec,
 };
 use holler_pane_testkit::envelope::check_envelope;
 use holler_pane_testkit::fixture::{sample_pane, sample_profile};
@@ -735,6 +735,10 @@ impl HostPort for LinkedHost<'_> {
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.fakes.host.foreground_commands(name)
     }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.fakes.host.attached_clients(name)
+    }
 }
 
 /// Run (and drop) the first hook armed for `on`. No lock is held while it runs.
@@ -834,6 +838,15 @@ impl HarnessPort for HookedHarness<'_> {
         let answer = self.fakes.harness.shown_session(pane, at);
         self.fire(HarnessOp::ShownSession, pane_only(pane));
         answer
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.fakes.harness.agent_view(at, session, max_turns)
     }
 }
 

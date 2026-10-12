@@ -617,3 +617,85 @@ fn send_prompt_queues_a_turn_and_session_activity_follows_it() {
     }
     assert_eq!(activity, Ok(Activity::Idle), "once the turn has ended");
 }
+
+// ---- #647 part 2: agent_view on a real server ----
+
+/// The project configuration of the brief's "Facts measured outside the repository": `build`
+/// denies `task`, and the project ships a custom primary `orchestrator` that allows it.
+const PROJECT_AGENTS: &str = r#"{"agent":{"build":{"permission":{"task":"deny"}},"orchestrator":{"mode":"primary","description":"x","permission":{"task":"allow"}}}}"#;
+
+/// Add a user message to `session` as `agent`, with `noReply`, so no model turn runs.
+fn user_turn(port: u16, session: &str, agent: &str) {
+    let body = json!({
+        "agent": agent,
+        "noReply": true,
+        "parts": [{ "type": "text", "text": "hello" }],
+    });
+    let reply = raw(port, "POST", &format!("/session/{session}/message"), Some(&body));
+    assert_eq!(reply.status, 200, "POST /session/:id/message as {agent}");
+}
+
+/// Where the message's agent field is proved (brief D15): each user turn reads back with the
+/// agent it was sent as (`info.agent` on 1.19.0), newest `max_turns` oldest first, and the
+/// project's custom primary agent is the one dispatcher.
+#[test]
+#[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
+fn ac647_agent_view_reads_a_real_servers_turns_and_agents() {
+    if !opted_in("ac647") {
+        return;
+    }
+    let mut rig = Rig::start();
+    rig.write_project_config(PROJECT_AGENTS);
+    rig.serve(0);
+    let p0 = rig.ports[0];
+    let s = rig.create(0);
+    for agent in ["plan", "build", "build", "orchestrator"] {
+        user_turn(p0, &s, agent);
+    }
+    let key = |text: &str| Some(AgentKey::parse(text).unwrap());
+    let view = rig
+        .harness
+        .agent_view(&HarnessEndpoint::Port(p0), &s, 3)
+        .unwrap();
+    let turns: Vec<_> = view
+        .turns
+        .iter()
+        .map(|t| (t.agent.clone(), t.can_dispatch))
+        .collect();
+    assert_eq!(
+        turns,
+        vec![
+            (key("build"), Some(false)),
+            (key("build"), Some(false)),
+            (key("orchestrator"), Some(true)),
+        ]
+    );
+    assert_eq!(view.dispatchers, vec![AgentKey::parse("orchestrator").unwrap()]);
+    assert_eq!(
+        rig.harness.agent_view(&HarnessEndpoint::Port(p0), UNKNOWN, 3),
+        Err(PaneError::SessionNotFound {
+            what: UNKNOWN.to_owned()
+        })
+    );
+}
+
+/// A `--pure` server over the rig's dead-end configuration alone lists only OpenCode's own
+/// agents, so it has no dispatcher: `agent-cannot-dispatch` cannot fire on a scratch pane
+/// (brief acceptance 18).
+#[test]
+#[ignore = "needs opencode and tmux: HOLLER_TEST_OPENCODE=1 cargo test -p holler-adapter-opencode --test real_opencode_test -- --ignored"]
+fn ac647_a_scratch_server_without_project_agents_has_no_dispatcher() {
+    if !opted_in("ac647") {
+        return;
+    }
+    let mut rig = Rig::start();
+    rig.serve(0);
+    let p0 = rig.ports[0];
+    let s = rig.create(0);
+    let view = rig
+        .harness
+        .agent_view(&HarnessEndpoint::Port(p0), &s, 3)
+        .unwrap();
+    assert_eq!(view.turns, vec![], "a fresh session has no turn");
+    assert_eq!(view.dispatchers, vec![], "only OpenCode's own agents");
+}

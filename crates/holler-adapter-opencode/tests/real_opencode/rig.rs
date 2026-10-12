@@ -45,7 +45,9 @@ use holler_adapter_opencode::{
 };
 use holler_pane::ports::Activity;
 use holler_pane::tx_launch::{wait_healthy, BOOT_POLL};
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+use holler_pane::{
+    AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+};
 use holler_pane_testkit::conformance::harness::HarnessRig;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -323,6 +325,15 @@ impl HarnessPort for Recording {
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.inner.session_activity(at, session)
     }
+    // #647 part 2: required, so the compiler finds this forward too.
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
+    }
 }
 
 /// The model guard: the server on `port` lists exactly the dead-end provider, and
@@ -459,6 +470,12 @@ impl Rig {
                 .unwrap_or_else(|e| panic!("launch({name}, {port}): {e:?}"));
         }
         panic!("serve({name}): three ports in a row were taken by another process");
+    }
+
+    /// Write `json` as the scratch project's `opencode.json`, which a server started after it
+    /// reads (#647 part 2: the agents a project ships).
+    pub fn write_project_config(&self, json: &str) {
+        std::fs::write(self.harness.project.join("opencode.json"), json).unwrap();
     }
 
     pub fn create(&self, i: usize) -> String {

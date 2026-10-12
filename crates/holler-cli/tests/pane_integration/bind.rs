@@ -24,8 +24,8 @@ use holler_cli::pane::wiring::bind::{
 };
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    Actor, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSpec, HostPort, Pane,
-    PaneError, PaneId, PaneName, PaneStore, Ports, ServeSpec,
+    Actor, AgentKey, AgentView, Argv, GridPos, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort,
+    HerdrSpec, HostPort, Pane, PaneError, PaneId, PaneName, PaneStore, Ports, ServeSpec, TurnAgent,
 };
 use holler_pane_testkit::conformance::herdr::{run_herdr_conformance, HerdrFixture};
 use holler_pane_testkit::conformance::host::run_host_conformance;
@@ -163,10 +163,21 @@ fn a_lazy_herdr_that_cannot_be_built_answers_that_error_from_every_method() {
 
 /// A harness that records which method was called and answers each distinctively: the
 /// default-armed methods answer what their defaults never would (#645's two; #831's four
-/// process methods, whose defaults refuse `process-unsupported`).
+/// process methods, whose defaults refuse `process-unsupported`), and the required
+/// `agent_view` (#647 part 2) answers [`distinctive_view`] and records its arguments.
 #[derive(Default)]
 struct Recording {
     calls: Mutex<Vec<&'static str>>,
+    agent_view_args: Mutex<Vec<(HarnessEndpoint, String, usize)>>,
+}
+
+/// What [`Recording::agent_view`] answers: one turn as `orchestrator` that can dispatch, and
+/// the one dispatcher `reviewer`, which no empty or constant view equals.
+fn distinctive_view() -> AgentView {
+    let key = |text: &str| AgentKey::parse(text).unwrap();
+    AgentView::default()
+        .with_turns(vec![TurnAgent::new(Some(key("orchestrator")), Some(true))])
+        .with_dispatchers(vec![key("reviewer")])
 }
 
 impl Recording {
@@ -244,6 +255,19 @@ impl HarnessPort for Recording {
         self.note("login_status");
         Ok(LoginStatus::Missing)
     }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.note("agent_view");
+        self.agent_view_args
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((at.clone(), session.to_owned(), max_turns));
+        Ok(distinctive_view())
+    }
 }
 
 /// Call every method of `harness` once; each answer, as `Ok` or the error's code.
@@ -313,6 +337,10 @@ fn call_every_method(harness: &dyn HarnessPort) -> Vec<Result<String, String>> {
             .login_status()
             .map(|s| format!("{s:?}"))
             .map_err(code),
+        harness
+            .agent_view(&port, "ses_1", 3)
+            .map(|view| format!("{view:?}"))
+            .map_err(code),
     ]
 }
 
@@ -333,7 +361,7 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
         "send_prompt is the inner one's, not the default prompt-unsupported"
     );
     assert_eq!(
-        answers[11..],
+        answers[11..15],
         [
             Ok("process_command".to_owned()),
             Ok("new_session_id".to_owned()),
@@ -360,8 +388,19 @@ fn the_wired_harness_forwards_every_method_the_default_armed_ones_included() {
             "new_session_id",
             "locate_process",
             "login_status",
+            "agent_view",
         ],
         "each method reached the inner harness once"
+    );
+    assert_eq!(
+        answers[15],
+        Ok(format!("{:?}", distinctive_view())),
+        "#647 part 2: agent_view is the inner one's answer, not a constant"
+    );
+    assert_eq!(
+        *inner.agent_view_args.lock().unwrap(),
+        vec![(HarnessEndpoint::Port(48100), "ses_1".to_owned(), 3)],
+        "agent_view reached the inner harness with every argument"
     );
 }
 
@@ -541,6 +580,9 @@ impl HostPort for LinkedHost {
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.host.foreground_commands(name)
     }
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.host.attached_clients(name)
+    }
 }
 
 /// What `attach_tui` saw: the resolver's answer for its pane, and whether the pane store
@@ -609,6 +651,14 @@ impl HarnessPort for Resolving {
     }
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.inner.session_activity(at, session)
+    }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
     }
 }
 

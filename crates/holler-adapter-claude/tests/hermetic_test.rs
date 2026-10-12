@@ -28,7 +28,7 @@ use holler_adapter_claude::{AgentsList, ClaudeConfig, ClaudeHarness, InboxWrite,
 use holler_pane::pane::ModelSpec;
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
 use holler_pane::{
-    AgentKey, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
+    AgentKey, AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
 };
 use serde_json::{json, Value};
 
@@ -493,6 +493,26 @@ fn abort_is_refused_abort_unsupported() {
     let rig = Rig::new(json!([entry(4242, SESSION, "busy", None)]));
     let refused = rig.harness.abort(&endpoint(4242), SESSION).unwrap_err();
     assert_eq!(refused.code(), "abort-unsupported", "{refused}");
+}
+
+// --- agent_view (#647 part 2) ---------------------------------------------------------------
+
+/// A process endpoint answers the empty view: one Claude Code process has no server that lists
+/// agents or turns, so it cannot tell (ADR-0021 section 12). A port endpoint is
+/// `server-unsupported`, the one conversion this harness makes, so a misrouted call is loud
+/// rather than an empty view (plan review W-4). Nothing is read: no process is looked for.
+#[test]
+fn agent_view_is_empty_for_a_process_and_refused_for_a_port() {
+    let rig = Rig::new(json!([entry(4242, SESSION, "idle", None)]));
+    assert_eq!(
+        rig.harness.agent_view(&endpoint(4242), SESSION, 3),
+        Ok(AgentView::default())
+    );
+    let refused = rig
+        .harness
+        .agent_view(&HarnessEndpoint::Port(48100), SESSION, 3)
+        .unwrap_err();
+    assert_eq!(refused.code(), "server-unsupported", "{refused}");
 }
 
 // --- delivery (item 7, W8) ------------------------------------------------------------------

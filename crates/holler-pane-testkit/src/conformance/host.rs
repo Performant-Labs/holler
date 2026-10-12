@@ -26,6 +26,11 @@
 //! keeps two rules of a real session (brief R2-8): it never asserts that the list is empty
 //! (the session's shell is listed too), and it polls for the name within a bound, because
 //! right after `run` the foreground process can still be the adapter's `env`.
+//!
+//! `attached_clients` (#647 part 2, ADR-0021 section 12) counts the tmux clients attached
+//! to a session. A session that `ensure_session` made has none, on tmux (a detached session)
+//! as on the fake, so its case asserts zero; a missing session is `pane-not-found`, as `ps`
+//! answers. Nothing in the suite attaches a client: a port has no method that does.
 
 use std::env;
 use std::thread;
@@ -52,7 +57,7 @@ const SETTLE_POLL: Duration = Duration::from_millis(20);
 
 /// The suite, in order: the one table that the runner iterates and [`host_cases`]
 /// lists.
-const CASES: [(&str, Case); 10] = [
+const CASES: [(&str, Case); 11] = [
     (
         "ps-of-missing-session-is-pane-not-found",
         ps_of_missing_session_is_pane_not_found,
@@ -80,6 +85,10 @@ const CASES: [(&str, Case); 10] = [
     (
         "foreground-commands-names-what-run-started",
         foreground_commands_names_what_run_started,
+    ),
+    (
+        "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
+        attached_clients_of_fresh_session_is_zero_and_of_missing_is_pane_not_found,
     ),
 ];
 
@@ -249,6 +258,27 @@ fn foreground_commands_names_what_run_started(host: &dyn HostPort) -> Result<(),
         }
         thread::sleep(SETTLE_POLL);
     }
+}
+
+/// Case 11 (#647 part 2): `attached_clients` of a session never ensured is `pane-not-found`,
+/// as `ps` answers, and of a session `ensure_session` just made is `0`: a fresh tmux session
+/// is detached, and nothing in the case attaches a client.
+fn attached_clients_of_fresh_session_is_zero_and_of_missing_is_pane_not_found(
+    host: &dyn HostPort,
+) -> Result<(), String> {
+    let missing = succeeds("PaneName::parse", PaneName::parse(C2))?;
+    expect_code(
+        "attached_clients of a session never ensured",
+        host.attached_clients(&missing),
+        NOT_FOUND,
+    )?;
+    let a = ensured(host, C1)?;
+    let count = succeeds(&format!("attached_clients({a})"), host.attached_clients(&a))?;
+    expect_eq(
+        &format!("attached_clients({a}) of a fresh session"),
+        count,
+        0,
+    )
 }
 
 // --- helpers ---

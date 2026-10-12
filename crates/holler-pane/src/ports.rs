@@ -351,8 +351,8 @@ impl PaneObservation {
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
 ///
-/// No method has a default (#835), so an implementation that answers only the four methods
-/// that came before `foreground_commands`, a wrapper port included, does not compile:
+/// No method has a default (#835), so an implementation that leaves out
+/// `foreground_commands`, a wrapper port included, does not compile:
 ///
 /// ```compile_fail,E0046
 /// use holler_pane::{Argv, HostPort, PaneError, PaneName};
@@ -370,6 +370,35 @@ impl PaneObservation {
 ///         Ok(())
 ///     }
 ///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn attached_clients(&self, _: &PaneName) -> Result<u32, PaneError> {
+///         Ok(0)
+///     }
+/// }
+/// ```
+///
+/// Nor does one that leaves out `attached_clients` (#647 part 2, ADR-0021 section 12):
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct NoClientCount;
+///
+/// impl HostPort for NoClientCount {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn foreground_commands(&self, _: &PaneName) -> Result<Vec<String>, PaneError> {
 ///         Ok(Vec::new())
 ///     }
 /// }
@@ -421,6 +450,60 @@ pub trait HostPort: Send + Sync {
 /// **Blocking.** Every method is synchronous. Call from `spawn_blocking` (or a
 /// thread) in async code. Every method returns within I5's bound (default 10 s) or
 /// with [`PaneError::Timeout`]. An implementation is `Send + Sync`.
+///
+/// `agent_view` has no default (#647 part 2, ADR-0021 section 12), so an implementation that
+/// leaves it out, a wrapper port included, does not compile:
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec};
+///
+/// struct NoAgentView;
+///
+/// impl HarnessPort for NoAgentView {
+///     fn serve_command(&self, _: &PaneName, _: u16, _: &ServeSpec) -> Result<Argv, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn verify_serving(&self, _: &HarnessEndpoint, _: &ServeSpec) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn health(&self, _: &HarnessEndpoint) -> Result<bool, PaneError> {
+///         Ok(false)
+///     }
+///     fn create_session(&self, _: &HarnessEndpoint) -> Result<String, PaneError> {
+///         Err(PaneError::NotImplemented)
+///     }
+///     fn list_sessions(&self, _: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+///         Ok(Vec::new())
+///     }
+///     fn abort(&self, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn attach_tui(&self, _: &PaneId, _: &HarnessEndpoint, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn select_session(&self, _: &PaneId, _: &str) -> Result<(), PaneError> {
+///         Ok(())
+///     }
+///     fn shown_session(
+///         &self,
+///         _: &PaneId,
+///         _: &HarnessEndpoint,
+///     ) -> Result<Option<String>, PaneError> {
+///         Ok(None)
+///     }
+/// }
+/// ```
+///
+/// The view it answers is `#[non_exhaustive]`: outside this crate an `AgentView` is built only
+/// from its empty default and its builders, so a struct literal does not compile there, with or
+/// without `..Default::default()`:
+///
+/// ```compile_fail,E0639
+/// let view = holler_pane::AgentView { turns: Vec::new(), dispatchers: Vec::new() };
+/// ```
+/// ```compile_fail,E0639
+/// let view = holler_pane::AgentView { turns: Vec::new(), ..Default::default() };
+/// ```
 pub trait HarnessPort: Send + Sync {
     /// The argv that starts the harness server of `name` on `port` with `spec` applied,
     /// for [`HostPort::run`] to start. Pure: it starts no process, binds no port, writes

@@ -7,7 +7,9 @@
 //!   processes of the pane (`FakeHarnesses::stop`), as tmux runs and stops a pane's processes
 //!   (#802). No case writes its own Claude linker (plan review W5).
 //! - `seed_claude` and `seed_opencode` build a live pane through the fakes' own port methods, not
-//!   through a verb, so a case of one verb fails only on that verb.
+//!   through a verb, so a case of one verb fails only on that verb. Each attaches one tmux client
+//!   to the pane's session (the fake host's `attach_client`), as the Herdr pane that shows it
+//!   would, so `doctor` does not report it `unattached` (#647 part 2).
 //! - `mark` and `since` scope the call logs to one run.
 
 use std::sync::Arc;
@@ -297,6 +299,7 @@ impl Rig {
         let n = name(pane);
         let herdr = self.place(grid);
         self.host.ensure_session(&n, CWD).unwrap();
+        self.host.attach_client(&n).unwrap();
         let id = self.harnesses.new_session_id().unwrap();
         let argv = self
             .harnesses
@@ -328,6 +331,7 @@ impl Rig {
         let n = name(pane);
         let herdr = self.place(grid);
         self.host.ensure_session(&n, CWD).unwrap();
+        self.host.attach_client(&n).unwrap();
         let argv = self
             .harnesses
             .serve_command(&n, port, &ServeSpec::default())
@@ -444,6 +448,10 @@ impl HostPort for LinkedHost<'_> {
 
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.rig.host.foreground_commands(name)
+    }
+
+    fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
+        self.rig.host.attached_clients(name)
     }
 }
 

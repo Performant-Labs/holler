@@ -7,7 +7,8 @@ use std::sync::Mutex;
 
 use holler_pane::ports::Activity;
 use holler_pane::{
-    Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore, ServeSpec,
+    AgentView, Argv, HarnessEndpoint, HarnessPort, Pane, PaneError, PaneId, PaneName, PaneStore,
+    ServeSpec,
 };
 use holler_pane_testkit::harness::FakeHarness;
 use holler_pane_testkit::pane_store::FakePaneStore;
@@ -60,6 +61,14 @@ impl HarnessPort for WriterInSelect<'_> {
         at: &HarnessEndpoint,
     ) -> Result<Option<String>, PaneError> {
         self.inner.shown_session(pane, at)
+    }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
     }
 }
 
@@ -209,5 +218,13 @@ impl HarnessPort for SeamHarness<'_> {
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.log.activity_query(at.port().unwrap(), session);
         Ok(self.activity)
+    }
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.inner.agent_view(at, session, max_turns)
     }
 }

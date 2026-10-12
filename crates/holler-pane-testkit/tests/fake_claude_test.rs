@@ -8,8 +8,10 @@
 //! process to a new session and keeps its pid, and a stopped process leaves its transcript.
 
 use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneName, ServeSpec};
+use holler_pane::{AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneName, ServeSpec};
+use holler_pane_testkit::claude::ClaudeOp;
 use holler_pane_testkit::claude::{ClaudeStatus, FakeClaude};
+use holler_pane_testkit::fault::PortOp;
 
 const C1: &str = "demo-c1r1";
 const C2: &str = "demo-c2r1";
@@ -263,4 +265,41 @@ fn session_ids_are_distinct_and_counted() {
     let b = fake.new_session_id().unwrap();
     assert!(!a.is_empty() && !b.is_empty());
     assert_ne!(a, b);
+}
+
+// --- agent_view (#647 part 2) ---
+
+/// A process endpoint answers the empty view (a single process cannot tell); a port endpoint
+/// is `server-unsupported`, the one conversion a single-process harness makes, so a call the
+/// router sent to the wrong harness is loud rather than an empty view (plan review W-4).
+#[test]
+fn agent_view_is_empty_for_a_process_and_refused_for_a_port() {
+    let fake = FakeClaude::new();
+    let id = fake.new_session_id().unwrap();
+    let pid = launch(&fake, C1, SessionChoice::Fresh(id.clone()));
+    assert_eq!(
+        fake.agent_view(&endpoint(C1, pid), &id, 3),
+        Ok(AgentView::default())
+    );
+    match fake.agent_view(&HarnessEndpoint::Port(48100), &id, 3) {
+        Err(PaneError::Refused { code, .. }) => assert_eq!(code.as_str(), "server-unsupported"),
+        other => panic!("a port endpoint must be server-unsupported, got {other:?}"),
+    }
+}
+
+/// `agent_view` passes the faults first, as every port method does, under its own op.
+#[test]
+fn a_fault_on_agent_view_fails_that_call_and_is_logged() {
+    assert_eq!(ClaudeOp::AgentView.as_str(), "harness.agent_view");
+    let fake = FakeClaude::new();
+    let unavailable = PaneError::Unavailable {
+        what: "made-up".to_owned(),
+    };
+    fake.faults()
+        .fail_next(ClaudeOp::AgentView, unavailable.clone());
+    assert_eq!(
+        fake.agent_view(&endpoint(C1, 4242), "ses_1", 3),
+        Err(unavailable)
+    );
+    assert_eq!(fake.faults().calls().last(), Some(&ClaudeOp::AgentView));
 }

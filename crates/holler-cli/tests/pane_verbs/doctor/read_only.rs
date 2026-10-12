@@ -1,5 +1,7 @@
 //! `holler pane doctor` without `--fix` (#647, ACs 12 and 13): a pass makes read calls
-//! only, and writes a record only when what it observed changed.
+//! only, and writes a record only when what it observed changed. #647 part 2 extends the
+//! read-only allowlist by exactly `HostOp::AttachedClients` and `HarnessOp::AgentView`
+//! (`rig::HOST_READS`, `rig::HARNESS_READS`), and the pass makes both.
 
 use holler_pane::findings::FindingKind as K;
 use holler_pane::PaneError;
@@ -8,7 +10,7 @@ use holler_pane_testkit::herdr::HerdrOp;
 use holler_pane_testkit::host::HostOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
-use super::rig::{keys, kinds, one, whole, Rig, Seed};
+use super::rig::{keys, kinds, one, whole, Rig, Seed, HARNESS_READS, HOST_READS};
 use super::{one_pane, PANE};
 
 /// Every incident at once, on one fleet.
@@ -68,15 +70,20 @@ fn doctor_without_fix_makes_only_read_calls() {
             keys(&report)
         );
     }
-    let reads = [
-        HarnessOp::Health,
-        HarnessOp::ListSessions,
-        HarnessOp::ShownSession,
-    ];
     assert!(
-        calls.harness.iter().all(|op| reads.contains(op)),
+        calls.harness.iter().all(|op| HARNESS_READS.contains(op)),
         "{:?}",
         calls.harness
+    );
+    assert!(
+        calls.harness.contains(&HarnessOp::AgentView),
+        "#647 part 2: a healthy pane with no recorded agent is asked its agent view: {:?}",
+        calls.harness
+    );
+    assert!(
+        calls.host.contains(&HostOp::AttachedClients),
+        "#647 part 2: a pane whose session exists is asked its client count: {:?}",
+        calls.host
     );
     let reads = [HerdrOp::Snapshot, HerdrOp::Version];
     assert!(
@@ -85,7 +92,7 @@ fn doctor_without_fix_makes_only_read_calls() {
         calls.herdr
     );
     assert!(
-        calls.host.iter().all(|op| *op == HostOp::Ps),
+        calls.host.iter().all(|op| HOST_READS.contains(op)),
         "{:?}",
         calls.host
     );

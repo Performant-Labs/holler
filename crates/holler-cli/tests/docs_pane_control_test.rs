@@ -608,3 +608,32 @@ fn the_built_not_proposed_rule_fails_a_proposed_line() {
     let unnamed = good.replace("`profile-drift` x", "");
     assert_eq!(built_lines_marked_proposed(&unnamed).len(), 1, "an unnamed item fails");
 }
+
+/// #647 part 2 (acceptance 17): section 5's rows for the two new kinds name exactly the command
+/// each finding names, in the table's last column ("The command it names"): none for
+/// `unattached` (no Holler verb attaches a tmux client), and the relaunch with the key joined to
+/// `--agent` for `agent-cannot-dispatch` (brief D8: a key may start with `-`, so `--agent KEY`
+/// is the wrong form, though `docs_cli_test` parses both). The row of `agent-cannot-dispatch`
+/// also tells a profile member to add `--profile` (plan review W-3), and the guide states the
+/// limit of `unattached`: a client in any terminal counts.
+#[test]
+fn section_5_rows_of_part_2_name_their_exact_commands() {
+    let s5 = section(&guide(), 5);
+    let mut missing = Vec::new();
+    let unattached = s5.lines().find(|l| l.starts_with("| `unattached` |"));
+    if !unattached.is_some_and(|l| l.trim_end().ends_with("| none |")) {
+        missing.push(format!("the `unattached` row must end `| none |`: {unattached:?}"));
+    }
+    let dispatch = s5.lines().find(|l| l.starts_with("| `agent-cannot-dispatch` |"));
+    let command = "| `holler pane relaunch PANE --agent=KEY` |";
+    if !dispatch.is_some_and(|l| l.trim_end().ends_with(command)) {
+        missing.push(format!("the `agent-cannot-dispatch` row must end `{command}`: {dispatch:?}"));
+    }
+    if !dispatch.is_some_and(|l| l.contains("--profile")) {
+        missing.push(format!("the `agent-cannot-dispatch` row must name `--profile`: {dispatch:?}"));
+    }
+    if !s5.contains("terminal") {
+        missing.push("section 5 must state that a client in any terminal hides `unattached`".into());
+    }
+    assert_none("docs/pane-control.md section 5, #647 part 2's rows", missing);
+}

@@ -1,0 +1,557 @@
+[
+  {
+    "name": "build",
+    "description": "The default agent. Executes tools based on configured permissions.",
+    "mode": "primary",
+    "native": true,
+    "hidden": null,
+    "topP": null,
+    "temperature": null,
+    "color": null,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "task",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "variant": null,
+    "options": {},
+    "steps": null
+  },
+  {
+    "name": "compaction",
+    "mode": "primary",
+    "native": true,
+    "hidden": true,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "options": {}
+  },
+  {
+    "name": "explore",
+    "description": "Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions.",
+    "mode": "subagent",
+    "native": true,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "grep",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "glob",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "list",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "bash",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "webfetch",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "websearch",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      }
+    ],
+    "options": {}
+  },
+  {
+    "name": "general",
+    "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+    "mode": "subagent",
+    "native": true,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "todowrite",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "options": {}
+  },
+  {
+    "name": "orchestrator",
+    "description": "x",
+    "mode": "primary",
+    "native": false,
+    "hidden": null,
+    "topP": null,
+    "temperature": null,
+    "color": null,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "task",
+        "pattern": "*",
+        "action": "allow"
+      }
+    ],
+    "variant": null,
+    "options": {},
+    "steps": null
+  },
+  {
+    "name": "plan",
+    "description": "Plan mode. Disallows all edit tools.",
+    "mode": "primary",
+    "native": true,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "task",
+        "pattern": "general",
+        "action": "deny"
+      },
+      {
+        "permission": "edit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "edit",
+        "pattern": ".opencode/plans/*.md",
+        "action": "allow"
+      },
+      {
+        "permission": "edit",
+        "pattern": "srv/demo-scratch/data/opencode/plans/*.md",
+        "action": "allow"
+      }
+    ],
+    "options": {}
+  },
+  {
+    "name": "summary",
+    "mode": "primary",
+    "native": true,
+    "hidden": true,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "options": {}
+  },
+  {
+    "name": "title",
+    "mode": "primary",
+    "native": true,
+    "hidden": true,
+    "temperature": 0.5,
+    "permission": [
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "doom_loop",
+        "pattern": "*",
+        "action": "ask"
+      },
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "read",
+        "pattern": "*",
+        "action": "allow"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.*",
+        "action": "ask"
+      },
+      {
+        "permission": "read",
+        "pattern": "*.env.example",
+        "action": "allow"
+      },
+      {
+        "permission": "*",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "options": {}
+  }
+]
