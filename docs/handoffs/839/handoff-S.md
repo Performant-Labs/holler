@@ -1,277 +1,272 @@
-# Handoff-S: #839 - DRIVEN follows each pane's session of record  (spec audit)
+# Handoff-S: #839 - DRIVEN follows each pane's session of record  (spec audit, S rework round 1)
 
-**Date:** 2026-10-12 (10:09 MDT)
-**Branch:** `issue-839-implementation` (worktree `.claude/worktrees/0839-driven`), head `e83ea9c`. The code audited is
-`4e691d9..8d3e7fa`, the tree T-green verified; `8d3e7fa..e83ea9c` adds only `handoff-A-dup.md` and its journal entry.
+**Date:** 2026-10-12 (10:57 MDT)
+**Branch:** `issue-839-implementation` (worktree `.claude/worktrees/0839-driven`), head `3f8b0bd`, working tree clean.
+This cycle's code is `fde8eb8..ee874c1`:
+- F `fde8eb8..9eb55d4`: production only;
+- T-green `9eb55d4..ee874c1`: tests only;
+- `ee874c1..3f8b0bd`: A-dup's handoff alone.
+
 **Issue:** #839 (absorbs #828)
-**Brief:** `docs/handoffs/839-brief.md` (decisions, ADR text, placement, Reuse, Acceptance 1 to 22, Blast radius)
-**Handoffs reviewed:** `handoff-A.md` (PASS, 7 warns), `handoff-T-red.md`, `handoff-F.md`, `handoff-T-green.md`,
-`handoff-A-dup.md` (PASS, 6 warns), `evidence.md`, `decisions.md`
+**Brief:** `docs/handoffs/839-brief.md`
+**Reworks:** round 1's REWORK, which audited the whole story (`4e691d9..8d3e7fa`): `git show
+fde8eb8:docs/handoffs/839/handoff-S.md`. This file covers the rework and re-checks the whole story's gates. Rows and
+rulings that did not change are carried from round 1, which holds their full evidence.
+**Handoffs reviewed:**
+- `handoff-A.md`: PASS, 7 warns;
+- `handoff-T-red.md`: RED valid;
+- `handoff-F.md`: this round;
+- `handoff-T-green.md`: this round, GREEN;
+- `handoff-A-dup.md`: this round, PASS, 6 warns carried;
+- `evidence.md` and `decisions.md`.
 
-**Verdict: REWORK** (production and test). There are two required changes:
+**Verdict: PASS.** Both REWORK items are closed:
+1. **REWORK 1 (test-only).** Three new process-level tests pin every clause of Acceptance 18's P5 and of Acceptance 7's
+   last sentence.
+2. **REWORK 2 (production).** `session-held` now quotes the advertised name. It builds `holler release NAME` only from a
+   routable name, in one builder that both ports call.
 
-1. Acceptance 18 lists pins that no test writes. This item is test-only.
-2. One new message breaks the brief's rule that advertised text is untrusted. This item is production.
-
-Everything else matches the brief, including ADR section 11 word for word. Advisory note 1 is not a rework item, but it
-must be done before merge: the branch now conflicts with `origin/main` in ADR-0021.
+There is no new blocking finding. Advisory 1 must still be done before the PR can merge: the branch conflicts with
+`origin/main` in ADR-0021.
 
 ## A precondition
 
-**Met.** The fourth up-front pass returned PASS with 0 `block` and 7 `warn` (`handoff-A.md`), and the
-anti-duplication gate returned PASS with 0 `block` and 6 `warn` (`handoff-A-dup.md`).
+**Met.**
+- **Up-front pass:** PASS, 0 `block`, 7 `warn` (`handoff-A.md`).
+- **Anti-duplication, this cycle:** PASS, 0 `block`, 6 `warn` (`handoff-A-dup.md`). All six are carried from the first
+  pass, and this cycle half-fixes warn 2.
 
 ## T precondition
 
 **Met.**
-- **RED:** valid (`handoff-T-red.md`). It is compile-level for the contract and assertion-level for `check_only`, the
-  offline reason, the catalog count, the three scans and the docs.
-- **GREEN:** no blocking issue (`handoff-T-green.md`). The run was `cargo test --workspace --no-fail-fast -- --skip
-  roster_stays_accurate_under_concurrent_body_load`: 2721 passed, 0 failed.
-- **Other Tier 1 checks:** clippy `-D warnings`, `lint.sh`, `changelog-check.sh`, `cargo machete` and `test-hooks.sh`
-  all pass.
-- **Mutations:** eight production mutations each failed their tests.
-- **Test repairs:** T-1 to T-6 changed test code only. `git diff --stat d480424 8d3e7fa` touches no `src/` file.
+- **RED:** valid (`handoff-T-red.md`), unchanged.
+- **GREEN this round:** no blocking issue (`handoff-T-green.md`).
+  - The run was `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`:
+    2725 passed, 0 failed, 36 ignored. That is round 1's 2721 plus the four new tests.
+  - `driven_e2e_test` ran four times, with 14 passed each time.
+- **Other Tier 1 checks:** these pass:
+  - clippy `-D warnings`;
+  - `lint.sh` and `changelog-check.sh`;
+  - `cargo machete` and `test-hooks.sh`;
+  - `git diff --check`.
+- **Mutations instead of RED.** The new tests were written after the code, so they have no RED. T-green made six
+  temporary production mutations instead, and each one failed its test:
+  - `classify` stops mapping the offline reason;
+  - `classify` stops mapping the ambiguous reason;
+  - `interrupt_cmd` loses its `pane_not_driven` arm;
+  - a hold is read as `NotDriven`;
+  - there is no `PaneHeld` arm;
+  - `session_held` spells the raw name.
+- **Roles kept apart.** `git diff --stat` per commit shows that F's commit touches only the three production files and
+  T-green's touches only the two test files.
 
 ## Acceptance criteria
 
+**How rows 1 to 22 were checked.**
+- No test was removed or weakened. T-green's diff adds four tests and edits only two module docs and two imports.
+- No production file changed outside the three that REWORK 2 touched.
+- So round 1's evidence stands for every row it passed, and every row is green in T-green's run.
+
 | # | Criterion | Proving test or evidence | Status |
 |---|---|---|---|
-| 1 | I2 extended to DRIVEN | `pane_verbs/driven/order.rs`: `a_switch_re_points_the_body_between_the_observation_and_the_record`, `a_reset_re_points_the_body_to_the_session_it_created` (`assert_all_agree`: the record, SHOWN, the TUI, the body's id and DRIVEN are one id; generation +1; one `cas_put`) | PASS |
-| 2 | The step order | The same two tests: the hub log is `[Advertised, Rebind]`, the rebind is not yet of record, and select comes before shown. `a_failure_before_the_rebind_leaves_the_body_where_it_was`. `first.rs::reset_first_on_a_healthy_pane_is_sent_through_the_hub` (`[Advertised, Prompt, Rebind, Prompt]`). `a_driven_switch_asks_the_harness_for_no_activity` (no `send_prompt`). T-green's order mutation fails them. | PASS |
-| 3 | A message reaches the real session of record | `driven_e2e_test.rs`: `say_pane_reaches_the_pane_s_real_session_of_record` (the id's `prompt_async`, the reply, `say --pane Q` exits 3 `pane-not-driven`, `answer --pane` resolves) and `interrupt_pane_resolves_the_same_id` | PASS |
-| 4 | The gate refuses a real-shaped pane | `holler-pane/tests/gate_test.rs` (8); `circuit/dispatch.rs` `hold_tests` (every variant, the recorded-DRIVEN key and its window, the name is no key, spawn is never gated, fail closed, the hold first); `panes/gate/tests.rs` (5) | PASS |
+| 1 | I2 extended to DRIVEN | `pane_verbs/driven/order.rs`: `a_switch_re_points_the_body_between_the_observation_and_the_record`, `a_reset_re_points_the_body_to_the_session_it_created` | PASS |
+| 2 | The step order | The same two tests, plus:<br>- `a_failure_before_the_rebind_leaves_the_body_where_it_was`;<br>- `first.rs::reset_first_on_a_healthy_pane_is_sent_through_the_hub`;<br>- `a_driven_switch_asks_the_harness_for_no_activity`. | PASS |
+| 3 | A message reaches the real session of record | `driven_e2e_test.rs`: `say_pane_reaches_the_pane_s_real_session_of_record`, `interrupt_pane_resolves_the_same_id` | PASS |
+| 4 | The gate refuses a real-shaped pane | `holler-pane/tests/gate_test.rs` (8), `circuit/dispatch.rs` `hold_tests`, `panes/gate/tests.rs` (5) | PASS |
 | 5 | Resolution | `driven_resolve_test.rs`: the three resolve tests and `say_interrupt_and_answer_accept_an_id` | PASS |
-| 6 | `doctor` | `pane_verbs/driven/doctor.rs`: the reverted body, the relaunch with its window, the agreeing body, the failed `advertised`, unproven, and another pane's body. `driven_test.rs`'s table. | PASS |
-| 7 | `reset --first` obeys the gate | `pane_verbs/driven/first.rs`: the three gate codes, operator and default holds, no body and a body that is behind, healthy (sent with `Send`, no harness prompt), and the race. Its last sentence (the `--pane` verbs keep exit 4) is pinned under 18. | PASS |
-| 8 | Rebind failures | `order.rs`: `a_refused_rebind_is_a_failure_after_the_act_that_records_nothing`, `a_busy_or_questioning_driver_is_refused_before_anything_moves`, `the_activity_table_is_the_same_through_the_harness_and_the_body`, `a_driven_switch_asks_the_harness_for_no_activity` (E85) | PASS |
-| 9 | The body | `holler-body/tests/rebind_test.rs` (8: the happy path, the refusals, busy, the 5 s bound with no late swap, one source after `session.error`, `query/support`, restart, the first moment); `task/rebind_tests.rs` (2); `driven_resolve_test.rs` `control_rebind_*` (3, including the other row's state left as it was) | PASS |
-| 10 | `check_only` | `holler-hub/tests/check_only_test.rs` (4: admitted with nothing moved, no grant consumed, the seven-case table through `say` and the check, the redirect from A's warn 3) | PASS |
-| 11 | The protocol | The catalog count test (23 rows). `golden_test.rs` covers three goldens, all new (`git diff --name-status` shows A three times and no M). The `codec_test` arm. `scripts/` is untouched. F's `lint.sh` output lists three `(new file)` lines. `v2.md` has the row and the `-32004` sentence. | PASS |
-| 12 | Holds across a reset | `first.rs::a_hold_carries_across_a_reset_and_stops_only_the_prompt`; `driven_e2e_test.rs::the_hold_key_survives_a_rebind_and_release_lets_the_first_message_through`; `driven_resolve_test.rs` (`holds.keys()` is empty after a rebind) | PASS |
-| 13 | No bypass | `driven_e2e_test.rs::the_generic_forward_cannot_carry_a_rebind`; `driven_resolve_test.rs::the_generic_forward_refuses_session_rebind`; `hold_single_path_test.rs` (three new scans; the two old ones unchanged). `admin/query` is not exercised (advisory 8). | PASS |
+| 6 | `doctor` | `pane_verbs/driven/doctor.rs` (the six cases), `driven_test.rs`'s table | PASS |
+| 7 | `reset --first` obeys the gate | `pane_verbs/driven/first.rs` covers:<br>- the three gate codes;<br>- operator and default holds (`session-held`, with `holler release kiwi/demo-c1r1`);<br>- no body, and a body that is behind;<br>- healthy, and the race.<br>**New this round:** its last sentence ("the same operator hold on the `--pane` verbs keeps exit 4") is pinned by `driven_e2e_test.rs::a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs` for `say` and `interrupt`. `answer` has no hold behaviour to keep; see the ruling under Spec compliance. | PASS |
+| 8 | Rebind failures | `order.rs`:<br>- `a_refused_rebind_is_a_failure_after_the_act_that_records_nothing`;<br>- `a_busy_or_questioning_driver_is_refused_before_anything_moves`;<br>- `the_activity_table_is_the_same_through_the_harness_and_the_body`;<br>- `a_driven_switch_asks_the_harness_for_no_activity`. | PASS |
+| 9 | The body | `holler-body/tests/rebind_test.rs` (8), `task/rebind_tests.rs` (2), `driven_resolve_test.rs` `control_rebind_*` (3) | PASS |
+| 10 | `check_only` | `holler-hub/tests/check_only_test.rs` (4) | PASS |
+| 11 | The protocol | All four are pinned:<br>- the catalog count test (23 rows);<br>- `golden_test.rs` over three new goldens (re-checked: `git diff --name-status` shows A three times, no M);<br>- the `codec_test` arm;<br>- `v2.md`'s row and the `-32004` sentence. | PASS |
+| 12 | Holds across a reset | `first.rs::a_hold_carries_across_a_reset_and_stops_only_the_prompt`; `driven_e2e_test.rs::the_hold_key_survives_a_rebind_and_release_lets_the_first_message_through`; `driven_resolve_test.rs` | PASS |
+| 13 | No bypass | `driven_e2e_test.rs::the_generic_forward_cannot_carry_a_rebind`; `driven_resolve_test.rs::the_generic_forward_refuses_session_rebind`; `hold_single_path_test.rs` (three new scans) | PASS |
 | 14 | One predicate | `pane_verbs/driven.rs::the_routed_verbs_refuse_by_the_one_predicate`; `panes/gate/tests.rs::the_frame_is_the_one_predicate_s_code_for_the_pane_on_the_id`; `hold_single_path_test.rs::the_pane_codes_and_the_pair_rule_are_defined_once` | PASS |
 | 15 | Fixtures | `pane_verbs/driven.rs::the_session_id_fixture_is_never_a_name` | PASS |
 | 16 | Scenario | `pane_integration/scenario.rs::reset_with_a_first_message`, rewritten as D9 says (compiled, opt-in) | PASS |
-| 17 | Docs | `docs_pane_control_test.rs::the_sentences_driven_replaced_are_gone_and_the_entry_is_written`. ADR-0021 section 11 matches the brief's text word for word (checked with whitespace normalised). The section 8 replacement matches apart from "(the next paragraph of the ADR)", which reads "(the next paragraph)" inside the ADR. | PASS |
-| 18 | A bare id is not a SESSION; P7; P5 | **Pinned:**<br>- the bare id: `a_typed_bare_id_is_unknown_with_no_hub`, `a_typed_bare_id_is_unknown_and_a_session_is_no_pane`;<br>- an id sent straight to `control/say`: `say_interrupt_and_answer_accept_an_id`;<br>- the `classify` table: two tests in `pane_verbs/driven.rs`;<br>- (i) and (ii): `a_turn_that_outlives_its_wait_is_not_pane_not_driven`;<br>- (iii): `a_send_returns_once_accepted_while_the_turn_runs_on` and `the_send_call_carries_the_turn_budget_and_waits_only_for_acceptance`;<br>- the wire reason: `offline_reason_test.rs` (3).<br>**Not pinned:**<br>- P5's "the routed verbs keep their holds": no test runs a `--pane` verb against an operator or default hold (exit 4), or prints `PaneHeld` from the hub's gate under `--json`;<br>- `pane-not-driven` "in all three verbs": only `say --pane` is pinned, and only for an unknown id. Nothing pins `interrupt --pane` or `answer --pane`, the `NotDriven` arm ahead of the `is_ambiguous` exit 2, or an offline body at the verb. | **PARTIAL** (REWORK 1) |
-| 19 | The gate sees a body that is behind | Both halves are pinned:<br>- on the fakes, with the real `doctor` and `switch`: `doctor.rs::the_gate_sees_a_behind_body_once_doctor_records_it`;<br>- on a real hub: `driven_e2e_test.rs::the_gate_refuses_a_body_on_a_pane_s_recorded_driven`.<br>The conformance suite runs over `FakeHub` (`fake_hub_test.rs`) and over the real client (`the_real_client_passes_the_hub_conformance_suite`). | PASS |
-| 20 | Drivers need evidence | `driven_test.rs` (the table, rows (1) to (4) of (d) included); `pane_verbs/driven/evidence.rs` (7); the `doctor.rs` cases. Row (1) of (d) through the verbs is `session-of-other-pane` (`a_switch_onto_another_pane_s_record_is_refused_by_the_existing_rule_first`); see the ruling under Spec compliance. | PASS |
-| 21 | One request at a time | `driven_resolve_test.rs`: `concurrent_forwards_on_one_body_each_get_their_own_reply`, `a_caller_waiting_for_the_slot_times_out_at_its_own_bound`, `the_hub_s_rebind_bound_is_below_the_cli_s`. `driven_e2e_test.rs`: `a_rebind_and_queries_at_once_each_get_their_own_reply`, `the_rebind_bounds_nest` (5, 6, 8 and 10 s). | PASS |
-| 22 | A single-process pane asks the hub nothing | `pane_claude/driven.rs` (2); `pane_claude/lifecycle.rs::reset_first_on_a_claude_pane_is_not_driven_and_stops_nothing` (E91 rewritten). Advisory 9 covers the doctor case. | PASS |
+| 17 | Docs | `docs_pane_control_test.rs::the_sentences_driven_replaced_are_gone_and_the_entry_is_written`; ADR-0021 section 11 matches the brief word for word (round 1) | PASS |
+| 18 | A bare id is not a SESSION; P7; P5 | **Round 1's pins:** the bare id with no hub; `control/say` with an id; the `classify` table; (i), (ii) and (iii); `offline_reason_test.rs` (3).<br><br>**New this round, `driven_e2e_test.rs`:**<br>- **`pane_not_driven_comes_first_in_all_three_verbs`.** `say`, `interrupt` and `answer --pane` each exit 3 with `pane-not-driven` in three cases: an unknown id (`-32003`); an ambiguous id (`-32003` `ambiguous`; the test first confirms through the hub's own `check_only` that the hub sees two sessions, so exit 2 would fail it); and an offline body (`-32004` `offline`, after a bounded wait for the hub's answer). No prompt reaches the session.<br>- **`a_hold_on_the_pane_s_body_keeps_exit_4_for_the_routed_verbs`.** The two holds are an operator hold (`holler hold kiwi/oc`) and a default hold (`--join-held kiwi/*`). Under each, `say --pane P TEXT` and `interrupt --pane P TEXT` exit 4. The text carries that kind's tail and neither `pane-not-driven` nor `session-held`. No prompt reaches the session.<br>- **`a_pane_hold_on_the_id_prints_pane_held_for_say_pane`.** P is healthy, and Q is parked with P's id as its recorded DRIVEN. `--json say --pane P` prints exactly `{"error":"session_held","session":<id>,"reason":"pane-parked","hold_kind":"pane"}` and exits 3. No prompt reaches the session. | **PASS** (was PARTIAL) |
+| 19 | The gate sees a body that is behind | `doctor.rs::the_gate_sees_a_behind_body_once_doctor_records_it`; `driven_e2e_test.rs::the_gate_refuses_a_body_on_a_pane_s_recorded_driven`; the conformance suite over `FakeHub` and over the real client | PASS |
+| 20 | Drivers need evidence | `driven_test.rs` (the table, rows (1) to (4) of (d)), `pane_verbs/driven/evidence.rs` (7), the `doctor.rs` cases; round 1's ruling on (d) row (1) stands | PASS |
+| 21 | One request at a time | `driven_resolve_test.rs` (3), `driven_e2e_test.rs::a_rebind_and_queries_at_once_each_get_their_own_reply`, `the_rebind_bounds_nest` | PASS |
+| 22 | A single-process pane asks the hub nothing | `pane_claude/driven.rs` (2), `pane_claude/lifecycle.rs::reset_first_on_a_claude_pane_is_not_driven_and_stops_nothing` | PASS |
+
+**REWORK 2's own pin:** `crates/holler-pane/tests/driven_test.rs::the_release_command_is_built_only_from_a_routable_name`.
+- **A routable name:** the code is `session-held`, the subject is quoted (`"kiwi/oc" is held (operator hold, reason
+  "night")`), and the text contains `run holler release kiwi/oc to lift it`.
+- **Names that are not routable** (a `;` command, a space, a newline with ESC, and uppercase), **and no name:** the text
+  contains neither the raw name nor `holler release kiwi`, and it names the id, quoted.
 
 ## Spec compliance
 
-**Implemented as decided.**
+**REWORK 2 is implemented as instructed.** `holler_pane::hub::session_held`, `crates/holler-pane/src/hub.rs:36-60`:
+- **The name is quoted.** The name is printed with `findings::quoted`, which uses `{:?}`: it escapes control characters
+  and adds quotes, cut at 64 characters (`error.rs:691-698`). This is D3's "every advertised name and id a message prints
+  goes through `findings::quoted`".
+- **The command is built, never spelled.** The command is built only from `RoutableName::parse(name)`, whose segments
+  are `[a-z0-9-]` joined by `/`, so it carries no space and no shell metacharacter. Any other name, a failed roster read
+  and no live body all give the existing fallback, which names the id quoted and spells no name.
+- **D4's content is kept:** the kind, the reason (quoted) and the release.
+- **`kind` is printed bare, safely.** Only `operator` or `default` reach it: `hub_refusal.rs`'s `held` maps every other
+  kind to `Other`, and `FakeHub` passes `HoldKind::as_str()`.
+- **The required pin stays green:** `first.rs::reset_first_on_a_held_pane_is_session_held`.
 
-| Decision | How the code matches it |
-|---|---|
-| P1 | `LiveHandle::query`'s allowlist and its comment are byte-identical to `main`. `rebind` rides the private `forward` with the literal method. `circuit.rs` takes +0 lines. There is no `admin/rebind`. |
-| P2 | `Inner.config.session_id` is the one source. `mirror_session_id` writes it in the first attach, the re-attach and the rebind, and `start` initialises it. `live_configs` feeds `query/support`. A restart reverts. |
-| P3 | ADR 0014 (point 5 and Consequences), ADR 0005 section 3 and ADR 0003's Addressing line and header are amended. `route_target_by` refuses a non-name `SESSION` before any hub. |
-| P4 and P8 | `driver_of` applies the exclusion rule and its exception, then rules (i) to (iii), then the fallback, which is `Unproven` on a shared listing. This is checked line by line against D3. |
-| P5 | `classify` decides no exit. The `--pane` arms act on `NotDriven` alone, first. |
-| P6 | `elsewhere` and `refuse_elsewhere` are in the plan. |
-| P7 | `Error::offline` sits beside `invalid_grant`. It is used on the resolve-time offline arms of `say` (`control_say::refusal`), `interrupt` and `answer` alone. `Timeout`, `Cancelled`, `AckTimeout` and `PromptFailed` stay bare. |
-| D1 | `resolve_prompt_target` sits in `live/target.rs`. The gate keys on `harness_session` through `send_turn`, the one `SayOpts` builder. `first_refusal` serves both the hub and `FakeHub`. |
-| D2 | The body refuses on its deadline first, then on a spawn session, then on busy. It then attaches under `timeout_at` and swaps only on success. The bounds are 5, 6, 8 and 10 s. `control/rebind` takes `token_id` and fills one roster row (A's warn 1). |
-| D3 | `HubPort` has three required methods. The order is plan, act, observe, drive, record, first message. A single process takes `Driver::None` and asks the hub nothing. Reconcile reads `hub.advertised` once per pass, sets the switch remedy after `with_fix` and uses `without_remedy` for ambiguous or unproven drivers. |
-| D4 | The hold key is unchanged, and a rebind sets no hold. |
-| D5 | `talk::admit` is `say`'s prelude, moved and not copied. `check_only` answers `{admitted: true}`. `Send` is built as `say_cmd::run` builds the call (600 s budget, 2 s accept wait). |
-| D6 | DRIVEN is `None`, and `--first` is refused before anything moves. |
-| D7 | The three codes are declared in the files that own them. |
-| D8 | The fixtures are `ses_` ids, built by `session_id(n)`. |
-| D9 | The scenario step is rewritten as decided. |
-| D10 | `FakeHub` runs over `FaultSwitch<HubOp>` and `first_refusal`. |
-| D11 | No file is at 900. |
-| D12 | `cli-surface.txt` is untouched. |
+**F's placement is accepted.**
+- **What F did:** one builder in `holler_pane::hub`, beside `SESSION_HELD`, called by both `HubClient::held`
+  (`wiring/hub.rs:171-182`) and `FakeHub::judge` (test kit `hub.rs:215`).
+- **Why it is right:**
+  - D7 puts `session-held` in that file as the port's answer.
+  - It follows the precedent of `driven::not_driven`.
+  - It adds no dependency (`holler-pane` already depends on `holler-proto`).
+  - It removes the copy that A-dup's warn 2 named.
+- **Outside the named file, with reason.** Round 1 named only `wiring/hub.rs`. The other two files are this story's own
+  new files. Without the move, the fake would have pinned words the real client no longer says.
 
-**Explained deviations, accepted.**
-- A's warns 1, 3, 5 and 7 were taken: the one-row roster fill, the pane gate before an interrupt's cancel,
-  `parse_session_id` moved to `findings.rs`, and `control_say.rs` kept whole.
-- `tx_switch/plan.rs`: the brief's own split rule at 650 lines.
-- `panes/gate/tests.rs` in place of `panes/gate_tests.rs`: a child module needs no `#[path]`.
-- `HubRefusal::Held` has no `key`: the `-32011` data carries none.
-- `control/rebind` checks `parse_session_id` first: an extra fail-closed check.
-- `FakePaneStore::records()`, which T's contract requires.
-- The README's debug-table row for the new `rebind` event.
-- The `--pane` mismatch wording "its body drives".
+**No other message prints an advertised field raw.**
+- I re-grepped `holler-pane/src`, `holler-cli/src/pane` and the test kit for messages built from advertised fields.
+- `driven::named`, `plan.rs`'s activity refusal and the other sites round 1 listed all quote.
+- The remaining hits are validated pane names and record names.
 
-**Ruling on Acceptance 20(d) row (1)**, held open by T-red, F, T-green and A-dup. The brief says two things:
-- the acceptance text says a switch of P1 onto the id of a body on P2's **session of record** is `session-driven-elsewhere`;
-- D3 step 1 runs "the existing refusals; then" the driver.
+**Round 1's rulings stand.** That includes Acceptance 20(d) row (1).
 
-The contract text F copied into the ADR says the same as D3 (section 11 point 3: "plan (the refusals of section 8, then
-the driver, ...)"). P6 itself keeps `session-of-other-pane` for "the target is another pane's session of record"
-(E153). So `check_unclaimed` refuses first, and row (1) is `session-of-other-pane`, as built and tested. Row (2) (P2's
-recorded DRIVEN) is `session-driven-elsewhere`.
-
-Both answers refuse with nothing moved, so the property the sentence protects holds: the `Unproven` remedy never pairs
-a body another pane's evidence proves. **No change.** The acceptance clause and D3's "one consequence" sentence
-overstate P6 for that one row. The contract governs. Under the standing rule to decide and report, this is decided
-here, not held.
-
-**One silent deviation (REWORK 2):** `HubClient::held` breaks D3's untrusted-text rule (see Quality audit).
+**New ruling: `answer` and holds.**
+- **What the brief says.** P5 and Acceptance 18 list `answer --pane` among the verbs that keep "the held refusal and
+  exit 4" under an operator or default hold.
+- **What the code does:**
+  - D5 (E125) says `answer_cmd` has no held arm.
+  - The hub's `control/answer` checks no hold (`control_server.rs:351-362`). It calls `talk::answer`, which takes only
+    the registry.
+  - ADR-0021 already says "`answer` sends no prompt and is not gated" (line 784, on `main` too).
+  - So `answer --pane` under a hold was never exit 4, on `main` or here.
+- **What is built:** P5's rule is "the three `--pane` verbs keep today's hold behaviour", and that is what is built.
+  Round 1's REWORK rightly left `answer` out of the pin.
+- **Ruling.** The brief's words overstate the behaviour for that one verb, and no code changes. This is decided here
+  under the standing rule, not held. It costs nothing at run time, and the contract's own section 8 sentence is right.
+  The new section 9 clause repeats the overstatement (advisory 2).
 
 ## Quality audit
 
-**Correctness and failure handling: sound.**
-- Every new refusal fails closed and moves nothing: the body's five rebind refusals, `control/rebind`'s params, id,
-  token and cached session, and the plan's refusals.
-- A late attach is never swapped in. The swap is after `timeout_at`, and the old driver's `shutdown` is a send and an
-  abort, so it cannot delay the reply.
-- A record is one compare-and-swap at the plan's generation. Reconcile writes DRIVEN in the same write as SHOWN.
-- `control/rebind` fills one roster row, so the whole-set race of A's warn 1 is gone.
-- `query_slot` sits inside each caller's own `timeout`, and replies match by correlation id.
-- The grant spent before the pane gate refuses (T-green's advisory 3) is `main`'s order, not new (advisory 5).
+**Correctness: sound.**
+- **Every path out of the builder is safe.** A failed roster read, no live body, and a name outside the grammar each
+  fall back to a sentence that names only the quoted id.
+- **Arguments:** both callers pass the prompted id and the body's roster name in the right order.
+- **The hold key:** the roster name is `label/session` (`roster.rs` `qualified_name`), which is the hold key, so the
+  built command lifts the right hold.
 
 **Build guards: met.**
-- No production `unwrap`, `expect` or `panic`. Every hit is in `rebind_tests.rs`, `panes/gate/tests.rs` or
-  `hold_tests`, under a linked allow.
-- Every new `#[allow]` carries `// #839`.
-- The largest touched files are `circuit.rs` 898 (+0), `pane_verbs/switch.rs` 895 and `roster.rs` 893. None is at 900.
-- No new `unsafe`, and no dead code (clippy `-D warnings`).
+- **No production panic paths.** No `unwrap`, `expect` or `panic` is added in production code. The one `panic!` in the
+  whole story's diff is `circuit/dispatch.rs:517`, inside `#[cfg(test)] mod hold_tests` under
+  `#[allow(..)] // #442, #646`.
+- **Allows:** no `#[allow]` is added without a `// #NNN` link.
+- **Sizes:** the largest touched file is `circuit.rs` at 898 (+0 for the story). This cycle's files are 106, 223, 310,
+  705 and 423 lines.
+- **Dependencies:** none is new.
 
-**Protocol: additive only.**
-- One new request, `session/rebind`; the catalog has 23 rows.
-- An optional `data.reason: "offline"` on `-32004`, and an optional `check_only` on `control/say` and `admin/say`.
-- `v2.md` updates the `-32004` and `-32009` rows, the `data` sentence, the presence sentence, the pane hold paragraph,
-  the "Re-pointing" paragraph and the `pane/*` note.
-- Three new goldens, and no existing golden changed.
+**Protocol: no change this cycle.** Across the whole story:
+- three goldens are added and none is modified;
+- `cli-surface.txt` and `scripts/` are untouched (D12).
 
 **Tests: meet the bar.**
-- Cross-process behaviour runs on a real hub and body against the fake OpenCode server (`driven_e2e_test.rs`, ephemeral
-  port, throwaway state).
-- Waits are bounded poll loops. The fake server's stall mode polls a flag. There are no fixed sleeps used as
-  synchronisation.
-- RED-first evidence is in `handoff-T-red.md`.
-- Gaps: REWORK 1.
+- **Real processes:** each new e2e test runs a real hub and a real body against the fake OpenCode server, on an
+  ephemeral port with throwaway state.
+- **No fixed sleeps:** the waits are bounded `wait_for` loops on the hub's own answer.
+- **The cases cannot pass vacuously:**
+  - `Rig::start` waits for each row's `harness_session_id`;
+  - the ambiguous case first checks the hub's `ambiguous` reason;
+  - the offline case waits for the hub's `offline` reason.
+- **Delivery:** each test also asserts that nothing reached the session.
 
-**Documentation: complete.**
-- `CHANGELOG.md` has an `## [Unreleased]` entry linking #839 and #828, and rewrites the #649 clause.
-- The README's `session` row names the new `rebind` event.
-- `docs/pane-control.md` has the `reset`, `park`, DRIVEN, cutover, "Later" and section 9 edits.
-- The edits listed for ADR-0021, 0014, 0005 and 0003 were checked against the brief's table.
+**Documentation: nothing more is needed this cycle.**
+- No doc quotes the `session-held` text.
+- The guide's sentence describes the normal case (advisory 5).
+- `CHANGELOG.md` has an `## [Unreleased]` entry linking #839 and #828 (checked in round 1).
 
-**Public-repository privacy: clean.** I grepped the added lines for IPs, `ts.net`, tailnet, host and account names,
-home paths, emails and keys. The only hits are a test message id (`m1`) and evidence excerpts quoting the existing
-placeholder `remote-a.example.ts.net`.
-
-**Message hygiene: one finding.** `crates/holler-cli/src/pane/wiring/hub.rs:173-192` (`HubClient::held`, new) puts
-`body.name` into the `session-held` message unquoted, twice. That name is the roster name of the body session, and
-its session part is the body's advertised `SessionAd.name`, an unvalidated wire `String` that the hub's roster does
-not check. The message also spells the command `holler release {name}` from it.
-
-D3: "every advertised name and id a message prints goes through `findings::quoted` ... and the command in these
-messages is built, never spelled". F applied this rule everywhere else:
-- `drive`;
-- `find_driver`;
-- `check_first`;
-- `refuse_elsewhere`;
-- `driven::named`;
-- reconcile's `check_driven`.
-
-Pane errors print raw in text mode (`output::emit_text`), so a body that advertises a crafted name reaches the
-operator's terminal through the one message that hands them a command to run.
+**Public-repository privacy: clean.**
+- I grepped every added line of `origin/main...HEAD` for IPs (other than `127.0.0.1`), `ts.net`, tailnet, host and
+  account names, home paths, email addresses and key shapes.
+- The only hits are the existing placeholder `remote-a.example.ts.net`, the epic's rule text, an existing
+  `auth_method = "api-key"` doc line, and the trailer address `noreply@anthropic.com`.
+- This cycle's new strings are test fixtures, such as `kiwi/oc; rm -rf ~` and an ESC sequence.
 
 **Commit and PR hygiene: no PR yet.**
-- Subjects are Conventional Commits.
-- The script's trailers are `Co-Authored-By: Claude <noreply@anthropic.com>`, with no session link. `main`'s
-  history shows the same for script commits, so this is the pipeline's behaviour, not this story's.
-- The PR is not open yet. The AI disclosure goes in after the script opens it (`CLAUDE.md`).
+- This cycle's three commits are Conventional Commits (`chore(#839): …`).
+- They carry the script's `Co-Authored-By: Claude <noreply@anthropic.com>` with no session link. Round 1 noted the
+  same: it is the pipeline's behaviour, not this story's.
+- The PR is not open yet. The AI disclosure is added after the script opens it (`CLAUDE.md`).
 
 ## Scope check
 
-**What the brief asked for is delivered.**
+**Delivered: exactly the rework.**
+- **REWORK 2:** three production files. S named one; F explained the other two (see Spec compliance).
+- **REWORK 1:** one e2e file.
+- **REWORK 2's pin:** one unit test, which F suggested.
 
-**Edits outside the Blast radius, each explained by F:**
-- `holler-hub/src/roster.rs` (+1) and `roster/rebind.rs` (new), for A's warn 1;
-- `holler-pane/src/tx_switch/plan.rs`, the brief's split rule;
-- `holler-pane-testkit/src/pane_store.rs`, for T's contract;
-- `README.md`, for the new log event.
+There is no unrelated refactor and no under-delivery.
 
-**Test files split for size:**
-- `pane_verbs/driven/{order,first,evidence,doctor}.rs` and `pane_claude/driven.rs`;
-- `holler-hub/tests/check_only_test.rs` and `driven_support/`.
-
-**Sizes above the brief's estimates, none at 900:**
-- the test kit's `hub.rs` is 317 lines (the brief said "under 250");
-- `say_cmd.rs` is 588 ("under 560");
-- `pane_verbs/switch.rs` is +2 ("no growth");
-- `roster.rs` is +1 ("no growth").
-
-**No unrelated refactors.**
-
-**Under-delivered:** Acceptance 18's pins (REWORK 1).
+**Round 1's scope notes stand:**
+- the edits outside the Blast radius, which F explained;
+- the sizes above the brief's estimates, none at 900. The test kit's `hub.rs` is now 310 lines, down from 317.
 
 ## Verdict
 
-**REWORK** (`reworkKind: production`: one production change plus test-only additions).
-
-1. **TEST-ONLY (no `src/` change; T writes it): Acceptance 18's unpinned clauses** (and Acceptance 7's last sentence).
-   Add them to `crates/holler-cli/tests/driven_e2e_test.rs`, which already has a real hub, a real body and `--join-held`
-   support.
-   - **(a) P5, holds keep exit 4.** Hold the body that drives P, first with an operator hold (`holler hold kiwi/oc`),
-     then with a default hold (a hub started with `--join-held kiwi/*`). Under each hold:
-     - `holler say --pane P TEXT` and `holler interrupt --pane P TEXT` exit 4 (`HELD_EXIT_CODE`) with the held refusal;
-     - stderr contains neither `pane-not-driven` nor `session-held`.
-
-     `answer` has no held arm (E125), so it is not in this pin.
-   - **(b) P5, a pane hold prints `PaneHeld`.** Seed P healthy, and a second pane that is parked and whose recorded
-     DRIVEN is P's id. `holler say --pane P --json TEXT` prints the `PaneHeld` object and exits 3, because the hub's
-     gate refuses for the parked pane.
-   - **(c) `pane-not-driven` in all three verbs, first.**
-     - `interrupt --pane Q` and `answer --pane Q 0` exit 3 with `pane-not-driven` for the pane no body drives, as `say
-       --pane Q` already does at `:244`.
-     - A pane whose id two live attach sessions advertise (`-32003` `ambiguous`; for example `Rig::start(&[("oa",
-       &id), ("ob", &id)])`) exits 3 `pane-not-driven` for `say --pane` and `interrupt --pane`, not the
-       `is_ambiguous` exit 2 (`interrupt_cmd.rs:200`, `say_cmd.rs:212`).
-     - A pane whose body is offline (stop the rig's body; the hub answers `-32004` with `data.reason: "offline"`)
-       exits 3 `pane-not-driven`.
-2. **PRODUCTION (F): `crates/holler-cli/src/pane/wiring/hub.rs:173-192`, `HubClient::held`.**
-   - Name the session with `findings::quoted`.
-   - Give the command `holler release <name>` only when the name parses as a `holler_proto::RoutableName`, whose
-     grammar has no space or shell metacharacter. Otherwise keep the existing fallback sentence, which spells no name.
-   - Keep D4's content: the kind, the reason and the release.
-   - `first.rs::reset_first_on_a_held_pane_is_session_held` (`contains("holler release kiwi/demo-c1r1")`) must stay
-     green. T-green re-runs the `session-held` tests.
+**PASS.** All 22 acceptance criteria are met and the implementation is spec-compliant. The quality is acceptable.
+Ready for O.
 
 ## Advisory notes (non-blocking)
 
-1. **Before the PR can merge (O or the run's agent): the branch conflicts with `origin/main`.** `origin/main` moved
-   to `6eff9cc` (#853) after this branch's base. `git merge-tree` reports one conflict, in `docs/adr/ADR-0021.md`,
-   "Decisions taken": #853 took items 32 and 33. By the brief's clash rule (2), whichever story merges second
-   renumbers, so #839's items 32 to 45 become 34 to 47, after #853's. Nothing elsewhere cites those numbers.
-   `CHANGELOG.md`, `ADR-0003.md`, `pane-control.md` and `profile_verbs/apply/rig.rs` merge cleanly.
-2. **A's Phase 3 warn 2 (P8, row (4)):** both panes get `One` for one body. This is built and pinned as P8 decided
-   (`driven_test.rs`, row 4). It is the operator's to revisit, and it is not reopened here.
-3. **A-dup's warns 1 to 6 are follow-ups.** None changes behaviour:
-   - the resolve scaffolding written twice;
-   - `FakeHub`'s copied words;
-   - the fast-gate order spelled in two places;
-   - `failed()`'s composition in two files;
-   - re-typed fixtures and `driven_support::id`;
-   - the test kit's `hub.rs` at 317 lines.
-4. **T-green's advisory 2: a slow failure.** A gate regression makes `driven_e2e_test.rs` take about ten minutes to
-   fail, because the conformance suite's real-client `Send` has a 600 s budget. A shorter budget there is a
-   follow-up.
-5. **T-green's advisory 3 predates this story.** `send_prompt` running `holds.admit` before the pane gate (a grant
-   spent on a prompt the gate then refuses, in a race only) is `main`'s order, unchanged by this story.
-6. **The body's rebind reason is broader than D2 names.** It reports every attach failure as `-32602` `"session not
-   found on the endpoint"`, a refused connection or an HTTP error included. The message carries the driver's own text,
-   and the CLI treats every rebind refusal as `unavailable`, so nothing is mis-mapped. A distinct reason is a possible
-   follow-up.
-7. **Two other pane messages pass hub or body text through raw.**
-   - `HubClient::refused` passes the hub's text for `Busy`. For `input-required` that text is the harness's question
-     (`control_say::refusal` sets `err.message = q`). The existing `say` busy hint deliberately does not print it.
-   - `reason_of` passes the body's refusal text.
+**New this round**
 
-   D5 says these carry the hub's text, so they are not rework. Escaping them (`quoted`, or an `embedded`-style escape)
-   is a cheap follow-up. Both are reachable only in a race after the plan's own refusals.
-8. **Acceptance 13's `admin/query` form is not exercised.** It reaches the same `hub_query_remote` (E99), whose
-   allowlist is pinned directly (`driven_resolve_test.rs` calls `LiveHandle::query("session/rebind")`). T-red named
-   this gap.
-9. **Acceptance 22, the doctor case.** `doctor_leaves_a_claude_pane_s_driven_as_stored` pins DRIVEN as stored. One
-   more line (`run_logged`, then `calls.hub.is_empty()`) would also pin "makes no `hub.advertised` observation".
-   Optional.
-10. **`profile_rename_faults_test` (#665)** is an inode-reuse flake that predates this story. It needs its own issue.
+1. **Before the PR can merge (O or the run's agent): the ADR-0021 conflict.**
+   - Re-checked at about 10:55 MDT. `git ls-remote` shows `main` still at `6eff9cc` (#853).
+   - `git merge-tree` reports one conflict: `docs/adr/ADR-0021.md`, "Decisions taken". #853 took items 32 and 33.
+   - By the brief's clash rule (2), #839's items 32 to 45 become 34 to 47. No doc or test cites those numbers.
+   - `CHANGELOG.md`, `ADR-0003.md`, `pane-control.md` and `profile_verbs/apply/rig.rs` merge cleanly.
+2. **ADR-0021 section 9 overstates for `answer`.**
+   - **Where:** line 827, the row "`say`, `interrupt`, `answer` with `--pane`".
+   - **What:** the clause #839 added reads "An operator or default hold on the body's session is still the held refusal
+     with exit 4, and a pane hold keeps its `PaneHeld` form". It is true of `say` and `interrupt` only (see the ruling).
+   - **Proposed:** "for `say` and `interrupt` (`answer` sends no prompt and is not gated)".
+   - **When:** it is one clause, and it can ride the ADR-0021 edit that advisory 1 needs, if O chooses.
+3. **The real client's `session-held` words are pinned by code alone.**
+   - **What is pinned:** the builder (`driven_test.rs`), and, through the verbs, `FakeHub` (`first.rs`).
+   - **The gap:** through the real client, `driven_e2e_test.rs:599-605` asserts only `session-held`. `HubClient::held`
+     could stop calling `session_held` with no test failing.
+   - **The fix:** one assertion there would pin it. The text should contain `"kiwi/oc" is held (default hold` and
+     `holler release kiwi/oc`. This is test-only and cheap, and not required.
+4. **A grammar split that predates this story.**
+   - **The two rules:**
+     - the hub mints labels by ADR 0005's regex `^[a-z0-9][a-z0-9-]{0,31}$` (`holler-hub/src/token.rs:414`), which
+       admits a trailing `-`;
+     - `RoutableName`'s segment check (`vocab.rs` `check_segment`) refuses one.
+   - **The effect:** for a body whose token label ends in `-`, `session-held` falls back to the id and spells no
+     command.
+   - **No new harm:** such names are already unroutable by name, because `say` refuses them by the same grammar.
+   - **Follow-up:** align the two grammars, outside this story.
+5. **`docs/pane-control.md:290` overstates for the fallbacks.**
+   - **What it says:** `session-held` "names the `holler release SESSION` that lifts it".
+   - **Two fallbacks name none:**
+     - a failed roster read (round 1);
+     - a name outside the grammar (this round). It is reachable only through a crafted advertisement or advisory 4's
+       label.
+   - **Weight:** non-blocking. F, T-green and A-dup flagged it too.
+6. **A third instance of round 1's advisory 7 (hub text passed through raw), on a non-race path.**
+   - **Where:** the `--pane` verbs' `pane_not_driven` (`say_cmd.rs:316`) appends the hub's text.
+   - **What:** for an ambiguous id, that text lists the candidate names unescaped (`ambiguous session …: candidates are
+     …`).
+   - **Why it is not rework:** D5 sanctions "the hub's text", and `say SESSION` printed the same text on `main`.
+   - **Follow-up:** one fix covers all three instances: escape the passed-through text, with `quoted` or an
+     `embedded`-style escape.
+
+**Carried from round 1** (`git show fde8eb8:docs/handoffs/839/handoff-S.md`; the number is round 1's)
+
+- **2, P8 row (4):** the operator's to revisit.
+- **3, A-dup's warns 1 to 6:** follow-ups. Warn 2 is now half fixed: the `session-held` copy is gone, while `FakeHub::why`
+  and the pane gate's sentence remain.
+- **4, a slow failure:** a gate regression makes `driven_e2e_test.rs` slow to fail, because of the 600 s `Send` budget in
+  the conformance suite.
+- **5, the spent grant:** the grant spent before the pane gate refuses is `main`'s order.
+- **6, the rebind reason:** the body's rebind reason is broader than D2 names.
+- **8, `admin/query`:** Acceptance 13's `admin/query` form is not exercised.
+- **9, Acceptance 22's doctor case:** it could also pin that no `hub.advertised` call is made.
+- **10, a flake:** the `profile_rename_faults_test` flake (#665) predates this story.
