@@ -77,7 +77,10 @@ runs with `LANG=C`." Made observable:
    adapter's `shown_session` for a pane whose title is `OC | ses_...` and whose start command is an `opencode attach` line
    returns that session id, not "no tmux session". The test fails (RED) before the change.
 3. `cargo test -p holler-adapter-opencode` and `cargo test -p holler-cli --test pane_integration` pass; the #649 scenario no
-   longer needs a test-chosen UTF-8 locale and its `LANG=C.UTF-8` line is removed (the scenario runs with the ambient `LANG`).
+   longer needs a test-chosen UTF-8 locale: its `LANG=C.UTF-8` line is removed from `binary_env`, and the guard test
+   `the_binary_env_is_built_from_nothing_inherited` (`guards.rs`) is updated to match (no `"LANG"` in the name set, and an
+   assertion that no `LANG` and no `LC_*` name is in the env). `binary_env` inherits nothing, so the scenario's binary now runs
+   with no locale at all, which is exactly the failing case of the issue: the scenario becomes a stronger pin, not a weaker one.
 4. `grep -n '"-u"' crates/holler-adapter-opencode/src/tui.rs` shows the one place `-u` is added; no second tmux builder exists.
 5. No behaviour change otherwise: every other `attach_test.rs` assertion on a tmux call still passes with only the `-u`
    position accounted for (see Files, Fake tmux).
@@ -89,27 +92,43 @@ rule list, "One tmux server" / add a rule "UTF-8 output": why `-u`). Optionally 
 
 Tests (T edits or adds):
 - `crates/holler-adapter-opencode/tests/tui_test.rs`: update `ac11c` so `expected` is `flag ++ ["-u"] ++ call`.
-- Fake tmux: no fixture change is needed, because `-u` goes after `-S <path>`, so `$1` is still `-S`. But the fixture records
-  `-u` as the first recorded token of every call, so `attach_test.rs` expectations (`query()`, `:203`, `:358`, `:409` and the
-  other recorded-call comparisons) must either start with `"-u"` or the fixture must skip a `-u` that follows the socket.
-  Decided (below): the fixture skips it, so `attach_test.rs` keeps its assertions and the recorded calls stay "the call tmux was
-  asked". `fake-tmux` keeps git mode 100755 and its POSIX-sh-and-`cat`-only rule (AC 33).
+- Fake tmux (`fake-tmux`): `-u` goes after `-S <path>`, so `$1` is still `-S`, but the fixture would record `-u` as the first
+  token of every call. Decided (below): after `shift 2` the fixture REQUIRES `$1` to be `-u` (prints a usage line and exits 64
+  otherwise) and then shifts it, so it is not recorded; `attach_test.rs` keeps its assertions and the recorded calls stay "the
+  call tmux was asked". This pins every hermetic call site, not only `ac11c`. `fake-tmux` keeps git mode 100755 and its
+  POSIX-sh-and-`cat`-only rule (AC 33). Update the contract comments (see the list below).
 - New RED test: a real-tmux test run with `LANG=C` (see Test plan), in a new file, `crates/holler-adapter-opencode/tests/utf8_locale_test.rs`
   (not appended to `real_opencode_test.rs`, which is an opt-in real-OpenCode rig behind `OPT_IN`). Skips cleanly with an
   `eprintln!` when no `tmux` is on `PATH`, as `real_opencode/rig.rs:90` does for its opt-in.
-- `crates/holler-cli/tests/pane_integration/scratch/mod.rs`: remove the `("LANG", "C.UTF-8")` entry and its comment (line 253-257).
+  It carries its own two small helpers: a `PATH` lookup for `tmux` and a private-socket tmux runner (`-S <sock>`, `TMUX` and
+  `TMUX_PANE` removed, stdin null). It cannot include `real_opencode/rig.rs` (`rig.rs:96` `on_path`, `:154` `tmux`): the workspace
+  lint `dead_code = "deny"` (`Cargo.toml:33`) rejects the rig's unused items in a second test file, and `rig::binaries()`
+  (`rig.rs:105`) panics without opencode. This is deliberate, so Phase A's anti-duplication pass should not flag the two helpers
+  as a near-copy. The call under test uses `tui::{tmux_command, query_args, parse_query}` (`tui.rs:114`, `:219`, `:232`).
+  Cleanup: a guard struct built BEFORE `new-session`, whose `Drop` runs `kill-server` on the private socket and removes the
+  tempdir (the shape of `rig.rs` `Guard`, `:168-186`), so a failed assertion leaks no server.
+- `crates/holler-cli/tests/pane_integration/scratch/mod.rs`: remove the `("LANG", "C.UTF-8")` entry and its comment (line 253-257),
+  and fix the `binary_env` doc comment at line 234 ("a UTF-8 `LANG`" no longer in the list; say the env carries no locale on purpose).
+- `crates/holler-cli/tests/pane_integration/guards.rs`: in `the_binary_env_is_built_from_nothing_inherited`, drop `"LANG"` from the
+  expected name set (line 109) and the `assert_eq!(value(&env, "LANG"), "C.UTF-8", ...)` (line 128); add an assertion that no
+  name equals `LANG` or starts with `LC_`. Without this edit `cargo test -p holler-cli --test pane_integration` (AC 3) fails.
+- `crates/holler-adapter-opencode/tests/fixtures/fake-tmux` (contract comment, line 5) and
+  `crates/holler-adapter-opencode/tests/support/fake_tmux.rs` (module doc, line 7): update to say the call is
+  `fake-tmux -S <path> -u <subcommand> [args...]` and that `-u` is not recorded.
 
 Reuse map (extend, do not duplicate): `tmux_command` is the single builder; `support/fake_tmux.rs` (`Fake`, `fixture`) for the
-hermetic side; the private-socket-in-`/tmp` pattern of `tests/real_opencode/rig.rs` (short path, `-f /dev/null`, never the default
-server) for the real side.
+hermetic side; for the real side only the PATTERN of `tests/real_opencode/rig.rs` (short `/tmp` path, `-f /dev/null`, never the
+default server, a `Drop` guard that kills the server), re-written as two small helpers in the new test file because the rig cannot
+be included (see Files). `tui::{tmux_command, query_args, parse_query}` for the call under test.
 
 ## Decisions already made (MO)
 1. `-u`, not tab-escape parsing. The issue offers both; `-u` is a client flag with no change to the query format, the parser or
    any reply, and is the fix the issue's reproduction names. Parsing `_` for TAB would be ambiguous with a title that holds `_`.
 2. `-u` goes after the socket flag and before the call arguments (tmux accepts global flags in any order), so `$1` stays `-S` for
    the fake and the recorded-call comparisons only need the fixture's skip.
-3. The fixture skips a leading `-u` when recording (one `[ "$1" = "-u" ] && shift` after `shift 2`), but the new real-tmux test is
-   the pin that tmux really gets `-u`; `ac11c` pins the argv.
+3. The fixture requires `-u` right after `-S <path>` (exit 64 otherwise) and does not record it: after `shift 2`,
+   `if [ "$1" != "-u" ]; then <usage to stderr>; exit 64; fi; shift`. The new real-tmux test is the pin that tmux really gets
+   `-u`; `ac11c` pins the argv; the fixture pins every hermetic call site.
 4. The locale of the child is not forced (`LC_ALL=C.UTF-8` would fail on a host without that locale); `-u` makes tmux assume UTF-8
    whatever the locale. No env var is added or removed.
 
@@ -123,10 +142,11 @@ RED first (T authors, runs before F writes code):
 1. `ac11c` extended to expect `-u`: fails today, args lack `-u`.
 2. New real-tmux test (`utf8_locale_test.rs`): start a private tmux server (`-S <short /tmp path> -f /dev/null`) with a detached
    session named as a `PaneName` running `sleep`, set its pane title with `select-pane -T 'OC | ses_x'`, then run
-   `tmux_command(&TmuxConfig { tmux_bin, socket: Path }, &query_args(&name))` with `.env("LANG","C").env_remove("LC_ALL")`
-   (and again with `LC_ALL=C`), and assert `parse_query` returns `Query::Live { title: "OC | ses_x", .. }`, not `NoPane`. It needs
+   `tmux_command(&TmuxConfig { tmux_bin, socket: Path }, &query_args(&name))` with `.env("LANG","C").env_remove("LC_ALL").env_remove("LC_CTYPE")`
+   (and again with `.env("LC_ALL","C").env_remove("LANG").env_remove("LC_CTYPE")`; tmux checks `LC_ALL`, then `LC_CTYPE`, then
+   `LANG`, so an ambient UTF-8 `LC_CTYPE` would otherwise stop the test being RED), and assert `parse_query` returns `Query::Live { title: "OC | ses_x", .. }`, not `NoPane`. It needs
    no OpenCode. RED today: the reply has `_` for TAB, so `parse_query` returns `NoPane`.
-3. GREEN after F adds `-u`; the fixture skip keeps `attach_test.rs` green unchanged. The #649 scenario with `LANG` removed is
+3. GREEN after F adds `-u`; the fixture's `-u` check-and-shift keeps `attach_test.rs` green unchanged. The #649 scenario with `LANG` removed is
    verified by `cargo test -p holler-cli --test pane_integration` (it is opt-in/skips without real binaries; T runs it if the
    rig's opt-in is available, otherwise states it was not run).
 Run with `cargo test -p holler-adapter-opencode`; never `cargo fmt` workspace-wide (format only the touched files).
