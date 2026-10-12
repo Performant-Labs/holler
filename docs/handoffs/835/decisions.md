@@ -291,3 +291,69 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - the rule always `false`: 4 tests fail
     - dead panes kept: 1 test fails
   - `evidence.md`: one T entry (`ProfileSpec.pane`).
+
+## A, up-front plan review (fourth pass, re-entry after T-green's BLOCK): 2026-10-11T19:16-06:00 (MDT)
+
+- **Decided:** PASS, with 0 `block` and 4 `warn` findings (`docs/handoffs/835/handoff-A.md`, which replaces pass 3's text;
+  pass 3 is at `49e4508`).
+  - **Why A ran again.** T-green returned BLOCK and F had reported `archChanged`, so the script sent the run back to A
+    (`nextPhase`, case 7). The brief is unchanged since pass 3 (sha256 `bac2232a86462e4f...`), so this pass did two things:
+    - checked F's cycle 1 for drift;
+    - reviewed the rework.
+  - **Cycle 1 has no drift.** F extended every object the plan named, in its layer. F's design decision 1 (the server of
+    a pane whose tmux read failed is still asked) fits pass 3's note 4.
+  - **The rework needs no contract decision.** Brief section 6 and R2-3 cover it.
+
+  The warns:
+  1. **The merge comes first, and it must be a real two-parent merge of `origin/main`.**
+     - T-red makes it with `--no-commit`, and the script commits. Otherwise F makes it before its first edit.
+     - Never a rebase, a squash or a copy.
+  2. **#840 says in four places that #835 calls its registry rule.** T-green listed three. The fourth is the doc comment
+     of #840's test `the_unmanaged_predicate_is_public_and_one_rule`.
+  3. **This story's own text says #832 reuses the predicate.** The places are `pane.rs:146`, ADR-0021 section 13
+     (`:966-967`) and `claude_code_rule_test.rs:3-4`. #832 closed without it.
+  4. **The guide is stale in five places beyond its findings table:**
+     - section 1;
+     - section 3's synopsis, its `observe-failed` row and its exit codes;
+     - section 10's fact and its step 1;
+     - section 12.
+
+     `ImportFinding::ObserveFailed`'s doc is stale too.
+- **Assumed:**
+  - `origin/main` stays at `bda1069` until the merge. If it moves, the merge takes the new tip and the same notes apply.
+  - The script's phase commit (`git add -A`, then `git commit -m ... --allow-empty`) turns a merge left by
+    `git merge --no-commit` into a two-parent commit, as git does while `MERGE_HEAD` exists. This was not run here,
+    because the role is read-only.
+  - T-red and F read this handoff's notes, as they read pass 3's.
+- **Hedged:**
+  - **W1 departs from T-green's routing only in who goes first.** Either order reaches the same tree. T-red goes first
+    so that its RED is on the branch, which avoids a T-red retry loop (`T_RED_BLOCK_CAP` is 10).
+  - **W4's flag pin is optional,** and the guide's wording is F's.
+  - **"#832 closed without a second signal" rests on a grep** of every `src` for process or agent detection. #832's
+    diff was not read again.
+- **Evidence:**
+  - **The branch and its state:**
+    - `git log`, `git reflog` and `git diff --stat` of the branch (`1aeb42c..25ff495`);
+    - `git fetch` at 18:57 and 19:05 MDT (`origin/main` is `bda1069`);
+    - `gh issue view 832` (closed at 15:35 MDT) and `gh issue view 831` (open);
+    - `gh pr list` (#852 and #673 are open, and neither shares a file with #835).
+  - **The pipeline script:**
+    - `nextPhase` case 7, `shouldEscalate`, `T_RED_BLOCK_CAP`, `decideArchReReview` and `buildPhaseCommitTaskPrompt`;
+    - `feature.md` (`archChanged`), and what `tester.md` and `feature.md` say about commits.
+  - **F's cycle 1:** `git diff 36b0de8 9bd101b` of every production file; handoff-F, handoff-T-red, handoff-T-green,
+    `evidence.md` and this journal.
+  - **`main`:**
+    - `git show bda1069` (`unmanaged.rs`, ADR-0021, `mod.rs`, `CHANGELOG.md`) and `git show 0e62b51 --stat`;
+    - `docs/pane-control.md` (sections 1, 3, 10, 11 and 12);
+    - `docs_pane_control_test.rs` (acceptance 1, 8, 9, 14 and 17).
+  - **The merge:** `git merge-tree --write-tree HEAD origin/main` gives tree `2ff3c92`, with no conflict. In that tree:
+    - every `835` mention outside the handoffs;
+    - `wc -l` of every touched `.rs` file (the largest is `launch/rig.rs`, 839 lines, under 900);
+    - `unmanaged.rs:63-84` and `tests/pane_verbs/unmanaged.rs:467-486`.
+  - **The commit hooks:**
+    - `git diff HEAD 2ff3c92 | grep '^+' | gitleaks stdin` (no leaks);
+    - `.githooks/{pre-commit,commit-msg,prepare-commit-msg}`;
+    - `scripts/lint.sh` (the size gate covers `crates/**/*.rs` only).
+  - **grep:**
+    - `"claude"` in every non-test `.rs` file: only `pane.rs:147` in `holler-pane`;
+    - `ObserveFailed`: now raised for the harness reads only.
