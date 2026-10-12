@@ -1,18 +1,22 @@
 //! `holler pane reset PANE [--as-operator] [--profile NAME] [--first TEXT]` (story #645): start
 //! a pane on a fresh session. The run creates it on the pane's harness server, shows it in the
-//! TUI and records it, through the engine `pane switch` uses (`holler_pane::tx_switch`, with a
-//! `Target::Fresh`), then, with `--first`, queues `TEXT` to it through the harness API. It is
-//! the remedy `pane doctor` names for a pane with no session of record and for one whose
-//! session of record is gone.
+//! TUI, re-points the pane's body to it and records it, through the engine `pane switch` uses
+//! (`holler_pane::tx_switch`, with a `Target::Fresh`), then, with `--first`, queues `TEXT` to it
+//! through the hub's one prompt path (#839), accepted and returned. It is the remedy `pane
+//! doctor` names for a pane with no session of record and for one whose session of record is
+//! gone.
 //!
 //! The arguments, the output and the exit codes are `pane switch`'s (`super::switch`), and the
 //! text line is `reset <pane> to a new session "<id>" (was "<id>")`. A pane whose session of
-//! record is running a turn or holds a question is refused before anything moves
-//! (`session-busy`, `session-holds-question`). A failure after the session was created names
-//! it: it stays on the server unrecorded, and doctor reports it as a stray session. A first
-//! message that does not land fails the run after the record, which stands. After a
-//! successful reset the previous session stays on the server too, as a stray: no port deletes
-//! a session.
+//! record, or whose body, is running a turn or holds a question is refused before anything
+//! moves (`session-busy`, `session-holds-question`). With `--first`, the hub's gate is asked
+//! before anything moves too: a parked, held or unhealthy pane, one whose SHOWN and DRIVEN
+//! differ, and one no body drives (whose body is not on its session of record) are refused
+//! (`pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`,
+//! `pane-not-driven`). A failure after the session was created names it: it stays on the server
+//! unrecorded, and doctor reports it as a stray session. A first message that does not land
+//! fails the run after the record, which stands. After a successful reset the previous session
+//! stays on the server too, as a stray: no port deletes a session.
 
 use clap::Args;
 use holler_pane::tx_switch::Target;

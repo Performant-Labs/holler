@@ -77,6 +77,7 @@ impl Rig {
             harness: &self.harness,
             scope: &self.scope,
             prober: &self.prober,
+            hub: &holler_cli::pane::wiring::Unwired,
         }
     }
 

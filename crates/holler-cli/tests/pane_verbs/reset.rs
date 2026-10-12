@@ -5,13 +5,16 @@
 use std::sync::Arc;
 
 use holler_pane::findings::FindingKind as K;
+use holler_pane::hub::PromptMode;
 use holler_pane::ports::Activity;
 use holler_pane::reconcile::Report;
 use holler_pane::{HarnessEndpoint, HarnessPort, PaneError};
 use holler_pane_testkit::harness::{HarnessOp as H, Quirk};
+use holler_pane_testkit::hub::HubOp;
 use holler_pane_testkit::pane_store::PaneStoreOp;
 
 use crate::doctor::rig::{keys, kinds, of_kind, one, whole, Rig, Seed};
+use crate::driven::drive;
 use crate::switch::{
     argv, both, both_with, both_with_missing_record, data, failed, failed_before_the_act, Case,
     SeamHarness, SeamLog, P, Q, RECONCILE_P,
@@ -86,6 +89,8 @@ fn reset_creates_a_fresh_session_and_switches_to_it() {
         assert_eq!(case.calls.harness, ops, "{:?}", case.format);
         let writes = [PaneStoreOp::Get, PaneStoreOp::CasPut];
         assert_eq!(case.calls.panes, writes, "{:?}", case.format);
+        // #839: the plan asks the hub once; with no body it reads nothing else (A's warn 4).
+        assert_eq!(case.calls.hub, [HubOp::Advertised], "{:?}", case.format);
     }
     let [text, json] = &cases;
     let (s1, new) = (&text.rig.live(P).session, text.record(P).session_of_record);
@@ -324,58 +329,75 @@ fn reset_over_seam(
     both_with(build, words, exec)
 }
 
-/// ACs 1 and 2 (part 2), the "order ran in the wrong session" incident as a test:
-/// with `Q` and the old session present (one shared data directory, so the server
-/// lists both), `--first` queues the text to the NEW session only — never the old
-/// one, never another pane's session or port — and only after the record write. The
-/// run is part 1's reset otherwise (same fake-log op sequence; no keystroke, by the
-/// runner's I4 check).
+/// ACs 1 and 2 (part 2), the "order ran in the wrong session" incident as a test, through the
+/// hub's one prompt path since #839 (E83): with `Q` and the old session present and a body
+/// driving each pane, `--first` is checked at the hub before the act on the OLD session of
+/// record, the body is re-pointed after `shown_session`, and the text is queued through the hub
+/// to the NEW session only, after the record write. `HarnessPort::send_prompt` is never called.
 #[test]
 fn reset_with_first_queues_the_message_to_the_new_session_only() {
-    let cases = reset_over_seam(
-        || Rig::new(&[Seed::new(P, 1, 1), Seed::new(Q, 1, 2)]),
-        &["--first", "ship the fix"],
-        Activity::Idle,
-        None,
-    );
+    let build = || {
+        let rig = Rig::new(&[Seed::new(P, 1, 1), Seed::new(Q, 1, 2)]);
+        drive(&rig, P);
+        drive(&rig, Q);
+        rig
+    };
+    let cases = reset_over_seam(build, &["--first", "ship the fix"], Activity::Idle, None);
     data(&cases);
     for case in &cases {
-        let s1 = case.rig.live(P).session.clone();
-        let q = case.rig.live(Q).session.clone();
-        let new = case
-            .record(P)
+        let f = case.format;
+        let (s1, q) = (
+            case.rig.live(P).session.clone(),
+            case.rig.live(Q).session.clone(),
+        );
+        let after = case.record(P);
+        let new = after
             .session_of_record
+            .clone()
             .expect("the new session of record");
-        assert_ne!(
-            &new, &s1,
-            "{:?}: a new session, not the old one",
-            case.format
-        );
-        assert_ne!(&new, &q, "{:?}: not the other pane's session", case.format);
-        case.assert_recorded(&new);
-        let ops = [
-            H::Health,
-            H::CreateSession,
-            H::SelectSession,
-            H::ShownSession,
-        ];
-        assert_eq!(case.calls.harness, ops, "{:?}", case.format);
-        let prompts = case.setup.prompts();
+        assert!(new != s1 && new != q, "{f:?}: a new session: {new}");
         assert_eq!(
-            prompts.len(),
-            1,
-            "{:?}: one prompt, to the new session only: {prompts:?} (old {s1:?}, {Q} {q:?})",
-            case.format
-        );
-        let prompt = &prompts[0];
-        assert_eq!(prompt.port, case.rig.live(P).port, "{:?}", case.format);
-        assert_eq!(prompt.session, new, "{:?}: the new session", case.format);
-        assert_eq!(prompt.text, "ship the fix", "{:?}", case.format);
-        assert_eq!(
-            prompt.then_of_record.as_deref(),
+            after.last_observed.driven.as_deref(),
             Some(new.as_str()),
-            "{:?}: the prompt follows the record write",
-            case.format
+            "{f:?}: DRIVEN"
+        );
+        assert!(
+            case.setup.prompts().is_empty(),
+            "{f:?}: no harness send_prompt"
+        );
+        let log: Vec<_> = case
+            .rig
+            .hub
+            .log()
+            .into_iter()
+            .map(|c| (c.op, c.id, c.mode, c.of_record))
+            .collect();
+        let want = [
+            (HubOp::Prompt, s1.clone(), Some(PromptMode::Check), true),
+            (HubOp::Rebind, new.clone(), None, false),
+            (HubOp::Prompt, new.clone(), Some(PromptMode::Send), true),
+        ];
+        assert_eq!(
+            log, want,
+            "{f:?}: checked before, re-pointed, then sent after the record"
+        );
+        let sent = case.rig.hub.prompts();
+        assert_eq!(sent.len(), 1, "{f:?}: one prompt: {sent:?}");
+        assert_eq!(
+            (sent[0].id.as_str(), sent[0].text.as_str()),
+            (new.as_str(), "ship the fix")
+        );
+        let bodies: Vec<String> = case
+            .rig
+            .hub
+            .bodies()
+            .into_iter()
+            .map(|b| b.harness_session_id)
+            .collect();
+        assert_eq!(
+            bodies,
+            [new.clone(), q.clone()],
+            "{f:?}: P's body follows; Q's is untouched"
         );
     }
 }
@@ -415,26 +437,26 @@ fn reset_without_first_queues_no_prompt() {
     }
 }
 
-/// AC 3 (part 2): a `send_prompt` failure after a successful record is reported
-/// honestly: the run fails with the port's own code, the message says the first
-/// message did not land, and nothing is appended — no reconcile step (the record is
-/// correct) and no "is not recorded" clause (the session IS recorded). The record
-/// and the TUI stand exactly as a successful reset left them.
+/// AC 3 (part 2), through the hub since #839 (E84): a first message the hub refuses after a
+/// successful record (`Check` admitted, `Send` refused: a race) is reported honestly: the run
+/// fails with the refusal's own code, the message says the first message did not land, and
+/// nothing is appended (no reconcile step, no "is not recorded"). The record and the body stand
+/// as a successful reset left them.
 #[test]
 fn reset_first_prompt_failure_after_the_record_is_honest() {
-    let fault = PaneError::Unavailable {
-        what: "the harness".to_owned(),
+    let build = || {
+        let rig = Rig::new(&[Seed::new(P, 1, 1)]);
+        drive(&rig, P);
+        rig.hub.fail_send(PaneError::Unavailable {
+            what: "the hub".to_owned(),
+        });
+        rig
     };
-    let cases = reset_over_seam(
-        || Rig::new(&[Seed::new(P, 1, 1)]),
-        &["--first", "ship the fix"],
-        Activity::Idle,
-        Some(fault),
-    );
+    let cases = reset_over_seam(build, &["--first", "ship the fix"], Activity::Idle, None);
     for message in failed(&cases, 1, "unavailable") {
         assert!(
             message.contains("first message did not land"),
-            "names what failed: {message:?}"
+            "{message:?}"
         );
         assert!(
             !message.contains("to reconcile"),
@@ -446,17 +468,29 @@ fn reset_first_prompt_failure_after_the_record_is_honest() {
         );
     }
     for case in &cases {
-        assert_eq!(
-            case.setup.prompts().len(),
-            1,
-            "{:?}: the prompt was attempted",
+        let after = case.record(P);
+        let new = after
+            .session_of_record
+            .clone()
+            .expect("the new session of record");
+        assert_ne!(
+            new,
+            case.rig.live(P).session,
+            "{:?}: the reset stands",
             case.format
         );
-        let new = case
-            .record(P)
-            .session_of_record
-            .expect("the new session of record");
-        case.assert_recorded(&new);
+        assert_eq!(after.last_observed.driven.as_deref(), Some(new.as_str()));
+        assert!(
+            case.rig.hub.prompts().is_empty(),
+            "{:?}: nothing landed",
+            case.format
+        );
+        assert!(
+            case.setup.prompts().is_empty(),
+            "{:?}: no harness send_prompt",
+            case.format
+        );
+        assert_eq!(case.shown(P).as_deref(), Some(new.as_str()));
     }
 }
 

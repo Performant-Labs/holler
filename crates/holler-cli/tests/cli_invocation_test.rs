@@ -318,6 +318,8 @@ fn hub_status_without_live_hub() {
 // `hub_status_without_live_hub` gives `hub status` above. The full
 // route/busy-check/coalesce/TalkLog path against a real hub+body is pinned by
 // `crates/holler-cli/tests/talk_test.rs`.
+// #839 (P3): the target is a valid session name; one that is not (`SESSION`) is
+// now refused `unknown session` by the CLI before any hub is contacted.
 #[test]
 fn say_without_live_hub_exits_1() {
     let state = std::env::temp_dir().join(format!("holler-inv-say-{}", std::process::id()));
@@ -325,7 +327,7 @@ fn say_without_live_hub_exits_1() {
     holler()
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
-        .args(["say", "SESSION", "TEXT"])
+        .args(["say", "session", "TEXT"])
         .assert()
         .failure()
         .code(1)
@@ -334,7 +336,7 @@ fn say_without_live_hub_exits_1() {
     holler()
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
-        .args(["--json", "say", "SESSION", "TEXT"])
+        .args(["--json", "say", "session", "TEXT"])
         .assert()
         .failure()
         .code(1);
@@ -384,7 +386,7 @@ fn interrupt_without_live_hub_exits_1() {
     holler()
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
-        .args(["interrupt", "SESSION"])
+        .args(["interrupt", "session"])
         .assert()
         .failure()
         .code(1)
@@ -394,7 +396,7 @@ fn interrupt_without_live_hub_exits_1() {
     holler()
         .env("HOLLER_STATE_DIR", &state)
         .env("NO_COLOR", "1")
-        .args(["--json", "interrupt", "SESSION"])
+        .args(["--json", "interrupt", "session"])
         .assert()
         .failure()
         .code(1);

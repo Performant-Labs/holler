@@ -19,6 +19,7 @@ use holler_pane::{
 };
 use holler_pane_testkit::envelope::{check_envelope, Envelope};
 use holler_pane_testkit::harness::{FakeHarness, HarnessOp, HarnessOp as H, Quirk, TuiView};
+use holler_pane_testkit::hub::HubOp;
 use holler_pane_testkit::pane_store::{FakePaneStore, PaneStoreOp};
 use holler_proto::clock::now_millis;
 use serde_json::Value;
@@ -75,8 +76,9 @@ impl<T> Case<T> {
     }
 
     /// The run recorded `target` for `P` and its TUI shows it: the record before the run with
-    /// exactly `session_of_record`, `last_observed.shown`, `last_observed.at` (now) and
-    /// `harness.health` (healthy) set, and its generation bumped by one.
+    /// `session_of_record`, `last_observed.shown`, `last_observed.at` (now) and `harness.health`
+    /// (healthy) set, DRIVEN observed `None` (no body drives `P` on these rigs, #839), and its
+    /// generation bumped by one.
     pub fn assert_recorded(&self, target: &str) {
         let label = format!("{:?}", self.format);
         let before = self.before(P);
@@ -87,7 +89,8 @@ impl<T> Case<T> {
         want.last_observed.shown = Some(target.to_owned());
         want.last_observed.at = after.last_observed.at;
         want.harness.health = Health::Healthy;
-        assert_eq!(after, want, "{label}: exactly the four fields change");
+        want.last_observed.driven = None;
+        assert_eq!(after, want, "{label}: exactly those fields change");
         let (start, end) = self.window;
         assert!(
             (start..=end).contains(&after.last_observed.at),
@@ -297,10 +300,9 @@ fn switch_moves_the_tui_and_the_record_together() {
     let data = data(&cases);
     for case in &cases {
         case.assert_recorded(&case.setup);
-        assert_eq!(
-            case.record(P).last_observed.driven.as_deref(),
-            Some("ses_driven")
-        );
+        // #839 D3 step 5: DRIVEN is observed, never kept: no body drives P, so the stale value goes.
+        assert_eq!(case.record(P).last_observed.driven, None);
+        assert_eq!(case.calls.hub, [HubOp::Advertised], "{:?}", case.format);
         let (harness, panes) = (&case.calls.harness, &case.calls.panes);
         let ops = [
             H::Health,

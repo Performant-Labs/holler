@@ -434,7 +434,7 @@ Every event carries a `component`, identifying which layer of a `say`/`interrupt
 | component     | Role | What it logs |
 | -------------- | ---- | ------------- |
 | `wire`         | hub, body | Every JSON-RPC message in/out over the hub↔body WebSocket circuit (`session/prompt`, `session/update`, `session/presence`, `circuit/ping`, …). |
-| `session`      | body | A session's mailbox enqueue/dequeue, its FIFO queue depth (`queue_enqueue`/`queue_dequeue`/`queue_full`), and its state transitions (`idle`/`working`/`input-required`). |
+| `session`      | body | A session's mailbox enqueue/dequeue, its FIFO queue depth (`queue_enqueue`/`queue_dequeue`/`queue_full`), its state transitions (`idle`/`working`/`input-required`), and a `rebind` with the `harness_session_id` an attach session was re-pointed to ([#839](https://github.com/Performant-Labs/holler/issues/839)). |
 | `acp`          | body | ACP v2 requests/notifications to/from a spawned harness child (redacted), plus the child's spawn attempt/success/failure and connection-closed ("child exit") events. |
 | `http_attach`  | body | Each HTTP call the attach driver makes to an externally-owned OpenCode session (method, path, status, elapsed ms), plus SSE connect/event/drop. |
 | `talklog`      | hub | Each line appended to a session's on-disk talklog (`prompt`/`update`/`done`). |

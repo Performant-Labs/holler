@@ -18,8 +18,8 @@ use holler_pane::{PaneError, Ports};
 use crate::pane::wiring::Wiring;
 use crate::prompt_target::{PromptArgs, PromptTarget, Routed, Stop};
 use crate::say_cmd::{
-    pane_hold_refusal, resolve_pane_record, route_target, routing_stop, session_of_record,
-    INTERRUPT_TEXT_UNSUPPORTED,
+    pane_hold_refusal, pane_not_driven, resolve_pane_record, route_target, routing_stop,
+    session_of_record, INTERRUPT_TEXT_UNSUPPORTED,
 };
 use crate::Interrupt;
 
@@ -109,7 +109,11 @@ fn route(interrupt: &Interrupt) -> Result<Next, Stop> {
         .and_then(|wiring| interrupt_pane(wiring.ports(), &pane, profile, arg.as_deref()))
         .map_err(|error| routing_stop(&error))?;
     Ok(match answer {
-        PaneInterrupt::Hub { session } => Next::Hub(Routed { session, arg }),
+        PaneInterrupt::Hub { session } => Next::Hub(Routed {
+            session,
+            arg,
+            pane: Some(pane),
+        }),
         PaneInterrupt::Relaunched { session } => Next::Relaunched { pane, session },
     })
 }
@@ -149,7 +153,7 @@ fn relaunched(pane: &str, session: &str, json: bool) -> InterruptResult {
 /// pane (#831) is relaunched on its session of record instead ([`interrupt_pane`]), and the run
 /// prints `interrupted <pane>: relaunched on its session of record "<session>"`, exit 0.
 pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
-    let Routed { session, arg } = match route(interrupt) {
+    let Routed { session, arg, pane } = match route(interrupt) {
         Ok(Next::Hub(routed)) => routed,
         Ok(Next::Relaunched { pane, session }) => return relaunched(&pane, &session, json),
         Err(stop) => return err(stop.message, stop.exit_code),
@@ -175,6 +179,11 @@ pub fn run(interrupt: &Interrupt, json: bool) -> InterruptResult {
         }
         Err(holler_hub::control::ControlError::RemotePolicyRefused(msg)) => err(msg, 3),
         Err(holler_hub::control::ControlError::Refused(e)) => {
+            // #839: for `--pane`, no live body for the pane's id is `pane-not-driven`, first,
+            // ahead of the ambiguous exit 2 below.
+            if let Some(stop) = pane_not_driven(pane.as_deref(), &session, &e) {
+                return err(stop.message, stop.exit_code);
+            }
             // The pane arm comes first (story #646): the redirect passes
             // `send_prompt`, whose pane-state gate is no hold to release.
             if let Some(refused) = pane_hold_refusal(&session, &e, json) {

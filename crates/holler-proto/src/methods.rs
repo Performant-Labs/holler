@@ -1,8 +1,9 @@
 //! The v2 method catalog (docs §4).
 //!
-//! Twenty-two methods, four kinds, three directions. `catalog()` is the
+//! Twenty-three methods, four kinds, three directions. `catalog()` is the
 //! single source of truth — the body/hub dispatch and the codec's
-//! `method_not_found` path both read from it.
+//! `method_not_found` path both read from it. (Twenty-two until issue #839
+//! added `session/rebind`, an additive hub-to-body request.)
 //!
 //! Kinds:
 //! - **Request** — expects exactly one response carrying the request's `id`.
@@ -13,13 +14,13 @@
 //!   `hello.role`).
 //! - **body→hub** — join / authenticate, and (issue #508) the seven
 //!   `admin/*` rows, legal only on an admin-role connection.
-//! - **hub→body** — prompt / cancel (and the hub's superseded).
+//! - **hub→body** — prompt / cancel / answer / rebind (and the hub's superseded).
 //!
 //! **Not in the catalog:** the hub's *control-socket* method names. [`PANE_METHODS`]
 //! and [`PROFILE_METHODS`] (issue #637, epic #633) name the `pane/*` and `profile/*`
 //! methods of the pane registry. They are hub control methods, outside [`CATALOG`]
-//! and not in `docs/protocol/v2.md`, so the closed 22-row catalog, the v2 wire
-//! protocol and every golden file are unchanged, and a body connection that sends one
+//! and not in `docs/protocol/v2.md`, so the closed catalog (23 rows since #839), the v2 wire
+//! protocol and every golden file are unchanged by them, and a body connection that sends one
 //! still gets `method_not_found`. `holler_hub::serve::CONTROL_METHODS` holds the
 //! `control/*` names the same way. Only the *names* live here: the params and the
 //! `PaneReply` encoding are in `holler-pane`, which this crate cannot depend on.
@@ -54,7 +55,7 @@ pub enum Direction {
     HubToBody,
 }
 
-/// The complete, closed v2 method catalog (22 rows).
+/// The complete, closed v2 method catalog (23 rows; 22 until #839 added `session/rebind`).
 #[rustfmt::skip]
 pub const CATALOG: &[Method] = &[
     // name                 kind          direction   (docs §4)
@@ -78,6 +79,10 @@ pub const CATALOG: &[Method] = &[
     // permission/elicitation — same direction/kind as `session/cancel`, the
     // request it's modeled on.
     Method { name: "session/answer",      kind: MethodKind::Request,      dir: Direction::HubToBody },
+    // `session/rebind` (issue #839): re-point one attach-mode session of the
+    // body to another harness session on the same endpoint. Additive; sent by
+    // the hub's own `LiveHandle::rebind`, never by the generic request forward.
+    Method { name: "session/rebind",      kind: MethodKind::Request,      dir: Direction::HubToBody },
     // `admin/*` (issue #508/#509, epic #506): the remote hub-admin control
     // channel. Params/results are byte-for-byte the same as the matching
     // `control/*` local form (docs v2.md §3-4); legal only on an admin-role
@@ -151,7 +156,10 @@ mod tests {
     /// connection still gets `method_not_found` for them and no golden file moves.
     #[test]
     fn pane_methods_not_in_wire_catalog() {
-        assert_eq!(CATALOG.len(), 22, "the v2 wire catalog is closed");
+        assert_eq!(CATALOG.len(), 23, "the v2 wire catalog is closed");
+        // #839: `session/rebind`, the one additive row: a request, hub to body.
+        let rebind = find("session/rebind").map(|m| (m.kind, m.dir));
+        assert_eq!(rebind, Some((MethodKind::Request, Direction::HubToBody)), "session/rebind");
         assert!(find("pane/list").is_none());
         assert!(find("profile/list").is_none());
 
