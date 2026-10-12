@@ -135,8 +135,9 @@ pub(crate) const FULL_DOCUMENT: &str = r#"{
 "#;
 
 /// The export of a profile `Bare` with one [`bare_spec`] at `r1c1`: the optional members
-/// are left out, `env` and `expect` are always present.
-const BARE_DOCUMENT: &str = r#"{
+/// are left out, `env` and `expect` are always present. Shared with `import.rs`, which
+/// pins that a file leaving `env` and `expect` out exports them back as `[]`.
+pub(crate) const BARE_DOCUMENT: &str = r#"{
   "format": "holler-profile",
   "version": 1,
   "name": "Bare",

@@ -258,3 +258,16 @@
   - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean.
   - T's own check of the rewritten `evidence.md`: 13 entries, 0 mismatches, 11,118 bytes.
   - The quoted ranges of the dropped E-numbers are unchanged since `bda1069`.
+
+## T (Phase 7, test-only rework, diff gate round 3): 2026-10-11 23:27 MDT
+- **Decided:**
+  - B-1 is answered in the tests and the appendix, not in production code. `ProfileSpec`'s `env` and `expect` carry no `skip_serializing_if` (`profile.rs:192-193`, `:202-203`), so both are always written, and `BARE_DOCUMENT` already pinned `"env": []` and `"expect": []` byte for byte. The gap the reviewer named is real in one place: no test fed a file that leaves the two members out. The new import test `a_spec_without_env_or_expect_imports_and_exports_them_as_empty_arrays` does that, then exports the result and asserts both are `[]` and the whole document equals `BARE_DOCUMENT`.
+  - One evidence entry quotes `ProfileSpec`'s `deny_unknown_fields`, `env` and `expect` attributes, because the gate cannot see unchanged lines of `profile.rs`. It also answers B-2's "`deny_unknown_fields` not shown". B-2 is marked "Not a block" and asks for no test change; its `error.rs:632-634` excerpt is already in the appendix.
+  - `BARE_DOCUMENT` is now `pub(crate)`, so the new test reuses it instead of a second copy.
+- **Assumed:** the gate's "absent (not just empty)" case can only arise from a file, since a `Vec` in memory has no absent state. So an import, then an export, is the cheapest test that reaches it.
+- **Hedged:** none.
+- **Evidence:**
+  - Mutation (restored from a copy, `git status` clean in `crates/*/src`): `skip_serializing_if = "Vec::is_empty"` on `env` and `expect` fails the new test (`left: (Null, Null)`) and `export_leaves_out_absent_optional_members`.
+  - The workspace: 154 targets, 2,436 passed, 0 failed, 32 ignored, 23:19 to 23:25 MDT. That is 2,435 plus the new test.
+  - Clippy `-D warnings`, `lint.sh`, `changelog-check` and `machete` are clean. `rustfmt --check` passes on both touched files.
+  - `evidence.md`: 14 entries, 0 excerpt mismatches, 11,799 bytes (under 12,000).

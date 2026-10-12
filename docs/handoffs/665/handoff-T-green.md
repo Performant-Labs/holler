@@ -1,3 +1,87 @@
+# Handoff-T-green (test-only rework, diff gate round 3) - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
+
+**Date:** 2026-10-11 (23:27 MDT)
+**Branch:** `issue-665-implementation`, on `bac1513` plus this phase's uncommitted test changes
+**Issue:** #665
+**Handoff-F reviewed:** `docs/handoffs/665/handoff-F.md` (no new F round; this is a test-only re-entry)
+**Handoff-T-red:** `docs/handoffs/665/handoff-T-red.md`
+**Findings answered:** `docs/handoffs/665-diff-result-r3.md`, B-1 and B-2
+
+The earlier rounds' handoffs follow this section, unchanged.
+
+## Test repair (B-1)
+
+**What B-1 claimed.** It claimed `env` and `expect` may be left out of an exported pane when a spec has none, and that no test proves otherwise.
+
+**What the code does.** `ProfileSpec` gives both members `#[serde(default)]` and no `skip_serializing_if` (`crates/holler-pane/src/profile.rs:192-193`, `:202-203`). Only the three `Option` members skip. So every exported pane writes `env` and `expect`, as `[]` when empty, and the production code meets D7.
+- `export_leaves_out_absent_optional_members` already pinned this byte for byte, through `BARE_DOCUMENT`.
+- The gate could not see `ProfileSpec`'s attributes, because those lines are unchanged.
+
+**The real gap.** A spec with "absent" (not empty) `env` or `expect` can exist only in a file, and no test fed one.
+
+**The changes, all test-side:**
+1. **New test** `a_spec_without_env_or_expect_imports_and_exports_them_as_empty_arrays`, in `crates/holler-cli/tests/profile_verbs/import.rs`. It takes `BARE_DOCUMENT`, removes `env` and `expect` from the pane, and imports it in both formats. Then:
+   - the stored spec's `env` and `expect` are empty;
+   - `profile export Bare` on the same rig writes `"env": []` and `"expect": []`;
+   - the whole document equals `BARE_DOCUMENT` byte for byte.
+
+   This pins the full serialized shape for an absent-env spec, which is the gate's own remedy. It runs at the in-process verb tier, the cheapest tier that has both the import and the export path.
+2. `BARE_DOCUMENT` (`crates/holler-cli/tests/profile_verbs/export.rs`) is now `pub(crate)`, with a doc line saying `import.rs` uses it. The existing round-trip test now uses the imported `Format` in place of a full path.
+3. **New evidence entry** in `docs/handoffs/665/evidence.md`, under "The verbs (CLI)". It quotes `ProfileSpec`'s `#[serde(deny_unknown_fields)]` (line 179) and its `env` and `expect` attributes, verbatim from source. This also settles B-2's "`deny_unknown_fields` ... not shown".
+
+**B-2** is marked "Not a block" by the gate, and it asks for no test change. Its one open point is now in the appendix, and so is the `error.rs:632-634` excerpt. The "never quoted" behaviour is already pinned by a mutation-checked canary test, `a_document_of_another_shape_is_usage_and_never_quoted` (rework 1, spot check 2).
+
+No production file was changed in this phase.
+
+## GREEN confirmation
+
+- `cargo test -p holler-cli --test profile_verbs import`: 15 passed, including the new test.
+- **The workspace.** `cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load`, 23:19 to 23:25 MDT: **154 targets, 2,436 passed, 0 failed, 32 ignored**, exit 0. That is 2,435 plus the new test. The story's targets: `profile_verbs` 114, `docs_cli_test` 3, `wire_selftest` 3.
+- **Spot check.** `skip_serializing_if = "Vec::is_empty"` was added to `env` and `expect` in `profile.rs`, from a saved copy. Two tests then fail:
+  - the new test, with `left: (Null, Null)` against `right: (Array [], Array [])`;
+  - `export_leaves_out_absent_optional_members`, where the document lacks both members.
+
+  The file was restored from the copy, and `git status` shows no change under `crates/*/src`.
+
+## Tier 1 results
+
+| Check | Command | Expected | Actual | Result |
+|---|---|---|---|---|
+| Lint | `bash scripts/lint.sh` | exit 0 | exit 0 | PASS |
+| CHANGELOG | `bash scripts/changelog-check.sh` | ok | `changelog-check: ok` | PASS |
+| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | PASS |
+| Workspace tests | as above | all pass | 2,436 passed, 0 failed, 32 ignored | PASS |
+| Docs CLI / canary | `docs_cli_test`, `wire_selftest`, in the workspace run | pass | 3 and 3 passed | PASS |
+| Unused deps | `cargo machete` | none | none | PASS |
+| Format | `rustfmt --edition 2021 --check` on both touched files | clean | clean | PASS |
+
+**Cross-check with F.** There is no new F round to cross-check. The counts match T-green rework 2, plus one test.
+
+## Tier 2 results
+
+| Check | Method | Result |
+|---|---|---|
+| D7 "always present" pinned | The new test (absent in the file) and `BARE_DOCUMENT` (empty in memory). Both fail under the skip mutation. | PASS |
+| Test quality | One test, one behaviour. It does not duplicate `export_leaves_out_absent_optional_members`, which starts from an in-memory spec, not a file without the members. It reuses `BARE_DOCUMENT`, with no second copy of the shape. | PASS |
+| Evidence appendix | 14 entries, every excerpt line matches its cited source line, and the file is 11,799 bytes, under the 12,000-byte cap. The new entry sits before the drift section, so it is well inside the cap. | PASS |
+| File size | `import.rs` 231 lines, `export.rs` 364 | PASS |
+| Security, error handling, data integrity | Unchanged from rework 1 | PASS |
+| Browser / Playwright | N/A (no UI surface) | N/A |
+
+## Acceptance criteria status
+
+Unchanged from rework 1. **CLI `profile export`** is now also backed by the new test, for D7's "`env` and `expect` always present".
+
+## Blocking issues
+
+None. Nothing F must change: B-1's premise does not hold for the code as written, and it is now proven in the tests and the appendix.
+
+## Advisory notes
+
+- The earlier advisories still apply: the rebase onto `origin/main` needs a fresh workspace run, the `unavailable` file-error half is unpinned, and #693 can flake CI.
+
+---
+
 # Handoff-T-green (rework 2): after F rework 2, the outside diff gate's round 2 - `holler profile rename`, `export`, `import` and `profile-drift` (#665)
 
 **Date:** 2026-10-11 (23:17 MDT)

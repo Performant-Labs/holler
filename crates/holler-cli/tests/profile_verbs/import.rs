@@ -7,11 +7,12 @@ mod refusals;
 
 use std::path::{Path, PathBuf};
 
+use holler_cli::output::Format;
 use holler_pane::{Actor, GridPos, PaneStore, Profile, ProfileChange, ProfileName, ProfileStore};
 use holler_pane_testkit::profile_store::ProfileStoreOp;
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::export::{full_spec, FULL_DOCUMENT};
+use crate::export::{full_spec, BARE_DOCUMENT, FULL_DOCUMENT};
 use crate::list::rig::{assert_failure, member, pane, profile, run_both, run_both_with, Rig};
 use crate::verb_harness::parse::try_parse;
 
@@ -176,15 +177,40 @@ fn import_takes_one_file_positional() {
     assert!(try_parse(&["profile", "import", "f.json", "--name", "Copy"]).is_ok());
 }
 
+/// D7: `env` and `expect` are always present in an export. The one way a spec can lack them
+/// is a file that leaves them out (`#[serde(default)]`), so this imports such a file and
+/// exports it again: both come back as `[]`, and the whole document is the bare shape.
+#[test]
+fn a_spec_without_env_or_expect_imports_and_exports_them_as_empty_arrays() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut document: Value = serde_json::from_str(BARE_DOCUMENT).unwrap();
+    let spec = document["panes"][0].as_object_mut().unwrap();
+    assert!(spec.remove("env").is_some() && spec.remove("expect").is_some());
+    let file = write_document(dir.path(), &document);
+    let ran = run_both_with(|| Rig::new([], []), &["profile", "import", &file], Rig::run);
+    assert_eq!(ran.both.text.code, 0, "{:?}", ran.both.text);
+    for rig in ran.rigs() {
+        let bare = &stored(rig, "Bare").expect("imported").panes[0];
+        assert!(bare.env.is_empty() && bare.expect.is_empty(), "{bare:?}");
+        let exported = rig.run(&["profile", "export", "Bare"], Format::Text);
+        assert_eq!(exported.code, 0, "{exported:?}");
+        let again: Value = serde_json::from_str(&exported.out).unwrap();
+        let pane = &again["panes"][0];
+        assert_eq!(
+            (&pane["env"], &pane["expect"]),
+            (&json!([]), &json!([])),
+            "env and expect are written even when the file left them out"
+        );
+        assert_eq!(exported.out, BARE_DOCUMENT, "the full shape, byte for byte");
+    }
+}
+
 #[test]
 fn an_exported_profile_imports_back_with_equal_specs() {
     let dir = tempfile::tempdir().unwrap();
     let out = path_text(&dir.path().join("fleet.json"));
     let exporter = crate::export::fleet();
-    let exported = exporter.run(
-        &["profile", "export", "Fleet", "--out", &out],
-        holler_cli::output::Format::Text,
-    );
+    let exported = exporter.run(&["profile", "export", "Fleet", "--out", &out], Format::Text);
     assert_eq!(exported.code, 0, "{exported:?}");
 
     let ran = run_both_with(

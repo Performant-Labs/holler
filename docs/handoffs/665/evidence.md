@@ -86,6 +86,15 @@ Line numbers are the branch head's; a script checks each excerpt against its cit
   >     if !line.ends_with('\n') {
   >         to.write_all(b"\n")?;
 
+- **Fact (T):** `ProfileSpec` refuses an unknown member, and `env` and `expect` have no `skip_serializing_if`, so `spec_value` writes both on every pane, `[]` when empty; a file leaving them out reads them as empty. Pinned by `a_spec_without_env_or_expect_imports_and_exports_them_as_empty_arrays`.
+  **Source:** `crates/holler-pane/src/profile.rs:179`, `crates/holler-pane/src/profile.rs:192-193` and `crates/holler-pane/src/profile.rs:202-203`
+  **Verbatim excerpt:**
+  > #[serde(deny_unknown_fields)]
+  >     #[serde(default, deserialize_with = "crate::argv::deserialize_env_names")]
+  >     pub env: Vec<EnvVarName>,
+  >     #[serde(default)]
+  >     pub expect: Vec<String>,
+
 ## The drift finding (reconcile)
 
 - **Fact:** `Finding::about` takes the pane, its record's position, and the kind's remedy (none for `profile-drift`), as `not-fixable`; an `observe-failed` message names the call and the error's code (`profile_store.list failed (<code>): ...`).
