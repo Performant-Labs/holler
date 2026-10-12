@@ -57,7 +57,7 @@ fn stage0_keeps_its_other_rules() {
 #[test]
 fn frontmatter_docs_and_readme_use_the_new_question() {
     let skill = flat("agent-skills/herdr-setup/SKILL.md");
-    let front = &skill[..skill.find("# Herdr: M local").unwrap()];
+    let front = &skill[..skill.find("# Herdr").unwrap()];
     assert!(front.contains(NEW));
     assert!(flat("docs/setup-wizard.md").contains(&format!("\"{NEW}\"")));
     assert!(flat("README.md").contains(&format!("\"{NEW}\"")));

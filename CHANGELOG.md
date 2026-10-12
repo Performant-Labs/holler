@@ -8,6 +8,20 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, the setup wizard (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the wizard
+  (`/herdr-setup`) builds its Herdr workspace out of Holler registry panes
+  ([#803](https://github.com/Performant-Labs/holler/issues/803)), a grid of OpenCode and Claude Code panes with one or
+  more orchestrators. It writes one spec per pane with `holler pane launch --spec-only`, dry-runs the profile, then runs
+  one `holler profile apply`, which creates the whole grid (no pane is launched or split by hand), and its teardown
+  closes the panes with `holler pane close` and `holler profile delete` before the ledger's processes stop. A new
+  helper, `lib/panes.sh`, checks the `[[pane]]` config and prints the grid, the environment literals and the exact
+  Holler calls, in order. Every Holler pane and profile call runs through `herdr.sh holler`, which scrubs the
+  environment (no `HERDR_*` and none of the driving agent's own variables reach `holler`, and so no pane) and refuses
+  to run without the instance's state directory and its Herdr or tmux socket. The hub and one body run on loopback on
+  the same machine, and the body's attach rows take each OpenCode pane's port and session of record from the registry.
+  Stages 4 to 9 now bring up the hub, start the Herdr server, create the profile, build the panes, join the body and
+  check the registry. [ADR 0021](docs/adr/ADR-0021.md) section 11 and decision 48 record it, and
+  [`docs/setup-wizard.md`](docs/setup-wizard.md) has the design ("How the wizard builds panes").
 - Pane control, DRIVEN (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the session the hub drives now
   follows each pane's session of record
   ([#839](https://github.com/Performant-Labs/holler/issues/839), which absorbs [#828](https://github.com/Performant-Labs/holler/issues/828)).
@@ -629,6 +643,16 @@ fills this file in at release time.
   the decisions. Until the hub's stores and the adapters are wired into the binary
   ([#649](https://github.com/Performant-Labs/holler/issues/649)), the real verbs answer `not-implemented`
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
+
+### Breaking Changes
+- The setup wizard's config is `[[pane]]` ([#803](https://github.com/Performant-Labs/holler/issues/803)): an
+  orchestrator is a role on an OpenCode or Claude Code pane. `[[orchestrator]]` and `[[session]]`, the free-form `cmd`,
+  remote attach-mode sessions (with `endpoint`, `mode`, `session_id`, `remote_host` and `remote_tailnet_host`) and the
+  manual-relay mode are gone: `panes.sh check` refuses each by name, and the wizard shows a conversion as text and never
+  rewrites the old file. `layout` goes on one line and must be a staircase (no column taller than the column to its
+  left), the set of grids `holler profile apply` can build. `herdr.sh label` and every pane and workspace word of
+  `herdr.sh run` are gone (`run` refuses them with exit 2, naming `holler pane`). `hub_host` is ignored and
+  `serve_https_port` unused.
 
 ### Bug Fixes
 - The OpenCode adapter reads a pane's TUI correctly when holler runs with no UTF-8 locale (`LANG=C`, `LC_ALL=C`, or
