@@ -149,3 +149,35 @@ Run record for the part-2 build run. The brief is `docs/handoffs/647-part2-brief
     - `bash scripts/lint.sh` (exit 0);
     - the privacy grep of the added lines.
   - The outside diff gate r1 (`647-diff-result-r1.md`): PASS.
+
+## S (Phase 8, spec audit) — 2026-10-12T11:52-06:00
+- **Decided:**
+  - REWORK, production (`handoff-S.md`).
+  - The A and T preconditions are met. Acceptance 1 to 21 and W1 to W8 each have a proving test or evidence.
+  - Every decision of the brief is implemented as stated or as A's warns amended it, and each amendment is recorded.
+  - Item 1: `reconcile/observe/agent.rs:129-133` puts the pane's `ProfileName` into the W-3 clause raw, twice, once as a suggested `--profile` argument.
+    - A display name may hold spaces (`Some Profile`), so the advice splits in a shell.
+    - It breaks #662 B1's written rule (`holler-cli/src/profile/delete.rs:203-205`) and `findings.rs`'s "untrusted text only through `quoted`".
+    - Every other profile-name message in both crates quotes the name, including the sibling `drift.rs:80`.
+    - Fix: `quoted(profile.as_str())` in both places.
+  - Item 2 (T at T-green): pin item 1 with a profile name that has a space. `blue` passes either way.
+  - Not REWORK:
+    - D9's Claude Code clause holds by structure but has no test (advisory 1, recommended for T);
+    - acceptance 9's "skipped" against the ADR's `None` is a brief defect that T resolved for the ADR (advisory 2);
+    - `GET /agent`'s 60-byte quote is pre-existing (advisory 3).
+- **Assumed:**
+  - T's recorded Tier 1 and Tier 2 output at `4bd4e75` and `b5fc4bb` is accurate: 2688/0, clippy, lint, opt-in real tmux and OpenCode. I did not re-run them (S's rule).
+  - The `quoted` fix leaves the existing `a_profile_members_message_names_its_profile` green, because `"blue"` still contains `blue`.
+- **Hedged:**
+  - `quoted` (Rust `Debug`) is the minimal fix within the crate. It does not protect `$` or a backtick in a pasted name, which #662 B1's POSIX single quotes do. That helper lives only in `holler-cli`, and the message is prose (the paste-ready field, `remedy`, carries no profile), so single quotes are not required here. If the remedy ever carries `--profile` (W-3), it must use single quotes.
+  - Acceptance 18's opt-in scratch scenarios were never run in this run (they need real Herdr).
+- **Evidence:**
+  - Read in full: the production diff of all 25 `src` files; every new test file (`agent_view_test.rs` x2, `doctor/attach.rs`, `doctor/agent.rs`, `forwarding.rs`, `attached_test.rs`); the test diffs of `findings_test.rs`, `fake_host_test.rs`, `bind.rs`, `wired.rs`, `read_only.rs`, `doctor.rs`, `doctor/rig.rs`, `pane_claude/{rig,mixed}.rs`, `docs_pane_control_test.rs`, `scratch/verbs.rs`, `scenario.rs` and `real_opencode_test.rs`; the ADR, guide and CHANGELOG diffs.
+  - Commands:
+    - greps for profile-name interpolations across `holler-pane/src` and `holler-cli/src` (about 20 sites, all quoted except `agent.rs`);
+    - `wc -l` on every touched `.rs` file (max 865);
+    - added-line greps for `unwrap`, `expect`, `panic`, `unsafe`, `allow(`, `sleep(` and privacy patterns;
+    - per-commit `crates/` check before `45bff85`, and that `45bff85` touches only `//!` lines of `ports.rs` plus the ADR;
+    - `with_fix` and `remedy` call sites;
+    - `gh pr list` (#839 is PR #863, open);
+    - `gh api .../compare/6eff9cc...ef14b1a` (remote `main` moved by #847's test-only fix, no overlap).
