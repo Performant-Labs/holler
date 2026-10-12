@@ -495,3 +495,68 @@ Run handoff directory `docs/handoffs/835` Â· branch `issue-835-implementation` Â
     - stale story cross-references (none);
     - personal names in the diff (none).
   - **Sizes:** `wc -l` on every touched file. All are under 900.
+
+## S, spec audit: 2026-10-11T20:05-06:00 (MDT)
+
+- **Decided:** REWORK (production, docs only), one item (`docs/handoffs/835/handoff-S.md`).
+  - **All 20 acceptance criteria have proving evidence.** The criteria come from the issue, the amendment and rounds
+    2 and 3.
+    - Every test was RED before F, failed under a mutation, or is a regression pin named as one (R3-3).
+    - The adoption after #831 is out of scope by brief section 5.
+  - **The item: the user-facing text misstates what the import reads.** It says the import reads "each process" of
+    the pane's tmux session, and that it leaves alone "a pane with a process named exactly `claude`".
+    - **Where:** the help text (`pane/import.rs:67-75`), the guide (sections 1, 3 and 10) and the CHANGELOG.
+    - **What the brief says** (section 1; R2-5's preamble): the read is the foreground process of each tmux pane of
+      the session. The ADR, `ports.rs` and `pane.rs` say this exactly.
+    - **What the text gets wrong:** under the text's own model, a `claude` behind another foreground process would be
+      found. That covers a `claude` started as a child of a wrapper script, and a suspended or backgrounded one. The
+      import does not find it, and the text's limits leave it out.
+    - A-dup (note 1) left this call to S.
+  - **The departures from the brief's literal text are recorded, not silent:**
+    - `observe_pane`'s change is recorded in sections 14 and 2 and in decision 23 (A pass 3, W2);
+    - R3-2's second bullet is read as applying to wrappers (A pass 3, W5);
+    - F's design decision 1;
+    - R3-3's pins pass before F.
+  - **Quality:**
+    - No `unwrap`, `expect` or `panic` in any `src`.
+    - The two `#![allow]` lines carry `// #835`.
+    - The largest touched `.rs` file is 839 lines.
+    - No protocol or golden change.
+    - The privacy grep is clean.
+    - The commits have the repo hook's trailer.
+- **Assumed:**
+  - T's and F's recorded runs stand. I re-ran no build or test, as the role says. My checks were read-only: `git diff`,
+    `git log`, `grep`, `wc -l`, `rustfmt --check`, `gh issue view 835` and `gh issue view 633`.
+  - The script commits this handoff and this entry at the phase commit.
+  - The rework adds no lines to the guide (817) and needs no test change, so T-green re-verifies only.
+- **Hedged:**
+  - **Why REWORK and not PASS with an advisory.** No behaviour is wrong, and the dry-run check in the guide's
+    section 10, step 1 catches a missed pane either way. But the text is the standing operator documentation for the
+    cutover. It also blurs the distinction R2-5 asked to record. The precedent is #652's S: its hold also required
+    one wrong sentence about the import to be corrected.
+  - **R3-2's second bullet cannot hold as written.** The test-only Herdr wrappers still use `observe_panes`'s
+    default. This is harmless, so it is an advisory, not an `ADVISORY-HOLD`.
+- **Evidence:**
+  - Live:
+    - `gh issue view 835`: the body is identical to the brief's issue section;
+    - `gh issue view 633`: the contract block's `HostPort` line lacks the new method (operator item);
+    - `gh pr list --head issue-835-implementation`: no PR yet;
+    - `git fetch`: `origin/main` is `bda1069`, an ancestor of `HEAD`.
+  - Read: the brief; every handoff, with cycle 1's T-red and T-green from git (`36b0de8`, `25ff495`) and A pass 3
+    (`49e4508`); this journal and `evidence.md`.
+  - Diffs: the full `git diff origin/main...HEAD` of every non-handoff file.
+  - Source checked:
+    - `import/{observe,assess,findings}.rs`, `pane.rs`, `ports.rs` and `unmanaged.rs`;
+    - the adapter's `lib.rs` and `tmux.rs`;
+    - `pane/import.rs`, `wiring.rs` and `wiring/bind.rs`;
+    - `reconcile.rs:362-372`;
+    - `findings::{quoted, embedded}`;
+    - every `impl HostPort` and `impl HerdrPort`, and every `observe_pane(s)` override;
+    - `pane_verbs/doctor.rs:131` and `import/join.rs:334`.
+  - Greps:
+    - `"claude"` in every `src`;
+    - the producers of `ObserveFailed`;
+    - `unwrap`, `expect`, `panic` and `#[allow` in the added lines;
+    - private names, IPs, paths and secrets in the 2,882 added lines;
+    - "each process" and its variants in docs and help.
+  - Sizes: `wc -l` on all 37 touched files.
