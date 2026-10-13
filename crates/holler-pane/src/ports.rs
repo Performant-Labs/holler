@@ -392,6 +392,9 @@ impl PaneObservation {
 ///     fn attached_clients(&self, _: &PaneName) -> Result<u32, PaneError> {
 ///         Ok(0)
 ///     }
+///     fn foreground_pids(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
 /// }
 /// ```
 ///
@@ -418,6 +421,26 @@ impl PaneObservation {
 ///     fn foreground_commands(&self, _: &PaneName) -> Result<Vec<String>, PaneError> {
 ///         Ok(Vec::new())
 ///     }
+///     fn foreground_pids(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> {
+///         Ok(Vec::new())
+///     }
+/// }
+/// ```
+///
+/// Nor does one that leaves out `foreground_pids` (#831):
+///
+/// ```compile_fail,E0046
+/// use holler_pane::{Argv, HostPort, PaneError, PaneName};
+///
+/// struct NoForegroundPids;
+///
+/// impl HostPort for NoForegroundPids {
+///     fn ensure_session(&self, _: &PaneName, _: &str) -> Result<(), PaneError> { Ok(()) }
+///     fn run(&self, _: &PaneName, _: &str, _: &Argv) -> Result<(), PaneError> { Ok(()) }
+///     fn stop_owned(&self, _: &PaneName) -> Result<(), PaneError> { Ok(()) }
+///     fn ps(&self, _: &PaneName) -> Result<Vec<u32>, PaneError> { Ok(Vec::new()) }
+///     fn foreground_commands(&self, _: &PaneName) -> Result<Vec<String>, PaneError> { Ok(Vec::new()) }
+///     fn attached_clients(&self, _: &PaneName) -> Result<u32, PaneError> { Ok(0) }
 /// }
 /// ```
 pub trait HostPort: Send + Sync {
@@ -456,6 +479,18 @@ pub trait HostPort: Send + Sync {
     /// Reconcile reads it once `ps` answered for a pane: no client at all is `unattached`, a
     /// session no Herdr pane shows.
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError>;
+
+    /// The process ids of the foreground process group of every live pane in the session
+    /// `name` (#831): every member of the group, not only its leader, so a program typed into
+    /// the pane's shell is in the answer while the shell (`#{pane_pid}`, what [`HostPort::ps`]
+    /// answers) is not. Unique and ascending across the session's panes. Pids only, never an
+    /// argv (I7). A session with no live pane answers an empty list; a missing session is
+    /// `pane-not-found`, as `ps` answers. All or nothing: a pane that cannot be read fails the
+    /// whole answer, never a partial list.
+    ///
+    /// The import reads it to find the pid of a Claude Code process it adopts, then matches
+    /// each pid against the harness's own listing (`HarnessPort::shown_session`).
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError>;
 }
 
 /// The harness of a pane and its sessions: an OpenCode server and its TUI (the adapter is

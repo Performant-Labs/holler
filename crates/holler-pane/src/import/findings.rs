@@ -1,14 +1,16 @@
 //! The findings of `holler pane import` (#650): what the import found about a pane directory,
 //! how much each weighs, and the one table of their codes.
 //!
-//! - [`ImportFinding`]: eighteen kinds, each with a stable kebab-case code that is also its
+//! - [`ImportFinding`]: twenty-three kinds, each with a stable kebab-case code that is also its
 //!   JSON form ([`ImportFinding::code`] is the one source of both), copying
 //!   [`FindingKind`]'s pattern. A condition reconcile already names keeps reconcile's
 //!   spelling, taken from its one source and never retyped: `observe-failed`,
 //!   `tmux-session-missing`, `server-wedged` and `server-down` from [`FindingKind::code`],
 //!   and `session-not-found` and `command-not-argv` from the closed error codes. The other
-//!   twelve are the import's own, two of them #835's (`harness-claude-code` and
-//!   `harness-unreadable`). A code is stable once merged (ADR-0021 section 9).
+//!   seventeen are the import's own, two of them #835's (`harness-claude-code` and
+//!   `harness-unreadable`) and five #831's, the adoption's (`claude-code-adopted`,
+//!   `claude-process-unmatched`, `claude-login-env`, `claude-model-not-anthropic` and
+//!   `spec-kind-differs`). A code is stable once merged (ADR-0021 section 9).
 //! - [`Level`]: a `problem` gives the pane no record and blocks a real run; a `warning` is
 //!   recorded without what it names; `skipped` and `info` block nothing.
 //! - [`Finding`]: one finding, about a pane or about no pane, with a one-line message.
@@ -67,10 +69,10 @@ pub enum ImportFinding {
     AlreadyImported,
     /// Its `sessions.toml` names a harness that is not OpenCode: no record, never blocking.
     HarnessNotOpencode,
-    /// Its tmux session runs Claude Code (#835): the pane is left alone, with no record and no
-    /// other finding, and blocks nothing. Its level is `info`, not `skipped` as
-    /// `harness-not-opencode`'s is: a switch adopts these panes once #831's adoption step lands,
-    /// while nothing adopts a pane that is not OpenCode.
+    /// Its tmux session runs Claude Code (#835), and the run was not asked to adopt it: the pane
+    /// is left alone, with no record and no other finding, and blocks nothing. Its level is
+    /// `info`, not `skipped` as `harness-not-opencode`'s is: `--adopt-claude-code` adopts these
+    /// panes (#831), while nothing adopts a pane that is not OpenCode.
     HarnessClaudeCode,
     /// What the pane's tmux session runs could not be read (#835): a read failed, or the
     /// pane's check did not finish. The pane is never recorded as OpenCode on a guess.
@@ -107,6 +109,22 @@ pub enum ImportFinding {
     CommandNotArgv,
     /// A directory of the state root that holds none of the pane files.
     IgnoredEntry,
+    /// The pane, whose tmux session runs Claude Code, is adopted with the Claude Code harness
+    /// (#831); the message names the next step, `holler pane relaunch NAME`.
+    ClaudeCodeAdopted,
+    /// No process of the pane's tmux session is one the Claude Code harness lists, more than
+    /// one is, or the one it lists holds no session (#831): the pane is never adopted on a
+    /// guess.
+    ClaudeProcessUnmatched,
+    /// The pane's `pane.env` sets a variable that changes Claude Code's login (#831); the
+    /// message names the variable, never its value.
+    ClaudeLoginEnv,
+    /// The provider of the pane's `OC_MODEL` is not `anthropic` (#831): the pane is adopted with
+    /// the model as the file declares it, which a relaunch would hand to `claude`.
+    ClaudeModelNotAnthropic,
+    /// The existing `fleet` has a spec for the pane whose harness kind is not the record's
+    /// (#831): the spec is kept as it is.
+    SpecKindDiffers,
 }
 
 impl ImportFinding {
@@ -130,6 +148,11 @@ impl ImportFinding {
         ImportFinding::SessionNotFound,
         ImportFinding::CommandNotArgv,
         ImportFinding::IgnoredEntry,
+        ImportFinding::ClaudeCodeAdopted,
+        ImportFinding::ClaudeProcessUnmatched,
+        ImportFinding::ClaudeLoginEnv,
+        ImportFinding::ClaudeModelNotAnthropic,
+        ImportFinding::SpecKindDiffers,
     ];
 
     /// The kind's stable kebab-case code, which is also its JSON form.
@@ -153,6 +176,11 @@ impl ImportFinding {
             ImportFinding::SessionNotFound => PaneCode::SessionNotFound.as_str(),
             ImportFinding::CommandNotArgv => PaneCode::CommandNotArgv.as_str(),
             ImportFinding::IgnoredEntry => "ignored-entry",
+            ImportFinding::ClaudeCodeAdopted => "claude-code-adopted",
+            ImportFinding::ClaudeProcessUnmatched => "claude-process-unmatched",
+            ImportFinding::ClaudeLoginEnv => "claude-login-env",
+            ImportFinding::ClaudeModelNotAnthropic => "claude-model-not-anthropic",
+            ImportFinding::SpecKindDiffers => "spec-kind-differs",
         }
     }
 
@@ -165,18 +193,23 @@ impl ImportFinding {
             | ImportFinding::PaneUnlabelled
             | ImportFinding::PaneLabelAmbiguous
             | ImportFinding::TmuxSessionMissing
-            | ImportFinding::SourcesDisagree => Level::Problem,
+            | ImportFinding::SourcesDisagree
+            | ImportFinding::ClaudeProcessUnmatched
+            | ImportFinding::ClaudeLoginEnv => Level::Problem,
             ImportFinding::ObserveFailed
             | ImportFinding::ServerWedged
             | ImportFinding::ServerDown
             | ImportFinding::NoSessionRecorded
             | ImportFinding::SessionNotFound
-            | ImportFinding::CommandNotArgv => Level::Warning,
+            | ImportFinding::CommandNotArgv
+            | ImportFinding::ClaudeModelNotAnthropic
+            | ImportFinding::SpecKindDiffers => Level::Warning,
             ImportFinding::HarnessNotOpencode => Level::Skipped,
             ImportFinding::AlreadyImported
             | ImportFinding::HarnessClaudeCode
             | ImportFinding::NameCellDiffers
-            | ImportFinding::IgnoredEntry => Level::Info,
+            | ImportFinding::IgnoredEntry
+            | ImportFinding::ClaudeCodeAdopted => Level::Info,
         }
     }
 }

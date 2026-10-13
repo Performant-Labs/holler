@@ -74,6 +74,10 @@ fn call(host: &dyn HostPort, op: HostOp, cwd: &str) -> Result<(), PaneError> {
         HostOp::StopOwned => host.stop_owned(&n),
         HostOp::Ps => host.ps(&n).map(|_| ()),
         HostOp::ForegroundCommands => host.foreground_commands(&n).map(|_| ()),
+        // #831: `foreground_pids` is bounded and missing-binary-checked in
+        // `foreground_pids_bound_test.rs` (this file is 822 of `lint.sh`'s 900 lines, and
+        // `METHODS` stays six); the exhaustive match only needs the arm.
+        HostOp::ForegroundPids => host.foreground_pids(&n).map(|_| ()),
         HostOp::AttachedClients => host.attached_clients(&n).map(|_| ()),
     }
 }

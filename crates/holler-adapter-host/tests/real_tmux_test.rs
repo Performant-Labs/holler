@@ -400,3 +400,52 @@ fn run_refuses_a_missing_or_relative_directory() {
         server.sessions()
     );
 }
+
+/// #831 (D2, the spike note does not settle it): the foreground process group of a program a
+/// person typed into the pane's shell includes that program's pid. The pane's first process, the
+/// one `ps` lists, is the shell; the program is a script named `claude` that writes its own pid
+/// and waits on a child, typed in with `send-keys`, as the fleet's panes are. The answer must
+/// hold the script's pid (the shell's pid is reported in the failure, not asserted: whether the
+/// shell is in the background depends on its job control).
+#[test]
+#[ignore = "needs tmux; run with --ignored"]
+fn foreground_pids_includes_a_program_typed_into_the_shell() {
+    if !tmux_available() {
+        return;
+    }
+    let (host, server) = private();
+    let dir = made(&server, "typed");
+    let n = ensured(&host, "demo-c1r1", &dir);
+    let shell = host.ps(&n).expect("ps")[0];
+    let script = dir.join("claude");
+    let pid_file = dir.join("claude.pid");
+    fs::write(
+        &script,
+        format!("#!/bin/sh\necho $$ > {}\nsleep 30\n", text(&pid_file)),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let typed = server.tmux(&["send-keys", "-t", "=demo-c1r1:", &text(&script), "Enter"]);
+    assert!(typed.status.success(), "{typed:?}");
+    let pid: u32 = written(&pid_file)
+        .trim()
+        .parse()
+        .expect("the script wrote its pid");
+
+    let mut seen = Vec::new();
+    let held = wait_until(|| {
+        seen = host.foreground_pids(&n).expect("foreground_pids");
+        seen.contains(&pid)
+    });
+    assert!(
+        held,
+        "the typed program {pid} is not in foreground_pids {seen:?} (the shell is {shell})"
+    );
+    let mut ascending = seen.clone();
+    ascending.sort_unstable();
+    ascending.dedup();
+    assert_eq!(seen, ascending, "ascending, each pid once");
+}

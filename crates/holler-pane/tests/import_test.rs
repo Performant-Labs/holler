@@ -16,6 +16,10 @@
 //! #835 adds two more (brief, round 2, R2-4): `harness-claude-code`, an `info` finding for a
 //! pane whose tmux session runs Claude Code and that the import leaves alone, and
 //! `harness-unreadable`, a `problem` for a pane whose harness could not be read.
+//!
+//! #831 adds five more (brief, "Final finding codes"; twenty-three in all): `claude-code-adopted`
+//! (`info`, each adopted pane), `claude-process-unmatched` and `claude-login-env` (`problem`),
+//! `claude-model-not-anthropic` and `spec-kind-differs` (`warning`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,7 +30,7 @@ use holler_pane::import::IMPORT_BLOCKED;
 use holler_pane::PaneError;
 
 /// The codes only the import has.
-const NEW_CODES: [&str; 12] = [
+const NEW_CODES: [&str; 17] = [
     "pane-unlabelled",
     "pane-label-ambiguous",
     "sources-disagree",
@@ -39,6 +43,11 @@ const NEW_CODES: [&str; 12] = [
     "ignored-entry",
     "harness-claude-code",
     "harness-unreadable",
+    "claude-code-adopted",
+    "claude-process-unmatched",
+    "claude-login-env",
+    "claude-model-not-anthropic",
+    "spec-kind-differs",
 ];
 
 /// The codes the import shares with reconcile and the closed error codes, each from its
@@ -67,6 +76,8 @@ fn levels() -> BTreeMap<String, &'static str> {
         "source-unreadable",
         "source-missing",
         "harness-unreadable",
+        "claude-process-unmatched",
+        "claude-login-env",
         FindingKind::TmuxSessionMissing.code(),
     ] {
         levels.insert(code.to_owned(), "problem");
@@ -78,6 +89,8 @@ fn levels() -> BTreeMap<String, &'static str> {
         "session-not-found",
         "no-session-recorded",
         "command-not-argv",
+        "claude-model-not-anthropic",
+        "spec-kind-differs",
     ] {
         levels.insert(code.to_owned(), "warning");
     }
@@ -89,6 +102,7 @@ fn levels() -> BTreeMap<String, &'static str> {
         "already-imported",
         "name-cell-differs",
         "harness-claude-code",
+        "claude-code-adopted",
     ] {
         levels.insert(code.to_owned(), "info");
     }
@@ -153,6 +167,32 @@ fn each_import_finding_has_its_level() {
             .unwrap_or_else(|| panic!("no level pinned for {}", kind.code()));
         assert_eq!(level, *want, "the level of {}", kind.code());
     }
+}
+
+/// #831: each adoption code is in `ALL` with the level the brief fixes, so a code that is
+/// missing, or present at another level, fails here by name (the set test above says only that
+/// the set differs).
+#[test]
+fn the_adoption_codes_are_listed_at_their_levels() {
+    let want = [
+        ("claude-code-adopted", "info"),
+        ("claude-process-unmatched", "problem"),
+        ("claude-login-env", "problem"),
+        ("claude-model-not-anthropic", "warning"),
+        ("spec-kind-differs", "warning"),
+    ];
+    for (code, level) in want {
+        let kind = ImportFinding::ALL
+            .iter()
+            .find(|k| k.code() == code)
+            .unwrap_or_else(|| panic!("ImportFinding::ALL lacks {code}"));
+        assert_eq!(serde_json::to_value(kind.level()).unwrap(), level, "{code}");
+    }
+    assert_eq!(
+        ImportFinding::ALL.len(),
+        23,
+        "eighteen kinds and five adoption kinds"
+    );
 }
 
 /// `import-blocked` is the verb's own open code: a refusal, exit 3.

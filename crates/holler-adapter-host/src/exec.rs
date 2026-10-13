@@ -1,5 +1,6 @@
-//! Running one child process under a deadline (Decision 2 of #641), and the one `kill`
-//! call every signal of the adapter goes through (Decision 4).
+//! Running one child process under a deadline (Decision 2 of #641), the one `kill`
+//! call every signal of the adapter goes through (Decision 4), and the one `ps` call that
+//! reads a tty's foreground process group (#831).
 //!
 //! A child is run by the shared bounded runner, [`holler_pane::bounded`] (#696), as this
 //! adapter always ran it: a null stdin, stdout and stderr both kept whole (no cap), each read
@@ -17,9 +18,9 @@ use std::time::{Duration, Instant};
 
 use holler_pane::bounded::{self, Capture, KillScope, Over, RunError, Spec};
 
-use crate::tmux::Pid;
+use crate::tmux::{decimal, Pid};
 
-/// How the adapter runs tmux and `kill`: both outputs kept whole, the child alone killed on
+/// How the adapter runs tmux, `kill` and `ps`: both outputs kept whole, the child alone killed on
 /// the deadline, and its exit polled every 2 ms.
 const RUN: Spec = Spec {
     stdout: WHOLE,
@@ -146,4 +147,54 @@ pub(crate) fn kill_group(
             ran.reason()
         )))
     }
+}
+
+/// The pids of the foreground process group of the tty `tty` (#831), through the `ps` binary at
+/// `ps`: `ps -t <tty> -o pid= -o pgid= -o tpgid=`, with `LC_ALL=C`. Numbers only, never a
+/// command line (I7). A process whose group id is the tty's foreground group id (`tpgid`) is in
+/// the answer, so every member of the group is, its leader or not; a `tpgid` of `-1` (no
+/// controlling terminal) matches nothing. A `ps` that exits non-zero with nothing on either
+/// output is a tty with no process (procps): an empty answer. Any other failure is
+/// `Unavailable` with `ps`'s first stderr line, and a line that is not three decimal fields
+/// fails the whole answer.
+pub(crate) fn ps_group(ps: &Path, tty: &str, deadline: Instant) -> Result<Vec<u32>, Failed> {
+    let mut command = Command::new(ps);
+    command
+        .args(["-t", tty, "-o", "pid=", "-o", "pgid=", "-o", "tpgid="])
+        .env("LC_ALL", "C");
+    let ran = run(&mut command, deadline)?;
+    if !ran.status.success() {
+        if ran.stdout.is_empty() && ran.stderr.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(Failed::Unavailable(format!("ps -t: {}", ran.reason())));
+    }
+    foreground_group(&ran.stdout).ok_or_else(|| {
+        Failed::Unavailable(
+            "ps -t printed a line that is not a pid, a group id and a foreground group id"
+                .to_owned(),
+        )
+    })
+}
+
+/// The members of the foreground group in `ps`'s answer, or `None` when a line is not three
+/// decimal fields (`tpgid` may be `-1`).
+fn foreground_group(stdout: &str) -> Option<Vec<u32>> {
+    let mut members = Vec::new();
+    for line in stdout.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [pid, pgid, tpgid] = fields.as_slice() else {
+            return None;
+        };
+        let (pid, pgid) = (decimal(pid)?, decimal(pgid)?);
+        let tpgid = if *tpgid == "-1" {
+            None
+        } else {
+            Some(decimal(tpgid)?)
+        };
+        if tpgid == Some(pgid) {
+            members.push(pid);
+        }
+    }
+    Some(members)
 }

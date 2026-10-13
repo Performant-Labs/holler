@@ -1,469 +1,147 @@
-# Handoff-F: #831 A Claude Code harness for panes
+# Handoff-F: Phase 5 - #831 adopt, adopting the fleet's existing Claude Code panes
 
-Two passes, newest first: the rework after S's REWORK, then the first pass (phase 5 of the role doc, phase 6 of the
-script).
-
-## Rework 1: S's REWORK (2026-10-11, 22:05 MDT)
-
-**Branch:** `issue-831-implementation` at `ccec57c` (worktree `.claude/worktrees/0831-claude-harness`), plus this rework,
-uncommitted. `MERGE_HEAD` is set: `origin/main` at `037405f` is merged with `--no-commit`, and the driver's phase commit
-concludes it, as in the first pass.
-**Issue:** #831 (still "Part of #831": item 17 waits for #835, which is OPEN at 22:00 MDT, and is not on `main`)
-**Input:** `handoff-S.md` (REWORK, `reworkKind: production`, three items and ten advisories), `handoff-A-dup.md` (W6 to W8),
-`decisions.md`.
-
-### What was done
-
-**The three REWORK items.**
-
-1. **`crates/holler-proto/src/vocab.rs`, the doc comment of `HARNESS_IDS`.** It now says what section 15 item 1 says: the id
-   `claude` has two uses that do not meet, a pane harness (Claude Code's interactive CLI, read only by the pane engine,
-   `holler_pane::pane::HarnessKind::Claude`) and a body harness (the ACP bridge, ADR 0012, read only by `holler-body`); that
-   `opencode` and `claude` also name a pane's harness; and that a test (`holler-pane`'s `tests/rework_test.rs`) pins every
-   `HarnessKind` serde name to the list. "The rest are reserved for future adapters" is gone; the protocol's own claim is
-   kept as a reference ("docs §9, where only `opencode` is a v2 adapter"). No wire, golden or `docs/protocol/v2.md` change.
-2. **`crates/holler-cli/src/pane/wiring/env.rs`.** `claude_bin` passes `holler_pane::pane::CLAUDE_CODE_COMMAND`, not a
-   second `"claude"`. Its doc says why the two are one fact: tmux names a pane's foreground process by the basename of its
-   `argv[0]`, which `process-in-use` (and #835's import) compares with the constant, so a `HOLLER_CLAUDE_BIN` with another
-   basename is not recognised (A-dup W7, S Advisory 7). No `"claude"` literal is left in `crates/*/src` outside
-   `HarnessKind::as_str` (the harness id), the constant itself, `HARNESS_IDS`, a hub test and `holler-body`.
-3. **`docs/adr/ADR-0021.md`, section 15 item 2's "As built".** "Text for text ... identical hunks" is replaced by what holds,
-   checked against `issue-835-implementation` at `f1d1bd0`: the API and the host-side code are #835's, unchanged (the
-   constant's value, the rule, the method's signature, `TmuxHost`'s and `FakeHost`'s implementations, host case 10, the
-   forwards: `holler-adapter-host/src`, the test kit's `host.rs` and `conformance/host.rs`, and four copied test files are
-   byte-identical); the doc comments are not (#835 reworded those of `CLAUDE_CODE_COMMAND` and `is_claude_code_command`
-   and the module doc of `claude_code_rule_test.rs` after F's copy; this story's doc of `foreground_commands` names
-   `process-in-use` too; the constant sits after `impl HarnessKind`). So whichever lands second keeps the other's API and
-   code and resolves a conflict in those doc comments.
-
-**The merge of `origin/main` (S Advisory 3; the brief: "Rebase onto `origin/main` before the PR").** `origin/main` moved to
-`037405f`: #855 (#667, the apply rehearsal: tests only) and #856 (#648, the roster's pane columns). `git merge --no-commit
---no-ff origin/main` conflicted in three docs files, resolved by keeping both sides:
-
-- `CHANGELOG.md`: both new Enhancements entries (#831, then main's #667), and in #652's entry this branch's "a Claude
-  Code pane set up by hand" followed by main's new #648 entry.
-- `docs/adr/ADR-0003.md`: this branch's SPEC FLAGS line (`--port-policy` with `none`, `--harness`) and main's `say` line
-  (which drops "Until #648, `roster --profile` is refused ...").
-- `docs/adr/ADR-0021.md`, "Deferred to named stories": main's removal of the #648 bullet, and this branch's #839 and #850
-  bullets.
-
-No code needed to change for the merge: `cargo build`, clippy and the whole suite pass as merged. #856's roster reads the
-registry through `PaneRow::from`, which reads no harness port, so a Claude Code record renders there.
-
-**The roster, now that #648 is on the branch.** The roster's rows are the hub's (the sessions bodies serve), each joined
-to the pane named like its label, so a Claude Code pane, which no body serves until #850, has no roster row. Recorded in
-section 15 item 18 ("The roster, as built") and its "Not built here" paragraph, `docs/pane-control.md` section 4 and the
-CHANGELOG entry. S's acceptance row 8 ("the roster waits for #648") now reads: the roster waits for #850.
-
-**The advisories that are doc statements of this PR's own** (each a sentence or two):
-
-- Advisory 5: `holler-pane-testkit/src/harnesses.rs` and section 15 item 4 no longer say "no rig writes a linker of its
-  own" or "the one linker" (the three older OpenCode-only rigs keep theirs: A-dup W6); `docs/pane-control.md` section 2
-  and the CHANGELOG no longer say the launch gives every pane the subscription login (it removes the overriding
-  variables; `claude-login-missing` checks whether the login is the subscription's).
-- Advisory 6: section 15 item 18 no longer says #828 "is moving" `reset --first`: #828 was closed (not planned, 15:56 MDT)
-  as folded into #839. The older #828 sentences (ADR-0021 sections 5 and 8, "Deferred", and #649's CHANGELOG entry) are
-  other stories' words, and #839's issue says it edits them, so they are left.
-- Advisory 7: the `process-in-use` bullet of `docs/pane-control.md` section 2 names the `HOLLER_CLAUDE_BIN` basename limit
-  (and the `env.rs` doc, above).
-- Advisory 8: the `Bindings` paragraph of `wiring/bind.rs`'s module doc says that `pane doctor --fix` can relaunch several
-  Claude Code panes at once, and why the pairs that may cross are never read.
-- Advisory 9: `docs/pane-control.md` section 11 says to close the Claude Code panes before going back to a `holler`
-  older than #831 (its hub refuses the registry as `store-corrupt`).
-
-### Design decisions
-
-1. **REWORK 3 states the facts instead of re-copying #835's doc comments.** #835 has reworded its doc comments since the
-   copy (its own S REWORKs), and may again before it lands, so text identity is not a stable target; the API and the code
-   are what the coordination needs identical, and they are. This story's doc of `foreground_commands` also names a second
-   reader that #835's lacks, which is correct for this branch.
-2. **REWORK 1 keeps the protocol's claim as a reference, not a restatement.** `claude` is in use as a body harness (a
-   config row for the ACP bridge, ADR 0012) and as a pane harness, so "reserved" would be wrong for it; the wire and
-   `docs/protocol/v2.md` stay untouched.
-3. **The merge now, not at the PR.** The branch conflicted with `main` in three files and the PR step does not merge, so a
-   PR opened as is would have conflicted (and, on GitHub, run no `pull_request` CI). Merging here puts the integration
-   under T-green, A-dup and S. Same mechanism as the first pass (`--no-commit`, `MERGE_HEAD` for the driver's commit).
-4. **No roster code change.** #648 decided that the roster lists the hub's rows; listing a registry pane with no row would
-   change #648's output, outside this story. The gap is recorded, and #850 closes it.
-5. **A-dup W1 and W3 (code refactors) are not done here.** S lists them as follow-ups (Advisory 10), and W1 would edit
-   `import/files.rs`, which #835 rewrites.
-
-### Reuse / extend-vs-new
-
-No new object. REWORK 2 uses the existing constant, `CLAUDE_CODE_COMMAND`.
-
-### Architecture notes for A
-
-None from this rework: one literal replaced by an existing constant, doc comments and docs. The merge brings #855 (tests)
-and #856 (the roster) in unchanged; no #831 code changed for them. `archChanged: false`.
-
-### Deviations from spec / wireframe
-
-None new. Section 15's "As built" text changed in items 2, 4 and 18 (and the "Not built here" paragraph); the PR body's
-list of edits to the amendment should name them.
-
-### Tier 1 self-check (incl. tests now GREEN)
-
-Run on the merged tree with every edit in place, 21:40 to 22:00 MDT:
-
-```text
-$ cargo build --workspace --tests                                   clean
-$ cargo clippy --workspace --all-targets -- -D warnings             exit 0, no diagnostic
-$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
-  passed 2523, failed 0, ignored 36 (165 test binaries; 2488/34/163 before the merge brought #855's and #856's tests)
-$ cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test   3 + 16 passed
-$ cargo test -p holler-proto                                         every target passes
-$ bash scripts/lint.sh                                               exit 0 (size warnings only)
-$ bash scripts/changelog-check.sh                                    changelog-check: ok
-$ cargo machete                                                      no unused dependencies
-$ rustfmt --check (env.rs, bind.rs, vocab.rs, harnesses.rs)          clean
-$ git diff HEAD --check -- CHANGELOG.md docs/adr docs/pane-control.md crates   clean
-```
-
-`git diff HEAD --check` over the whole tree reports trailing whitespace in `docs/handoffs/667-brief.md` only: main's file,
-merged as it is.
-
-### Evidence appendix
-
-`docs/handoffs/831/evidence.md`, "F, the rework after S's REWORK": five facts (the roster's rows are the hub's;
-`PaneRow::from` reads no port; the hub refuses an unreadable registry as `store-corrupt`; how the bindings pair an id with
-a name, and that only the OpenCode harness reads them; `program_bin`'s lookup).
-
-### Tests that look wrong (for T)
-
-None. Test gaps that stay T's (S Advisory 4, "for T-green in this loop"):
-
-- `harness-dialog-open` and an unknown status (`unavailable`) have no row in the adapter's
-  `activity_maps_status_and_waiting_for`; `session-holds-permission` is asserted by its exit code only;
-- lower value: `pane get` and `pane watch` over a Claude record, `holler interrupt --pane` output for a Claude pane,
-  `server-unsupported`;
-- new with the merge: a roster test that a hub row named like a Claude Code pane shows that pane's cells (the
-  acceptance's "the roster sees the Claude pane", where a row joins it);
-- `reset_first_reaches_the_new_process`'s comments name #828, now folded into #839 (S Advisory 6).
-
-### Known issues
-
-- Item 17 is not built: #835 is not on `main` (checked at 21:30 and 22:00 MDT).
-- The opt-in real test is not run (unchanged from the first pass; S Advisory 1).
-- `MERGE_HEAD` is set. The three files that conflicted are resolved and staged by path; the driver's commit concludes the
-  merge.
-
-### Files changed
-
-This rework's own edits (production and docs):
-
-- `crates/holler-proto/src/vocab.rs`
-- `crates/holler-cli/src/pane/wiring/env.rs`
-- `crates/holler-cli/src/pane/wiring/bind.rs`
-- `crates/holler-pane-testkit/src/harnesses.rs`
-- `docs/adr/ADR-0021.md` (with the conflict's resolution)
-- `docs/adr/ADR-0003.md` (the conflict's resolution only)
-- `CHANGELOG.md` (with the conflicts' resolution)
-- `docs/pane-control.md`
-- `docs/handoffs/831/handoff-F.md`, `evidence.md` and `decisions.md`
-
-Plus the merge of `origin/main` at `037405f`: main's files (#855, #856), unchanged.
-
-### For the PR body (S's Advisory 2, updated)
-
-- "Part of #831". What remains: item 17 after #835; the `say` step after #839 and #850; the Claude pane's roster row with
-  #850 (#648 is merged); the real test's first run.
-- The edits to the amendment, as built: items 2, 4 to 10, 12 to 15, 17 and 18, the "Not built here" paragraph, and
-  decisions 26 to 28.
-- The `stop_owned` difference from the issue's "by the recorded pid".
-- The AI disclosure `CONTRIBUTING.md` requires.
-
----
-
-# First pass: Phase 5 - #831 A Claude Code harness for panes
-
-**Date:** 2026-10-11
-**Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-claude-harness`)
-**Issue:** #831 (this PR is "Part of #831": the adoption step, section 15 item 17, waits for #835)
+**Date:** 2026-10-12
+**Branch:** `issue-831-implementation` (worktree `.claude/worktrees/0831-adopt`, head `af8709a` before this phase)
+**Issue:** #831
 
 ## What was done
 
-F implemented T's contract (`handoff-T-red.md`) in A's order (W14 first, then the endpoint step alone, the variant, the
-process methods and the router, the fakes and the suite, the adapter crate, the engines and the verbs, the docs). Every
-authored test passes except one stable-codes list that T must extend (below). Nothing was committed or pushed.
-
-**`holler-pane`**
-
-- `pane.rs`: `HarnessKind::Claude`; the facts about a kind (`as_str`, `shape() -> Shape`, `abort_style() -> AbortStyle`,
-  `login_variables()` with `CLAUDE_LOGIN_VARIABLES`, the seven names); #835's `CLAUDE_CODE_COMMAND` and
-  `is_claude_code_command`, copied verbatim; `HarnessInfo.port: Option<u16>`, checked against its kind through
-  `#[serde(try_from = "RawHarnessInfo")]` (`misfit`), and `HarnessInfo::endpoint(&name) -> Result<HarnessEndpoint, _>`
-  (`store-corrupt` for a record that does not fit its kind).
-- `ports.rs`: every `HarnessPort` method that took `port: u16` takes `&HarnessEndpoint` (`shown_session(pane, at)`,
-  `attach_tui(pane, at, session)`); four default-armed process methods (`process_command(name, spec, &SessionChoice)`,
-  `new_session_id`, `locate_process`, `login_status`), each defaulting to `process-unsupported`; `ServeSpec` gains
-  `model` and `cwd` (`with_model`, `with_cwd`); `Activity::WaitingPermission`; #835's required
-  `HostPort::foreground_commands`, verbatim.
-- `ports/process.rs` (new): `HarnessEndpoint {Port, Process {pane, pid}}` with its two conversions (`port()`,
-  `process()`), `SessionChoice {Fresh, Keep, Resume}`, `LoginStatus {Ok, Missing}`, and the port's codes
-  `process-unsupported`, `server-unsupported` (new), `abort-unsupported`, `session-mismatch`, `inbound-held`.
-- `ports/router.rs` (new): `HarnessRouter<S, P>`, the one router (W5); re-exported with `HarnessEndpoint` from `lib.rs`.
-- `tx_launch.rs` split (W14: 831 lines before, 747 now) into `budget.rs`, `rules.rs` (the policy rule `port_for`, the
-  relaunch rules with the harness check, `refuse_login_env`, codes `port-policy-unsupported`, `harness-change-refused`,
-  `claude-login-env-refused`), `server.rs` (the server's act, `wait_healthy` through `wait_until`), `process.rs` (new:
-  the single process's act, `process-in-use`, `wait_located`) and `undo.rs` (rollback, endpoint-generic). Public:
-  `ProcessSession {Keep, Resume(String), Fresh}`, `relaunch_on`, `relaunch_recorded`, `wait_until`.
-- `tx_switch.rs`: a single process's switch and reset are a relaunch (`relaunch_recorded` with `Resume` or `Fresh`)
-  after the idle gate (`session-holds-permission`, new) and, for switch, `session-of-other-pane`; `--first` goes to the
-  endpoint of the record the relaunch stored (W4).
-- `reconcile.rs`, `reconcile/observe.rs`, `reconcile/observe/process.rs` (new): `reconcile_with(ports, request,
-  Option<Relaunch>)`; the single-process chain (W3); the repair only while idle, through the caller's relaunch, and no
-  record write after it (W2); the login check once per pass when a pane in scope is a single process.
-- `findings.rs`: `PaneWaiting` and `ClaudeLoginMissing`, appended, no remedy.
-- `profile_snapshot.rs` (`NO_PORT_POLICY = "none"`, `port_policy_of`), `tx_apply.rs` (`harness-change-refused` before the
-  health judgment), `tx_apply/observe.rs`, `import/{assess,files,observe}.rs` (W7's `!= Some(Opencode)` fix and the
-  endpoint/`Option` migration), `unmanaged.rs` (#840's doc sentences: both kinds are drivable).
-
-**`holler-pane-testkit`**: `claude.rs` (new, `FakeClaude`), `harnesses.rs` (new, `FakeHarnesses` over the router, the
-rigs' one linker), `conformance/claude.rs` (new, the 12-case suite, a mutant per case), the endpoint migration of
-`harness.rs`, `conformance/{harness,pane_store}.rs` and `fixture.rs`, #835's `FakeHost::foreground_commands` and host
-suite case 10 (verbatim).
-
-**`holler-adapter-claude`** (new crate; T wrote the skeleton): `lib.rs` (`ClaudeConfig`, `Timeouts`, `ClaudeHarness`,
-the seams `AgentsList`, `InboxWrite`, `LoginCheck`, the `HarnessPort` impl), `argv.rs`, `agents.rs`
-(`harness-dialog-open`), `inbox.rs`, `seams.rs`, `exec.rs`.
-
-**Other adapters**: `holler-adapter-host` (`TmuxHost::foreground_commands`, #835 verbatim); `holler-adapter-opencode`
-(endpoint-keyed: `at.port()?` at each method).
-
-**`holler-cli`**: `wiring.rs` (`HarnessRouter<WiredHarness, WiredHarness>`, `claude_harness`, the env table row),
-`wiring/env.rs` (`claude_bin`, `claude_config_dir`), `wiring/bind.rs` (forwards), `pane/args.rs` (`--harness`),
-`pane/launch.rs` (kind default and override, the grammar-only policy check, `harness_text`), `pane/get.rs`,
-`pane/doctor.rs` (`reconcile_with` + `relaunch_recorded(Keep)`), `say_cmd.rs` (`resolve_pane_record`,
-`interrupt-text-unsupported`, `answer-unsupported`), `interrupt_cmd.rs` (`interrupt_pane`, `PaneInterrupt`),
-`answer_cmd.rs` (`answer_pane_target`), `Cargo.toml`.
-
-**Docs**: ADR-0021 (as-built paragraphs in sections 8, 14 and 15, the section 9 rows, "Deferred", decisions 26 to 28;
-the three `docs_cli_test` fragments fixed), `docs/pane-control.md` (the Claude Code pane in sections 1 to 6 and 9 to
-12), `docs/orchestrating.md` (one paragraph), ADR-0003 (amendment line, rows, SPEC FLAGS), `CHANGELOG.md`.
-
-**Merge of `origin/main`.** `origin/main` moved (#849, #840, #851) after the base. Rebasing was impossible: `008a995` is
-pushed and the driver pushes without force. So F ran `git merge --no-commit --no-ff origin/main` (clean, no conflict) and
-left `MERGE_HEAD` set: **the driver's phase commit concludes it as a merge commit.**
+- `crates/holler-pane/src/ports.rs`: `HostPort::foreground_pids(name) -> Result<Vec<u32>, PaneError>`, required, with its doc;
+  the two `compile_fail,E0046` doctests get the method, and a third (`NoForegroundPids`) omits it.
+- `crates/holler-adapter-host/src/lib.rs`, `tmux.rs`, `exec.rs`: `TmuxHost::foreground_pids` (one `list-panes -s` of
+  `#{pane_dead} #{pane_tty}`, strict tty parse; then `ps -t <tty> -o pid= -o pgid= -o tpgid=` per live pane, `LC_ALL=C`,
+  one shared deadline, all or nothing, sorted and de-duplicated), the `ps: PathBuf` field and `with_ps_binary`,
+  `OP_FOREGROUND_PIDS`, `tmux::tty_listing`/`parse_ttys`, `exec::ps_group` beside `kill_group`; the crate docs' errors
+  table gains the column.
+- `crates/holler-cli/src/pane/wiring.rs`, `wiring/bind.rs`: `Unwired`, `BindingHost` and `Wired<dyn HostPort>` forward it.
+- `crates/holler-pane/src/import/findings.rs`: the five codes in `ALL`, `code()`, `level()` (23 kinds); the
+  `HarnessClaudeCode` doc reworded.
+- `crates/holler-pane/src/import/files.rs`: `LauncherEntry.port: Option<u16>`, new `about: String`.
+- `crates/holler-pane/src/import/observe.rs`: `Target.adopt: Adopt` (`Off`, `On(PaneId)`, `OnUnlabelled`),
+  `Observed::ClaudeCode(Adoption)`, the hook into `adopt::read`; `unread_finding` factored out of `tmux_finding`; the
+  call-count doc rewritten.
+- `crates/holler-pane/src/import/adopt.rs` (new, 225 lines): `Adoption`, `Process`, `Miss`, `target` (the label match,
+  through `assess::labelled`), `read` (the AC9 chain and stop rule), `assess_adopted` (the D3 rule, the login check,
+  `claude-code-adopted`).
+- `crates/holler-pane/src/import/assess.rs`: `assess` split into `begin` / `finish` and a `HarnessPart` passed to the one
+  `record()`; the port-less `source-missing` on the OpenCode path; the reworded `harness-claude-code` message; `assess_all`
+  routes `Adoption::NotAsked` to `Outcome::claude_code` and the other two to `assess_adopted`.
+- `crates/holler-pane/src/import.rs`: `ImportRequest.adopt`, `Plan.fleet: FleetPlan` (`None`, `Create`, `Extend { profile,
+  generation_read, added }`), the one `ProfileStore::get(fleet)` (flag on and a record to write), `extend` with
+  `spec-kind-differs`.
+- `crates/holler-cli/src/pane/import.rs`: the flag accepted (`CLAUDE_CODE_STORY` and the refusal gone), `adopt` threaded;
+  help and docs; "to extend" text with the added specs; the summary counts adopted panes and says "extended".
+- `crates/holler-cli/src/pane/import/writes.rs`: the write matches on `FleetPlan`; Extend writes records first and `fleet`
+  last; the undo generalised (`Write::{Record(&Pane), Fleet}`, `created: Option<(&Profile, &Actor)>`, the planned-record
+  equality check); the extension's reconcile text.
+- `crates/holler-cli/src/pane/import/launcher.rs`: `checked` keeps a port-less entry with a cwd (every other check and
+  text unchanged; the relative-cwd check still runs for it).
+- `docs/adr/ADR-0021.md`, `docs/pane-control.md`, `CHANGELOG.md`: the amendment (AC1).
 
 ## Design decisions
 
-1. **Endpoint conversions in one place each** (item 3). `HarnessEndpoint::port()` is the server harness's one
-   conversion and `process()` the single process's. The mirror case gets its own code, `server-unsupported` (new),
-   rather than a second meaning of `process-unsupported`: the message says which shape was asked what. The alternative,
-   one code for both, makes "a forgotten forward" and "a Claude pane asked for a TUI step" read the same.
-2. **`SessionChoice` carries the verb's intent** (W1). `Resume` keeps switch's `session-not-found`: the adapter refuses an
-   id with no transcript, and the plan runs it before anything stops. At the engine level, `ProcessSession::Fresh`
-   takes its id from the harness (`new_session_id`), and a server pane's relaunch accepts `Keep` only (`usage`
-   otherwise).
-3. **One stop/run/wait/record sequence** (W4, W10). `relaunch_on` and `relaunch_recorded` serve switch, reset,
-   interrupt and doctor. `process_command` runs first among the plan's reads, so its refusals write nothing. The wait
-   is `wait_until`, the engine's one deadline-checked loop, until the process is located and idle.
-4. **Doctor's repair through a caller-supplied relaunch** (W2; A left the mechanism to F). `reconcile_with` receives
-   `Option<Relaunch>`, and `holler pane doctor` passes `relaunch_recorded` with `Keep`. The alternative, a relaunch after
-   the pass, was rejected because the chain must know that it relaunched: it skips its own record write (the relaunch
-   stored one), and it reports `fixed` or `fix failed: CODE` on the same finding. Reconcile still imports no `tx_launch`.
-5. **`process-in-use`** (W11) through #835's `foreground_commands` and `is_claude_code_command`, for a launch only (a
-   relaunch has stopped what the pane owns). A tmux session that does not exist yet (`pane-not-found`) runs nothing.
-6. **The login variables are a fact of the kind.** The adapter's `env -u` list and the engine's
-   `claude-login-env-refused` (raised in the plan, before any port call) both read `HarnessKind::login_variables()`, so
-   they cannot drift. Decision 28 in the ADR.
-7. **The login check** runs once per reconcile pass, and only when a pane in scope is a single process: a fleet with no
-   Claude pane never asks the Claude harness anything. A failed check is `observe-failed`, never `claude-login-missing`.
-8. **The socket hook** (W8; A left the key to F). Its command is fixed text. Its data comes through the environment:
-   `CLAUDE_CODE_MESSAGING_SOCKET` and the argv's `HOLLER_CLAUDE_SOCKET_DIR`. It writes `<dir>/$PPID` through a temporary
-   file and a rename, under `umask 077`. The reader fails closed: the directory and the file must be the user's alone
-   and not links, and the content one absolute path. A file is trusted only for a pid that `claude agents --json`
-   lists now. The pid was chosen over the session id as the key because a person's `/clear` changes the session and not
-   the process, so the same file is rewritten and no stale socket outlives its process.
-9. **The `inbound-held` window** is 600 ms (`Timeouts::held_window`), ended early when the entry turns `busy`. An entry
-   that was already waiting before the write is not judged.
-10. **`--harness` and the policy** (W13). The flag is in `SpecFlags`, typed by `validate`, and never echoed. The CLI's flag
-    check reports only `port_for`'s `usage` class. A policy the kind does not take is the engine plan's refusal
-    (`port-policy-unsupported`), so `--spec-only` and `profile apply` meet the same rule.
-11. **`HarnessInfo` validation** follows `Profile`'s slug pattern: a record with a port on a Claude pane, or with none on
-    an OpenCode pane, does not deserialize. `HarnessInfo::endpoint` answers `store-corrupt` for one built in memory.
-12. **Interrupt routing** is by `abort_style()`. A busy Claude pane is relaunched too, since that is the interrupt (the
-    operator's decision of 2026-10-11). Nothing is typed.
-13. **The wiring's inbox directory** is `holler_hub::state::resolve_state_dir()/claude-inbox`, the directory through
-    which the CLI already finds the hub, rather than a new variable.
+- **`FleetPlan::Extend` keeps `generation_read`** beside `profile.generation` (they are equal at plan time), as the brief
+  names the field; the write uses `generation_read`.
+- **Specs are appended to the read profile in record order**; existing specs keep their order. Nothing pins an order.
+- **`HarnessPart.keeps_agent: bool`** rather than an `Option<AgentKey>` from the caller: the OpenCode caller would have to
+  reach into `files.env` for the agent before `record()` checks `files.env` is there. One bool keeps that check in one place.
+- **`plan` reads `fleet` when the flag is on and any outcome has a record**, blocked plan or not, so a dry run of a blocked
+  run still shows "to extend"; the real run is refused before any write anyway.
+- **An extension that adds no spec reports the profile as read** (`Written.profile`), since nothing wrote it.
+- **The model warning and the login check run whenever `pane.env` was read**, even if the pane is blocked for another
+  reason, so the report lists every reason at once.
+- **`ps` parsing:** fields by `split_whitespace` (procps pads them), exactly three, pid and pgid decimal (`tmux::decimal`,
+  made `pub(crate)` rather than copied), `tpgid` decimal or `-1`; an empty line fails the answer (T pins it).
+- **The tty check rejects a leading `/`** as well (a "relative" name), besides the brief's rules.
 
 ## Reuse / extend-vs-new
 
-- **Extended in place**, as the brief's Reuse map and A's plan review asked:
-  - `HarnessPort` (#802 decision 2 precedent), `HostPort` (with #835's method), `HarnessInfo`, `HarnessKind`, `ServeSpec`
-    and `Activity`;
-  - the launch engine (`tx_launch`, with no parallel launcher), `tx_switch`'s plan, reconcile's chain (a sibling module
-    for the single process), `tx_apply`'s choice, `say_cmd`'s pane gates (`resolve_pane_record`, which
-    `resolve_pane_target` now calls), and the wiring's decorators (forwards only).
-- **`Ports` keeps one `harness`**: the router is the new object, and it is the type A asked for (W5).
-- **New objects with the brief's justification:**
-  - the crate `holler-adapter-claude`: one adapter crate per harness, like `holler-adapter-opencode`, and a dependency of
-    `holler-cli` only;
-  - `FakeClaude`, `FakeHarnesses` and the Claude conformance suite: the test kit's established fake-and-suite pattern;
-  - `ports/process.rs`, `ports/router.rs` and `tx_launch/process.rs`: sibling modules of the objects they extend.
-- **For A's anti-duplication gate:** `holler-adapter-claude/src/exec.rs` is a bounded capture runner shaped like the
-  OpenCode and host adapters' runners. An adapter may not depend on another, and the shared runner is #696, so it is a
-  copy by design, written so that #696 is a move.
+Extended, per the brief's Reuse map and A's warns 1 and 2: one `record()` (no second `Pane` literal), the join's start and
+tail shared (`begin`/`finish`), `labelled` reused for the label match, `join` and `files.problems` reused by the adopt join;
+`HarnessPort::shown_session` (no new harness method); `spec_from_pane`/`profile_from_panes`; the one undo of `writes.rs`
+generalised (`Failed`/`undone`/`undo`/`reconcile`), no second copy; `single_quoted`/`pane_list`;
+`HarnessKind::login_variables()`; `exec::run` and the `kill_group` pattern for `ps_group`; `parse_foreground`'s strictness;
+`Outcome::claude_code` unchanged for `NotAsked`. New: `import/adopt.rs`, the sibling module the brief asks for (file size).
 
 ## Architecture notes for A
 
-- **New dependency edge:** `holler-cli -> holler-adapter-claude -> holler-pane` (plus `serde_json` and `getrandom`,
-  both workspace dependencies). No `holler-hub` or `holler-proto` dependency was added to the adapter. `holler-cli`
-  already depended on `holler-hub`, which `claude_harness` calls for the state directory.
-- **Public interface changes** (`archChanged: true`):
-  - `HarnessPort`: endpoint-keyed, plus four default-armed methods;
-  - `HostPort::foreground_commands`: required, as #835 decided;
-  - `HarnessInfo.port: Option<u16>`;
-  - `ServeSpec.{model, cwd}`, `Activity::WaitingPermission`, two `FindingKind`s;
-  - new public types: `HarnessEndpoint`, `SessionChoice`, `LoginStatus`, `HarnessRouter`, `ProcessSession` and
-    `reconcile::Relaunch`;
-  - new public functions: `relaunch_on`, `relaunch_recorded`, `wait_until`, `wait_located`, `reconcile_with`,
-    `say_cmd::resolve_pane_record`, `interrupt_cmd::interrupt_pane` and `answer_cmd::answer_pane_target`.
-- **No wire or protocol change:** `docs/protocol/v2.md` is not touched, and no golden file moved.
-- **Sizes (`scripts/lint.sh` exit 0):** `tx_launch.rs` 747 lines, and `holler-pane-testkit/src/harness.rs` about 630
-  (a warn).
+- Layers: `holler-pane` (port trait, import engine), `holler-adapter-host` (a third subprocess, `ps`, behind its own seam and
+  the shared bounded runner), `holler-cli` (verb, writes, wiring). No new dependency.
+- Public interface changes: `HostPort::foreground_pids` (required: every implementer adds it); `ImportRequest.adopt`;
+  `Plan.profile` replaced by `Plan.fleet: FleetPlan` (only `holler-cli` reads it); `LauncherEntry.port` optional and
+  `about` added; five `ImportFinding` variants; `TmuxHost::with_ps_binary`.
+- No wire/protocol change beyond the five additive finding codes; JSON keys of the verb unchanged.
+- The `send_prompt` choke point is untouched.
 
 ## Deviations from spec / wireframe
 
-- **Section 15 is corrected "as built"**, as A's journal assumed (there is no O in this path). Each correction is an
-  "As built" paragraph in its item:
-  - item 2: the constant is `CLAUDE_CODE_COMMAND` with `is_claude_code_command` (W6);
-  - item 5: `process_command` takes a `SessionChoice` (W1); `LoginStatus` has no `NotApplicable`, and `login_status`'s
-    default refuses (W9);
-  - item 6: one entry point, and doctor's repair only while idle (W2, W3, W4, W10, W11);
-  - item 12: `--harness` in `pane/args.rs` (W13);
-  - item 14: each code declared where it is raised (W10), plus the new `server-unsupported`.
-
-  **The PR body should list these edits to the amendment.**
-- **Item 17 (adoption) is not built.** #835 is not on `main` (checked at F's start and again at the end of F), so the
-  story stops there, as the item says.
-- **#835's code is copied verbatim:** its branch at `9bd101b` and `36b0de8` (the constant and the rule, the required
-  method, the `TmuxHost` and `FakeHost` implementations, host suite case 10, the decorators' forwards, and its tests
-  `claude_code_rule_test.rs`, `foreground_test.rs` and the hunks of `fake_host_test.rs`, `fake_tmux_test.rs` and
-  `host_conformance_test.rs`). Whichever lands second merges identical hunks. These files are left exactly as #835 wrote
-  them, rustfmt-unclean lines included. `HerdrPort::observe_pane`'s loss of its default is #835's and is not copied.
+- The brief says "do not write a number" for the two new ADR decisions: they are listed after decision 49 as two bullets
+  under a sentence saying each takes the next free number at merge (a numbered item needs a number).
+- ADR section 2 has no host-adapter errors table; the errors table with the new `foreground_pids` column and "tmux, `kill`
+  or `ps`" is in the crate docs (`crates/holler-adapter-host/src/lib.rs`), and the ADR's section 2 prose and section 5's
+  runner paragraph name the third subprocess.
+- The guide has no port list; `foreground_pids` is named in section 10 (the fact about the Claude Code panes) and section 3.
 
 ## Tier 1 self-check (incl. tests now GREEN)
 
-Run after the merge of `origin/main` and after the docs, at 2026-10-11T20:43-06:00 (MDT):
-
-```text
-$ cargo build --workspace --tests                                    # clean
-$ cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
-  passed 2487, failed 1, ignored 34 (163 test binaries)
-  FAILED: holler-pane tests/findings_test.rs finding_kind_codes_are_stable   <- T's list, see below
-$ cargo test -p holler-cli --test pane_claude                        42 passed, 1 ignored (the say step, #839/#850)
-$ cargo test -p holler-cli --test cli_surface_test                   3 passed (the two --harness lines parse)
-$ cargo test -p holler-cli --test pane_integration                   67 passed, 4 ignored (opt-in real), 119 s
-$ cargo test -p holler-pane --test claude_kind_test                  15 passed
-$ cargo test -p holler-pane --test rework_test                       7 passed
-$ cargo test -p holler-pane --test claude_code_rule_test             2 passed
-$ cargo test -p holler-pane-testkit --test fake_claude_test          13 passed
-$ cargo test -p holler-pane-testkit --test claude_conformance_test   4 passed (42 s: the mutation case)
-$ cargo test -p holler-pane-testkit --test fake_harnesses_test       5 passed
-$ cargo test -p holler-adapter-claude                                hermetic 15 passed; real_claude_test 1 ignored (opt-in)
-$ cargo test -p holler-cli --test docs_cli_test --test docs_pane_control_test   3 + 16 passed
-$ cargo test -p holler-proto --test docs_errors_test --test docs_wire_test       3 + 12 passed
-$ cargo clippy --workspace --all-targets -- -D warnings
-  error: this loop never actually loops --> crates/holler-cli/tests/pane_claude/mixed.rs:242:5   <- T's test, see below
-  (every other target clean: --exclude holler-cli --all-targets, and holler-cli --lib --bins plus each --test but
-  pane_claude, both with -D warnings, finish with no diagnostic)
-$ bash scripts/lint.sh                 exit 0 (size warnings only; none of the new files)
-$ cargo machete                        no unused dependencies
-$ bash scripts/changelog-check.sh      changelog-check: ok
-$ rustfmt --check                      clean on every new or changed file of F's, except #835's verbatim copies and the
-                                       lines main already carried unformatted (answer_cmd.rs, interrupt_cmd.rs,
-                                       say_cmd.rs, pane_integration/{bind,scenario,wired}.rs, pane_verbs/switch.rs)
 ```
+cargo build --workspace --all-targets                         -> ok, no warning
+cargo test --workspace --no-fail-fast -- --skip roster_stays_accurate_under_concurrent_body_load
+                                                              -> every binary ok after the docs_cli fix below
+  (first run: holler-body rebind_test flaked once, passed in the no-fail-fast run, as T recorded)
+cargo test -p holler-cli --test pane_verbs                    -> 455 passed (43 adopt*, harness.rs's 6 #831 cases)
+cargo test -p holler-cli --test docs_pane_control_test        -> 23 passed
+cargo test -p holler-cli --test docs_cli_test                 -> 3 passed
+cargo test -p holler-pane --test import_test                  -> 6 passed
+cargo test -p holler-pane --doc                               -> 12 passed (3 HostPort compile_fail)
+cargo test -p holler-adapter-host                             -> all ok (foreground_pids 13, bound 6)
+cargo test -p holler-adapter-host --test real_tmux_test -- --ignored -> 10 passed (typed-in case on tmux 3.7c, private socket)
+cargo clippy -p holler-pane -p holler-adapter-host -p holler-pane-testkit --all-targets -- -D warnings -> clean
+cargo clippy -p holler-cli --lib --bins --test pane_verbs --test docs_pane_control_test --test pane_integration
+  --test pane_claude --test docs_cli_test -- -D warnings      -> clean
+  (holler-cli's token_load_test and roster_cli_test fail clippy on toolchain 1.93 at main; untouched)
+cargo fmt --check on the touched files                        -> clean (only those files formatted)
+bash scripts/lint.sh                                          -> exit 0 (adapter lib.rs 592, assess.rs 479, ports.rs 785)
+bash scripts/changelog-check.sh                               -> ok
+grep -rn "CLAUDE_CODE_STORY" crates/holler-cli/src            -> nothing
+```
+
+`docs_cli_test::every_documented_holler_command_parses` failed once on a guide line of mine that quoted
+`holler pane import --adopt-claude-code` without its required arguments; the line was reworded.
 
 ## Evidence appendix
 
-`docs/handoffs/831/evidence.md`: six facts of unchanged code (`class_of` for open codes, the closed `session-not-found`,
-`shown_differs`, `TmuxHost::run` and `stop_owned`, tmux's `env --` argv and its escaping, and `resolve_state_dir`).
+`docs/handoffs/831/evidence.md` (the Claude adapter's pid-only `shown_session`, the router, `is_member`, `Pane`'s
+`PartialEq`, the bounded runner's no-spawn-after-deadline).
 
 ## Tests that look wrong (for T)
 
-1. **`crates/holler-pane/tests/findings_test.rs`, `finding_kind_codes_are_stable`.** `CODES` (`[&str; 13]`) must gain
-   `"pane-waiting"` and `"claude-login-missing"`, in that order, after `"unmanaged-stalled"` (`[&str; 15]`), since the
-   contract appends the two kinds (item 13). Its module doc's "twelve kinds" is also stale. This is test-only: nothing in
-   production code changes.
-2. **`crates/holler-cli/tests/pane_claude/mixed.rs:242`, `say_delivers_a_message_to_each_pane_of_the_scenario`**
-   (ignored). Its loop ends in an unconditional `panic!`, so `cargo clippy --workspace --all-targets -- -D warnings`, a
-   CI step (`ci.yml:348`), fails with `clippy::never_loop`. For example, move the `panic!` after the loop, or add
-   `#[allow(clippy::never_loop)] // #831`. This is test-only.
-
-**The endpoint migration of the existing tests** (T's "Not changed" list, assigned to F's endpoint step) was done with
-no assertion edited:
-
-- `u16` became `&HarnessEndpoint` at each harness call;
-- `HarnessInfo { port: N }` became `Some(N)`;
-- three expectations of a port read became `Some(PORT)`: `fake_pane_store_test.rs`, `pane_verbs/launch.rs` (the
-  expected record) and `pane_verbs/launch/serve.rs`;
-- the doubles of `HarnessPort` and `HostPort` gained the forwards their trait now requires.
-
-The files are:
-
-- `holler-pane`: `ports_test.rs`, `profile_snapshot_test.rs`, `profile_diff_test.rs`;
-- the test kit: `fake_harness_test.rs` (an `at()` helper), `harness_conformance_test.rs`, `fake_pane_store_test.rs`;
-- the OpenCode adapter: `hermetic_test.rs`, `attach_test.rs`, `prompt_test.rs`, `agent_test.rs`,
-  `real_opencode_test.rs`, `real_opencode/rig.rs`, then rustfmt;
-- `holler-cli`: `pane_verbs/{launch/rig,apply/rig,doctor/rig,doctor/surface,import/rig}.rs`, `pane_verbs/{switch,
-  launch,launch/serve,relaunch,reset}.rs`, `profile_verbs/{rig,create,apply/rig}.rs`, `pane_integration/{scenario,
-  wired,bind}.rs`.
-
-Phase 6 checks that no assertion moved.
+None.
 
 ## Known issues
 
-- **Item 17 is not built** (above): the PR is "Part of #831". The adoption is built test first once #835 has merged.
-- **Not run by F: the opt-in real test**, `HOLLER_TEST_CLAUDE=1 cargo test -p holler-adapter-claude --test
-  real_claude_test -- --ignored --test-threads=1`. It uses the real login and one model turn, and it starts real
-  processes. So these are unverified against Claude Code 2.1.296:
-  - the hook's `$PPID` key, which assumes Claude Code runs a hook's shell as its direct child, so that `$PPID` is the pid
-    `claude agents --json` lists. If it is not, `send_prompt` fails closed (`unavailable`) and nothing is misdelivered;
-  - the inbox frame;
-  - the end-to-end launch through real tmux.
-
-  The spike verified the socket variable at `SessionStart`, `--session-id` and `--resume`, `agents --json` and
-  `authMethod`.
-- **`harness-dialog-open` has no fake state** (T's advisory), so it is pinned only by the adapter's mapping (hermetic) and
-  the launch's generic wait-error rollback.
-- **The `inbound-held` window** is pinned on `FakeClaude` only (timing at the real seam).
-- **The claude conformance suite's mutation case takes about 42 s:** each of its mutants waits out a bound.
-- **`reset_first_reaches_the_new_process`** depends on #828 not having moved `--first` yet. If #828 lands first, it goes
-  back to T.
-- **`MERGE_HEAD` is set** in the worktree (the merge of `origin/main`, above). The driver's commit concludes it.
+- `cargo fmt -p holler-cli` with the local rustfmt reformats ~100 files the story does not touch (the crate is not clean
+  under the local toolchain); those changes were reverted, and only the touched files are formatted.
+- The real-store side of the undo's equality check (the hub store keeping a record verbatim apart from `generation`) is
+  stated in the guide, as A's warn 5 asked; no test exercises the hub store here.
 
 ## Files changed
 
-Production and docs only. The test files are listed in "Tests that look wrong", in the migration paragraph.
-
-- `Cargo.lock`
-- `CHANGELOG.md`
-- `crates/holler-adapter-claude/Cargo.toml`
-- `crates/holler-adapter-claude/src/{lib,agents,argv,exec,inbox,seams}.rs`
-- `crates/holler-adapter-host/src/{lib,tmux}.rs`
-- `crates/holler-adapter-opencode/src/lib.rs`
-- `crates/holler-cli/Cargo.toml`
-- `crates/holler-cli/src/{answer_cmd,interrupt_cmd,say_cmd}.rs`
-- `crates/holler-cli/src/pane/{args,doctor,get,launch,wiring}.rs`
-- `crates/holler-cli/src/pane/wiring/{bind,env}.rs`
-- `crates/holler-pane/src/{findings,lib,pane,ports,profile_snapshot,reconcile,tx_apply,tx_launch,tx_switch,unmanaged}.rs`
-- `crates/holler-pane/src/import/{assess,files,observe}.rs`
-- `crates/holler-pane/src/ports/{process,router}.rs` (new)
-- `crates/holler-pane/src/reconcile/observe.rs`
-- `crates/holler-pane/src/reconcile/observe/process.rs` (new)
-- `crates/holler-pane/src/tx_apply/observe.rs`
-- `crates/holler-pane/src/tx_launch/{budget,process,rules,undo}.rs` (new)
-- `crates/holler-pane/src/tx_launch/server.rs`
-- `crates/holler-pane-testkit/src/{claude,harnesses}.rs` (new)
-- `crates/holler-pane-testkit/src/{fixture,harness,host,lib}.rs`
-- `crates/holler-pane-testkit/src/conformance/claude.rs` (new)
-- `crates/holler-pane-testkit/src/conformance/{harness,host,mod,pane_store}.rs`
-- `docs/adr/ADR-0003.md`
+- `crates/holler-pane/src/ports.rs`
+- `crates/holler-pane/src/import.rs`
+- `crates/holler-pane/src/import/adopt.rs` (new)
+- `crates/holler-pane/src/import/assess.rs`
+- `crates/holler-pane/src/import/files.rs`
+- `crates/holler-pane/src/import/findings.rs`
+- `crates/holler-pane/src/import/observe.rs`
+- `crates/holler-adapter-host/src/lib.rs`
+- `crates/holler-adapter-host/src/tmux.rs`
+- `crates/holler-adapter-host/src/exec.rs`
+- `crates/holler-cli/src/pane/import.rs`
+- `crates/holler-cli/src/pane/import/launcher.rs`
+- `crates/holler-cli/src/pane/import/writes.rs`
+- `crates/holler-cli/src/pane/wiring.rs`
+- `crates/holler-cli/src/pane/wiring/bind.rs`
 - `docs/adr/ADR-0021.md`
-- `docs/orchestrating.md`
 - `docs/pane-control.md`
-- `docs/handoffs/831/{handoff-F,evidence}.md` (new)
-- `docs/handoffs/831/decisions.md` (F's entry)
+- `CHANGELOG.md`
