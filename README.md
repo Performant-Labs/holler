@@ -301,7 +301,7 @@ holler say --pane demo-alpha "hello"    # say, interrupt and answer also take --
 
 - Every `pane` and `profile` verb takes `--format=json` (one envelope: `schema_version`, `ok`, `data`, `error`), and exits
   0 on success, 1 on a runtime failure, 2 on usage, 3 on a refusal. With no hub running they exit 1 with `unavailable`.
-- Grid positions are written row first (`r2c1`); `c1r2` and `2,1` are accepted on input.
+- Grid positions are written row first (`r2c1`); `r2c1` and `2,1` are accepted on input.
 - `holler roster` now ends with the columns PANE, POS, PROFILE, HEALTH, SHOWN and DRIVEN, and prints a loud first line
   when a pane shows a different session than the hub drives; `roster --profile NAME` filters; `roster --json` gains the
   matching keys. DRIVEN follows each pane's session of record (#839), so `say`, `interrupt` and `answer` with `--pane`
@@ -384,13 +384,13 @@ A pane that `holler pane launch NAME --harness claude --port-policy none` starte
 
 ```toml
 [[session]]
-name = "c1r1"
+name = "r1c1"
 harness = "claude"
 mode = "attach"
 session_id = "0b6f8f2e-5c1d-4a43-9d51-2f1f6a7f0a11"   # the pane's session of record
 ```
 
-`holler pane get c1r1 --format=json` prints that session (`data.pane.session_of_record`). This `claude` is the pane's interactive process; the ACP bridge above is a spawn row with a `command`.
+`holler pane get r1c1 --format=json` prints that session (`data.pane.session_of_record`). This `claude` is the pane's interactive process; the ACP bridge above is a spawn row with a `command`.
 
 - The body reads nothing the process prints, so `say` returns an empty reply and the pane shows the answer; a turn in flight is interrupted with `holler interrupt --pane NAME`, which relaunches the pane, never by the body.
 - `holler body run` reaches the process with the same `claude` program the pane verbs use (`HOLLER_CLAUDE_BIN`, else `claude` on `PATH`). `holler body support claude` looks on `PATH` only.

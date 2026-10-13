@@ -6,7 +6,7 @@
 #   pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH] [--project DIR] [--agent KEY] [--dry-run]
 #   pane-restart PANE [--model ALIAS|NAME] [--effort E] [--fresh] [--dry-run]            (a Claude Code pane, see below)
 #
-# PANE is cCrR (the tmux session is hj-PANE, derived, never typed). Steps, in order; the first failure stops the
+# PANE is rRcC, row then column (the tmux session is hj-PANE, derived, never typed). Steps, in order; the first failure stops the
 # script and names the step:
 #   1 refuse unless the pane is idle and reachable   2 back up pane.env   3 set the OC_ lines in pane.env
 #   4 stop the TUI (/exit, then one Ctrl-C)          5 start it fresh      6 wait for the server
@@ -14,7 +14,7 @@
 # Every text typed into a pane is followed by Enter: in the same `tmux send-keys` call for the shell line, as a
 # separate call after a short pause for `/exit` (the TUI's autocomplete popup swallows an Enter sent with it). Only the key file's PATH is written to
 # pane.env; the file is never read or printed. Exit: 0 ok, 1 refused (nothing changed), 2 failed after a change.
-# --mo restarts c4r2, the MO pane: it edits opencode-mo/opencode.json and agents/mo.md instead of pane.env, launches
+# --mo restarts r1c1, the MO pane: it edits opencode-mo/opencode.json and agents/mo.md instead of pane.env, launches
 # with OC_SESSION_NAME=mo and no --agent, needs --key-file, accepts a busy pane, and skips pane-ready.
 # A pane that is already fully down is started without the stop step; that needs --project.
 # A Claude Code pane (issue #784) is found, not named: a live Claude Code process whose per-process record in
@@ -27,7 +27,7 @@
 # idle. The model is confirmed from the new process's own arguments, because no prompt is sent. A process whose command
 # line has arguments this script does not know how to carry over is refused. --model takes an alias (opus, sonnet,
 # fable) or a full name, with an optional [1m]; --effort is low, medium, high, xhigh or max.
-# Keys go to the pane id in the record (hj-c3r1:@6.%6 -> %6), not to the session's active pane. Not carried over: the old
+# Keys go to the pane id in the record (hj-r1c3:@6.%6 -> %6), not to the session's active pane. Not carried over: the old
 # command's environment variables, and a model or effort set inside the session with /model or /effort.
 # Timeouts (seconds) can be tuned with PANE_RESTART_T_STOP / _T_UP / _T_REG / _T_MODEL and PANE_RESTART_POLL.
 set -uo pipefail
@@ -107,7 +107,7 @@ restart_claude() { # restart_claude RECORD: the whole restart of one Claude Code
   fi
   pid=$(jq -r '.pid' "$rec"); sid=$(jq -r '.sessionId // empty' "$rec"); cwd=$(jq -r '.cwd // empty' "$rec"); status=$(jq -r '.status // empty' "$rec")
   [ -n "$sid" ] && [ -d "$cwd" ] || refuse "the record $rec has no session id or no working directory"
-  # Type into the pane the record names (hj-c3r1:@6.%6 -> %6), never into the session: a session's active pane may be another one.
+  # Type into the pane the record names (hj-r1c3:@6.%6 -> %6), never into the session: a session's active pane may be another one.
   tmux_target=$(jq -r '.tmux // empty' "$rec"); target=${tmux_target##*.}
   [[ "$target" =~ ^%[0-9]+$ ]] || refuse "the record's tmux target '$tmux_target' has no pane id"
   [ "${TMUX_PANE:-}" != "$target" ] || refuse "this script is running inside $session ($target)"
@@ -199,7 +199,7 @@ restart_claude() { # restart_claude RECORD: the whole restart of one Claude Code
   echo "$pane: OK model=${cur_model:-default} effort=${cur_effort:-default} session=$nsid (Claude Code; confirmed from the process's own arguments, no prompt sent)"
 }
 
-{ [[ "$pane" =~ ^c[0-9]r[0-9]$ ]] && mapfile -t crecs < <(claude_records "$pane"); } || crecs=()
+{ [[ "$pane" =~ ^r[0-9]c[0-9]$ ]] && mapfile -t crecs < <(claude_records "$pane"); } || crecs=()
 if [ "${#crecs[@]}" -gt 1 ]; then
   refuse "more than one live Claude Code session is recorded for hj-$pane (${crecs[*]##*/})"
 elif [ "${#crecs[@]}" = 1 ]; then
@@ -208,13 +208,13 @@ elif [ "${#crecs[@]}" = 1 ]; then
 fi
 
 # 1. Refuse -------------------------------------------------------------------------------------------------
-[[ "$pane" =~ ^c[0-9]r[0-9]$ ]] || refuse "'$pane' is not a pane name (cCrR)"
+[[ "$pane" =~ ^r[0-9]c[0-9]$ ]] || refuse "'$pane' is not a pane name (r<row>c<col>)"
 [ "$fresh" = 0 ] || refuse "--fresh is for Claude Code panes; no live Claude Code process is recorded in hj-$pane"
 if [ "$mo" = 1 ]; then
-  [ "$pane" = c4r2 ] || refuse "--mo is only for c4r2, the MO pane"
+  [ "$pane" = r1c1 ] || refuse "--mo is only for r1c1, the MO pane"
   [ -n "$key_file" ] || refuse "--mo needs --key-file (the provider key file for MO's config)"
 else
-  [ "$pane" != c4r2 ] || refuse "c4r2 is the MO pane: pass --mo (its config is opencode-mo/, not pane.env)"
+  [ "$pane" != r1c1 ] || refuse "r1c1 is the MO pane: pass --mo (its config is opencode-mo/, not pane.env)"
 fi
 [ -n "$model" ] || refuse "--model PROVIDER/ID is required"
 [[ "$model" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$ ]] || refuse "'$model' is not PROVIDER/ID"
@@ -229,7 +229,7 @@ fi
 session="hj-$pane"
 state="$HOME/.holler-oc/$session"
 penv="$state/pane.env"
-col=${pane:1:1}; row=${pane:3:1}
+row=${pane:1:1}; col=${pane:3:1}
 base="http://127.0.0.1:$((47000 + col * 10 + row))"
 
 tmux has-session -t "$session" 2>/dev/null || refuse "no tmux session $session"
@@ -356,7 +356,7 @@ followed() { # oc-holler's watcher wrote the new session to last-session and ses
 }
 doctor_name=$pane
 # MO's roster name carries the host label in front (the lower-cased short host name); PANE_RESTART_MO_ROSTER_NAME overrides it.
-[ "$mo" = 1 ] && doctor_name=${PANE_RESTART_MO_ROSTER_NAME:-$(hostname -s | tr '[:upper:]' '[:lower:]')-hj-c4r2/mo}
+[ "$mo" = 1 ] && doctor_name=${PANE_RESTART_MO_ROSTER_NAME:-$(hostname -s | tr '[:upper:]' '[:lower:]')-hj-r1c1/mo}
 doctor_ok() { pfo doctor "$doctor_name" 2>&1 | tail -1 | grep -q ': ok$'; }
 if ! wait_for "$t_reg" followed; then
   last=$(cat "$state/last-session" 2>/dev/null || true)

@@ -57,7 +57,7 @@ oc_http POST "$PORT" /tui/select-session '{"sessionID":"not-a-session"}'
 check "select-session with a malformed id -> 400 (got $HTTP_CODE)" test "$HTTP_CODE" = 400
 
 # ---- 4. which session is shown: the title, and its limits ----------------------------
-oc_http PATCH "$PORT" "/session/$A" "{\"title\":\"hj-c1r1 holler pane title $A\"}"
+oc_http PATCH "$PORT" "/session/$A" "{\"title\":\"hj-r1c1 holler pane title $A\"}"
 sleep 1
 info "a long session title is cut in the terminal title: '$(oc_tui_title tui1)'"
 oc_http PATCH "$PORT" "/session/$A" "{\"title\":\"$A\"}"

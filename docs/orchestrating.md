@@ -112,7 +112,7 @@ stops only the processes the pane owns, starts the harness server again, keeps t
 server still lists it, and records the new model:
 
 ```bash
-holler pane relaunch hj-c3r1 --model anthropic/claude-sonnet-5-5 --effort medium
+holler pane relaunch hj-r1c3 --model anthropic/claude-sonnet-5-5 --effort medium
 ```
 
 The synopsis is `holler pane relaunch PANE --model PROVIDER/ID [--effort E]`; [pane-control.md](pane-control.md) is the
@@ -126,12 +126,12 @@ OpenCode TUI on a new model without the registry. Run it on the host that owns t
 from any shell except the pane being restarted:
 
 ```bash
-scripts/pane-restart c3r1 --model anthropic/claude-sonnet-5-5 --effort medium \
+scripts/pane-restart r1c3 --model anthropic/claude-sonnet-5-5 --effort medium \
   --key-file '$HOME/.holler-oc/keys/anthropic.key'      # add --dry-run first to see the plan
 ```
 
-It prints one line: `c3r1: OK model=… session=…`, `c3r1: REFUSED: …` (exit 1, nothing changed) or
-`c3r1: FAIL step N (name): …` (exit 2, with the `pane.env` backup path). It refuses the MO pane (`c4r2`) and
+It prints one line: `r1c3: OK model=… session=…`, `r1c3: REFUSED: …` (exit 1, nothing changed) or
+`r1c3: FAIL step N (name): …` (exit 2, with the `pane.env` backup path). It refuses the MO pane (`r1c1`) and
 any pane that is not idle. Pause the watchdog yourself first if you do not want it acting on the pane meanwhile.
 Do not type `tmux send-keys` by hand for this: text sent without `Enter` sits unsubmitted in the TUI prompt
 (the 2026-10-10 failure that motivated the script). A registry pane restarted with the script leaves the
@@ -144,13 +144,13 @@ A pane running **Claude Code** that was set up by hand is not in the pane regist
 Code pane that `holler pane launch PANE --harness claude` started (#831) has a record: restart it with
 `holler pane relaunch PANE`, not with the script, whose new process the record would not name (pane-control.md,
 section 2). Such a pane is detected, not named: the script looks for a live Claude Code process whose
-record in `~/.claude/sessions/<pid>.json` names the pane's tmux session (`hj-c3r1`). Such a pane takes a Claude
+record in `~/.claude/sessions/<pid>.json` names the pane's tmux session (`hj-r1c3`). Such a pane takes a Claude
 model alias or name and an effort level, and none of the OpenCode options:
 
 ```bash
-scripts/pane-restart c3r1 --model opus --effort high --dry-run   # alias (opus, sonnet, fable) or full name, optional [1m]
-scripts/pane-restart c3r1 --effort xhigh                         # an omitted --model or --effort keeps its old value
-scripts/pane-restart c3r1 --model sonnet --fresh                 # a new session instead of resuming the old one
+scripts/pane-restart r1c3 --model opus --effort high --dry-run   # alias (opus, sonnet, fable) or full name, optional [1m]
+scripts/pane-restart r1c3 --effort xhigh                         # an omitted --model or --effort keeps its old value
+scripts/pane-restart r1c3 --model sonnet --fresh                 # a new session instead of resuming the old one
 ```
 
 It refuses unless the record says `idle` and the screen shows neither `esc to interrupt`, a question
@@ -160,7 +160,7 @@ starts `claude` again in the same directory with the flags it had, the new model
 conversation yet cannot be resumed and is refused before anything changes; pass `--fresh`. The model is confirmed
 from the new process's own arguments; no prompt is sent, so nothing is spent. A running process with a flag the
 script does not know how to carry over (a prompt, `--mcp-config`) is refused and the flag is named.
-Keys are typed into the pane id the record names (`hj-c3r1:@6.%6` gives `%6`), not into the session, so a second pane
+Keys are typed into the pane id the record names (`hj-r1c3:@6.%6` gives `%6`), not into the session, so a second pane
 or window in the same tmux session is never touched. Not carried over: environment variables set on the old command
 line, and a model or effort changed inside the session with `/model` or `/effort` (only the command-line arguments are
 read). The first Ctrl-C of the fallback only warns in Claude Code, so the script sends two.
