@@ -12,7 +12,8 @@
 //!    `harness.shown_session` and `harness.agent_view` (a server pane whose record names no
 //!    agent and whose healthy server lists the session of record: `agent-cannot-dispatch`,
 //!    #647 part 2); and once per pass `herdr.version` and `herdr.snapshot`, and (#839)
-//!    `hub.advertised`, the hub's live attach bodies, when a pane in scope has a server.
+//!    `hub.advertised`, the hub's live attach bodies, when any pane is in scope (a single
+//!    process's body too, #850).
 //!    A healthy server's list is trusted. An unhealthy server's list only tells a wedged
 //!    server (the list times out) from a down one. A rule that needs a value that was not
 //!    observed is skipped, and the call that failed is an `observe-failed` finding: nothing
@@ -50,7 +51,9 @@
 //! is `not-fixable`, with the relaunch remedy. The relaunch is the caller's
 //! ([`reconcile_with`]'s `relaunch`: `holler pane doctor` passes `tx_launch`'s), so this
 //! engine never imports the launch engine, which reads its [`shown_differs`]. After a
-//! relaunch the chain writes no record of its own: the relaunch stored it. And once per pass,
+//! relaunch the chain writes no record of its own: the relaunch stored it. Its body is found as a
+//! server pane's is, over an empty server list (#850), so its DRIVEN is recorded and a body that
+//! is behind is reported as above. And once per pass,
 //! when a pane in scope is a single process, `harness.login_status` is asked: a login that is
 //! not the subscription's is one `claude-login-missing`.
 //!
@@ -63,9 +66,10 @@
 //!   then). `None` with `at > 0` is an observed home screen, or a pane with no TUI.
 //! - `last_observed.driven` is the harness session the pane's body advertises, as
 //!   `driven::driver_of` found it (#839), in the same write as `shown`; `None` when no body
-//!   drives the pane, or when none can be told to be its own. A failed `hub.advertised`
-//!   leaves it as stored, and so does a single-process pane, which no body drives until
-//!   #850. The TUI's mismatch still compares SHOWN with `session_of_record`
+//!   drives the pane, or when none can be told to be its own, for a single-process pane as for a
+//!   server pane (#850). A failed `hub.advertised` leaves it as stored, and so does a
+//!   single-process pane's relaunch, which stored its own record. The TUI's mismatch still
+//!   compares SHOWN with `session_of_record`
 //!   ([`shown_differs`]), and `--fix` repairs only that side.
 //! - A record is written only when one of those values changed, or on its first
 //!   observation (`at == 0`): the hub's rule for a periodic writer (`panes/mod.rs`). So
@@ -98,7 +102,7 @@ const HERDR_VERSION: &str = "herdr.version";
 const HERDR_SNAPSHOT: &str = "herdr.snapshot";
 /// The login call of a pass that holds a single-process pane (#831).
 const HARNESS_LOGIN_STATUS: &str = "harness.login_status";
-/// The hub call of a pass that holds a server pane (#839).
+/// The hub call of a pass that holds a pane (#839).
 const HUB_ADVERTISED: &str = "hub.advertised";
 
 /// How a pass relaunches a single-process pane on its session of record, for `--fix` (#831,
@@ -325,14 +329,11 @@ fn resolve(
     Ok((scope, ports.pane_store.list()?))
 }
 
-/// The hub's live attach bodies, read once per pass (#839) and only when a pane in scope has a
-/// server: a single process has no body until #850, so a pass of single processes alone asks
-/// the hub nothing. `None` when nothing was asked.
+/// The hub's live attach bodies, read once per pass (#839) when any pane is in scope: a server
+/// pane's body and a single process's (#850) are found the same way. `None` when nothing was
+/// asked.
 fn read_bodies(ports: Ports<'_>, scope: &[Pane]) -> Option<Result<Vec<Advertised>, PaneError>> {
-    scope
-        .iter()
-        .any(|pane| pane.harness.kind.shape() == Shape::ServerAndTui)
-        .then(|| ports.hub.advertised())
+    (!scope.is_empty()).then(|| ports.hub.advertised())
 }
 
 /// What the pass saw of Herdr itself.

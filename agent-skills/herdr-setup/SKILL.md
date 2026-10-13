@@ -73,8 +73,10 @@ or Claude Code (`harness = "claude"`, #831), and an orchestrator is a role on a 
 a free-form command: Holler starts what the harness adapter builds, so what a pane holds is its harness
 and nothing else. Where the two differ, the stage says so: an OpenCode pane has a server on a fixed port,
 and its model is recorded, not applied, until #829 (its server runs what its OpenCode configuration
-selects); a Claude Code pane has no server and no port, its model and effort are applied, and it has no
-body row and no roster row until #850, so Stage 10's `holler say` round trip covers OpenCode panes only.
+selects); a Claude Code pane has no server and no port, its model and effort are applied, and its body
+row is not derived by this wizard: Stage 8 derives OpenCode rows only, and the operator writes a Claude
+Code pane's row by hand from the README's "A Claude Code pane" (#850). So Stage 10's `holler say` round
+trip covers a Claude Code pane only when that row exists.
 
 ## Connections this wizard's setup actually makes
 
@@ -93,7 +95,8 @@ connection is loopback or a local socket, verified against the ADRs in the `holl
 2. **Body ↔ each OpenCode pane's server ("the body hop").** Attach mode (ADR 0014): plain HTTP on
    loopback, `http://127.0.0.1:<port>`, to the server Holler started inside that pane's tmux session.
    The body is not that server's parent, and its rows take each pane's port and session of record from
-   the registry (Stage 8). A Claude Code pane has no server and no body row yet (#850).
+   the registry (Stage 8). A Claude Code pane has no server: its body row, which the operator writes by
+   hand (#850), attaches to its process, and this wizard derives none.
 3. **Holler ↔ Herdr, tmux and the harnesses.** Holler's pane verbs reach Herdr through its adapter over
    Herdr's **local Unix socket** (for the default instance `~/.config/herdr/herdr.sock`), run each pane's
    harness in a tmux session named as the pane (the default instance on tmux's default server, a named
@@ -839,8 +842,9 @@ plan and show it before touching anything:
   count (how many OpenCode, how many Claude Code, which are orchestrators). The ports are the ones
   `panes.sh grid` printed, never recomputed. Say, in one line each: the model, effort and environment
   of an OpenCode pane are recorded, not applied, until #829 (its server runs what its OpenCode
-  configuration selects); the model and effort of a Claude Code pane are applied; and a Claude Code pane
-  has no body row and no roster row yet (#850), so Stage 10's round trip covers OpenCode panes only.
+  configuration selects); the model and effort of a Claude Code pane are applied; and a Claude Code
+  pane's body row is written by the operator by hand, not by this wizard (#850), so its roster row and
+  Stage 10's round trip exist only when that row does.
   The `plan` lines are the calls Stages 6 and 7 run, in that order: the profile, one `--spec-only`
   launch per pane (which touches nothing live), the dry run, then one apply.
 - **Which case this is.** Name which of these holds, from Stage 2's ledger, session list and
@@ -1324,8 +1328,9 @@ exists to fall back to.
 
 **One body on this machine drives every OpenCode pane.** A body is how the hub drives a session: it
 attaches to the session each pane's server holds (attach mode, ADR 0014; it is not that server's
-parent). **A Claude Code pane has no body row yet** (#850): Stage 3 said so, and Stage 10's round trip
-covers OpenCode panes only. One body serves all the OpenCode panes, so restarting it reconnects every
+parent). **This stage derives no row for a Claude Code pane** (#850: that row attaches to the pane's
+process, and the operator writes it by hand from the README's "A Claude Code pane"): Stage 3 said so,
+and Stage 10's round trip covers a Claude Code pane only when that row exists. One body serves all the OpenCode panes, so restarting it reconnects every
 one of them at once. With no OpenCode pane in the grid, this stage has nothing to do: report it skipped
 (⏭️), never failed.
 
@@ -1460,8 +1465,9 @@ HOLLER_STATE_DIR=<state_dir> holler say <label>/<name> "reply with just: <name> 
 
 **Verify:** the reply appears in the CLI output here for every OpenCode pane, a real round trip through
 the hub, the body and the pane's own server. Repeat for every OpenCode pane — a partial pass (2 of 3
-verified) is a real gap for the untested one, not good enough. A Claude Code pane has no round trip yet
-(no body row until #850): say so plainly, and count it verified by Stage 9 alone.
+verified) is a real gap for the untested one, not good enough. A Claude Code pane has a round trip only
+when the operator wrote its body row by hand (#850; this wizard derives none): run the same `holler say`
+for it then; otherwise say so plainly, and count it verified by Stage 9 alone.
 
 **If Stage 3's AGENTS.md briefing was installed, prove it with a genuinely new session — a
 resumed one proves nothing.** An orchestrator with old conversation history may already "know" about

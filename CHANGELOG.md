@@ -8,6 +8,19 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, a body for a Claude Code pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#850](https://github.com/Performant-Labs/holler/issues/850)): `holler say --pane NAME TEXT` and `holler pane reset
+  PANE --first TEXT` reach a Claude Code pane through the hub, with its holds and its pane gate in force. The pane's
+  body is an attach row of `holler body run` with `harness = "claude"` and the pane's session of record as
+  `session_id`, a UUID, and no endpoint (the README's "A Claude Code pane"; the operator writes it, the setup wizard
+  derives none). The body delivers through the Claude Code adapter that the pane verbs use (one frame to the process's
+  inbox socket, the process found by its session on every call) and follows the turn with `claude agents --json`; it
+  reads nothing the process prints, so `say` returns no reply text, and it has no in-place interrupt: a cancel in flight
+  is refused, naming `holler interrupt --pane NAME`, which relaunches the pane. A `switch` or a `reset` of a Claude Code
+  pane re-points its body to the new session and records DRIVEN, and `holler pane doctor` records DRIVEN for it and
+  reports a body that is behind. `holler body support claude` is a `PATH` lookup for such a row. No hub or wire change.
+  [ADR 0014](docs/adr/ADR-0014.md) points 7 to 11 and [ADR 0021](docs/adr/ADR-0021.md) sections 5 and 15 (items 9 and
+  19) record the contract.
 - Pane control, compaction (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane compact
   PANE [--profile NAME]` compacts the context of a pane's session of record through the harness API, never by typing
   `/compact` into its TUI ([#878](https://github.com/Performant-Labs/holler/issues/878)). It runs on the compaction model
@@ -18,7 +31,7 @@ fills this file in at release time.
   unhealthy or mismatched pane. `HarnessPort` gains the default-armed `compact` (`compact-unsupported`, which a Claude Code
   pane answers until the spike decides it); the OpenCode adapter asks `POST /session/:id/summarize` under its own 120 s
   bound (`Timeouts::compact`), written from OpenCode 1.19.0's API document and not yet run against a real server.
-  [ADR 0021](docs/adr/ADR-0021.md) section 8 ("Compaction") and decision 50 record it, and
+  [ADR 0021](docs/adr/ADR-0021.md) section 8 ("Compaction") and decision 51 record it, and
   [`docs/pane-control.md`](docs/pane-control.md) documents the verb.
 - The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
   `holler-pane` (`holler_pane::bounded`) instead of four private copies
@@ -87,13 +100,10 @@ fills this file in at release time.
   decision, no keypress) restart it. `switch` and `reset` also refuse a pane waiting on a permission prompt
   (`session-holds-permission`), an interrupt with text is `interrupt-text-unsupported` and `answer --pane` is
   `answer-unsupported`. `holler pane doctor` reports two new findings, `pane-waiting` and `claude-login-missing`.
-  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet, and `holler roster`, whose rows are the sessions
-  that bodies serve, has no row for one: both need a body for its session
-  ([#850](https://github.com/Performant-Labs/holler/issues/850), after
-  [#839](https://github.com/Performant-Labs/holler/issues/839)). The new crate `holler-adapter-claude` implements the
-  harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`); every harness call is now keyed by an
-  endpoint, a port or a process; and `HostPort::foreground_commands` with the one Claude Code command rule is built to
-  #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
+  `holler say --pane NAME TEXT` reaches a Claude Code pane through its body (#850). The new crate
+  `holler-adapter-claude` implements the harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`);
+  every harness call is now keyed by an endpoint, a port or a process; and `HostPort::foreground_commands` with the one
+  Claude Code command rule is built to #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
   [`docs/pane-control.md`](docs/pane-control.md) documents the Claude Code pane.
 - Profiles can be renamed, exported and imported, and `holler pane doctor` reports a pane that drifted from its
   profile (epic [#633](https://github.com/Performant-Labs/holler/issues/633),

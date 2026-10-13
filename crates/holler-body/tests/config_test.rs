@@ -301,7 +301,7 @@ fn presence_doc_lists_every_session_idle() {
 
         [[session]]
         name = "beta"
-        harness = "claude"
+        harness = "codex"
         mode = "attach"
         endpoint = "http://127.0.0.1:4096"
         session_id = "ses_1"

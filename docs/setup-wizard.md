@@ -168,9 +168,10 @@ workspace command of its own (`herdr.sh run` refuses every word but `status`, `s
    asks on a refused, failed or reported step, and gives the apply a timeout above its expected
    duration (up to 10 s to observe, plus about 15 s per create).
 5. **One body** (Stage 8) on the same machine, joined over `ws://127.0.0.1:<hub_port>`, whose attach
-   rows are derived from the registry. A Claude Code pane has no body row until
-   [#850](https://github.com/Performant-Labs/holler/issues/850), so it has no roster row either, and
-   a `say` round trip reaches the OpenCode panes only.
+   rows are derived from the registry, for the OpenCode panes only. A Claude Code pane's body row
+   attaches to its process and is written by the operator by hand
+   ([#850](https://github.com/Performant-Labs/holler/issues/850), the README's "A Claude Code pane"), so
+   a `say` round trip reaches a Claude Code pane only when that row exists.
 6. **The registry check** (Stage 9): `holler pane doctor`, `holler pane list` and
    `holler profile show NAME`, gated on any finding except `unregistered-herdr-pane`. DRIVEN prints
    `-` until [#839](https://github.com/Performant-Labs/holler/issues/839).

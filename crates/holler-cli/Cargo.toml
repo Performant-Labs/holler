@@ -279,6 +279,29 @@ path = "tests/attach_cli_test.rs"
 name = "attach_mode_test"
 path = "tests/attach_mode_test.rs"
 
+# A Claude Code row end to end (#850): a real hub, a real `holler body run` whose
+# row has `harness = "claude"` and `mode = "attach"`, and a program that stands
+# for `claude` (`claude_rig`, `#[path]`-included): `say` is one inbox frame, a
+# hold refuses it, an interrupt in flight is refused, the row is on the roster,
+# `body support claude` is a PATH lookup and no login is read.
+[[test]]
+name = "claude_attach_mode_test"
+path = "tests/claude_attach_mode_test.rs"
+
+# #831's `say` step as a default-run test (#850): `say --pane` reaches an OpenCode
+# pane and a Claude Code pane through one hub and two bodies, with the holds and
+# the pane gate in force (`fake_server.rs` and `claude_rig` `#[path]`-included).
+[[test]]
+name = "say_pane_scenario_test"
+path = "tests/say_pane_scenario_test.rs"
+
+# The text #850 makes false is gone (#850): the ADR, the guide, the CHANGELOG, the
+# module docs, the pane_claude test comments and the wizard's text carry none of the
+# present-tense statements that a Claude Code pane has no body.
+[[test]]
+name = "docs_claude_body_test"
+path = "tests/docs_claude_body_test.rs"
+
 # DRIVEN end to end (#839): a real hub, a real body in attach mode against the
 # same fake OpenCode server (`#[path]`-included), and pane records written
 # through the wiring's own client: `say --pane` reaches a real session of

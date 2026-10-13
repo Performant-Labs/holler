@@ -5,12 +5,12 @@
 //! shows both with SHOWN and DRIVEN as their records give them; a message is delivered to the
 //! Claude pane at `HarnessPort::send_prompt` (W12); one pane is interrupted (the Claude pane: a
 //! relaunch on its session of record, the session unchanged), one is parked, and `doctor` is
-//! clean. The step "deliver a message to each through `holler say`" needs #839 and #850 and is
-//! written down below as an ignored test that names both (item 18), not left out.
+//! clean. The step "deliver a message to each through `holler say`" is the default-run
+//! `say_pane_scenario_test` (#850, item 18): it needs a real hub and two real bodies, which this
+//! target, over the test kit's fakes, does not start.
 
 use holler_cli::interrupt_cmd::{interrupt_pane, PaneInterrupt};
 use holler_cli::output::Format;
-use holler_cli::say_cmd::resolve_pane_target;
 use holler_pane::pane::{HarnessKind, Hold};
 use holler_pane::profile::{SpecHarness, SpecHerdr, SpecHost};
 use holler_pane::{HarnessPort, ProfileSpec};
@@ -234,31 +234,4 @@ fn the_acceptance_scenario_on_the_fakes() {
     // `doctor` is clean.
     let found = findings(&data_of(&rig.run(&["pane", "doctor"], Format::Json)));
     assert_eq!(kinds(&found), Vec::<String>::new(), "{found:?}");
-}
-
-/// The scenario's `holler say` step (#831's acceptance, ADR-0021 section 15 item 18). It cannot
-/// pass until the hub can reach both panes: the hub delivers only to a connected body addressed by
-/// its advertised name, and `say --pane` resolves a pane to its session of record, which matches
-/// no body's name until #839 joins a body's `harness_session_id` to `Pane.session_of_record`; a
-/// Claude Code pane also has no body at all until #850. Run it with `--ignored` once both land.
-#[test]
-#[ignore = "blocked by #839 (the hub joins a body's harness session to Pane.session_of_record) and #850 (a body driver for a Claude Code pane): holler say --pane reaches no pane of either harness until both land"]
-fn say_delivers_a_message_to_each_pane_of_the_scenario() {
-    let rig = applied();
-    let mut addresses = Vec::new();
-    for pane in [OPENCODE, CLAUDE] {
-        let address = rig
-            .with_ports(|ports| resolve_pane_target(ports, pane, None))
-            .unwrap_or_else(|e| panic!("{pane} resolves: {e}"));
-        assert_eq!(
-            Some(address.as_str()),
-            rig.record(pane).session_of_record.as_deref()
-        );
-        addresses.push((pane, address));
-    }
-    panic!(
-        "`holler say --pane` would send to the hub addresses {addresses:?}, which no body \
-         advertises until #839 (and, for the Claude pane, #850): replace this line with the \
-         real delivery through the hub, then assert the message reached each pane"
-    );
 }

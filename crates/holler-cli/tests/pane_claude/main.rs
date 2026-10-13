@@ -13,9 +13,10 @@
 //! - `lifecycle`: relaunch, switch, reset, interrupt, answer, park and close (W1, W4, the
 //!   operator's abort decision);
 //! - `doctor`: the single-process chain, the relaunch repair and the new findings (W2, W3);
-//! - `mixed`: one profile with both harnesses, and the acceptance scenario, its `say` step
-//!   ignored and naming #839 and #850 (item 18);
-//! - `driven`: a Claude Code pane asks the hub nothing and keeps its stored DRIVEN (#839);
+//! - `mixed`: one profile with both harnesses, and the acceptance scenario (its `say` step is the
+//!   default-run `say_pane_scenario_test`, #850; item 18);
+//! - `driven`: the drive rule of a single process, the body of a Claude Code pane followed by
+//!   `switch` and `reset` and recorded as DRIVEN by `doctor` (#850, item 19).
 //! - `compact`: `pane compact` on a Claude Code pane is `compact-unsupported` after the engine's
 //!   checks, and on an OpenCode pane it compacts through the router (#878).
 
