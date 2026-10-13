@@ -7,7 +7,7 @@ fills this file in at release time.
 
 ## [Unreleased]
 
-## [0.5.0] - TODO(release date)
+## [0.5.0] - 2026-10-13
 <!-- DRAFT, refreshed 2026-10-12 against origin/main ef881fc. Entries below the epic summary and PENDING list are main's [Unreleased] verbatim (each story wrote its own). Merged since the earlier draft: #803 (PR 866), #647 part 2 (872), #839 (863), #844 (870), #845 (873, Part of; follow-up #875), #846 (868; follow-up #869), #847 (865), #848 (867), #696 (874; follow-up #877), #853 (861), #835 (860); PR 871 (pipeline pin) is tooling and omitted. The story index (one line per issue) is in the release drafts, not here. Resolve every [PENDING #N] before release. -->
 
 ### Enhancements
@@ -657,8 +657,8 @@ fills this file in at release time.
   ([#644](https://github.com/Performant-Labs/holler/issues/644)).
 
 ### Breaking Changes
-- The setup-wizard skill (installed at `~/.claude/skills/setup-wizard`, now `~/.claude/skills/herdr-setup`) has its command renamed `/setup-wizard` to `/herdr-setup` ([#820](https://github.com/Performant-Labs/holler/issues/820)). Anyone invoking the old name must use the new one. (TODO: operator to confirm this is a breaking change)
-- `holler --version` / `-V` now print `holler 0.5.0 (<commit>)` instead of a bare version, and the `version` field of `hub status`, `hub query status`, `body query status` and `caps` reads `0.5.0 (<commit>)` ([#851](https://github.com/Performant-Labs/holler/issues/851), [PR 854](https://github.com/Performant-Labs/holler/pull/854)). Anything that parses the old bare string must change. (TODO: operator to confirm this is a breaking change)
+- The setup-wizard skill (installed at `~/.claude/skills/setup-wizard`, now `~/.claude/skills/herdr-setup`) has its command renamed `/setup-wizard` to `/herdr-setup` ([#820](https://github.com/Performant-Labs/holler/issues/820)). Anyone invoking the old name must use the new one.
+- `holler --version` / `-V` now print `holler 0.5.0 (<commit>)` instead of a bare version, and the `version` field of `hub status`, `hub query status`, `body query status` and `caps` reads `0.5.0 (<commit>)` ([#851](https://github.com/Performant-Labs/holler/issues/851), [PR 854](https://github.com/Performant-Labs/holler/pull/854)). Anything that parses the old bare string must change.
 - The setup wizard's config is `[[pane]]` ([#803](https://github.com/Performant-Labs/holler/issues/803)): an
   orchestrator is a role on an OpenCode or Claude Code pane. `[[orchestrator]]` and `[[session]]`, the free-form `cmd`,
   remote attach-mode sessions (with `endpoint`, `mode`, `session_id`, `remote_host` and `remote_tailnet_host`) and the
