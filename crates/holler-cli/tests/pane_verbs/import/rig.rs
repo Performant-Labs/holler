@@ -193,12 +193,28 @@ impl ImportRig {
     /// The launcher table at its default path, from [`ImportRig::launcher`], written in
     /// reverse name order (so the import's order is its own, not the file's).
     pub fn write_launcher(&self) {
+        self.write_launcher_replacing(None);
+    }
+
+    /// The launcher table with the table of the pane `name` holding exactly `body` (its lines,
+    /// e.g. a `cwd` and a `command` but no `port`; #831), every other entry as in
+    /// [`ImportRig::launcher`].
+    pub fn write_launcher_with(&self, name: &str, body: &str) {
+        self.write_launcher_replacing(Some((name, body)));
+    }
+
+    fn write_launcher_replacing(&self, replaced: Option<(&str, &str)>) {
         let mut text = String::from("# made-up launcher table (#650)\n");
         for (name, entry) in self.launcher.iter().rev() {
-            text.push_str(&format!(
-                "\n[{name}]\nport = {}\ncwd = \"{}\"\ncommand = {}\n",
-                entry.port, entry.cwd, entry.command
-            ));
+            match replaced {
+                Some((pane, body)) if pane == name => {
+                    text.push_str(&format!("\n[{name}]\n{body}\n"));
+                }
+                _ => text.push_str(&format!(
+                    "\n[{name}]\nport = {}\ncwd = \"{}\"\ncommand = {}\n",
+                    entry.port, entry.cwd, entry.command
+                )),
+            }
         }
         self.write("launcher.toml", &text);
     }

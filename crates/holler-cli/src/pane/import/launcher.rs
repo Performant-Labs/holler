@@ -8,7 +8,10 @@
 //! have are all one refusal, which every pane reports as `source-unreadable`. Its message
 //! names the file and the line and column of the error's span, and never the error's text:
 //! `toml`'s message quotes the offending line of the file, which can hold a secret. A pane with
-//! no entry, or an entry without its port or cwd, is `source-missing`.
+//! no entry, or an entry without its cwd, is `source-missing`. An entry without a port is kept
+//! (#831): a pane that runs Claude Code has no server, so which pane needs a port is known only
+//! once its tmux session is read, and the join reports a port-less OpenCode pane
+//! (`source-missing`, the same words).
 
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
@@ -111,22 +114,20 @@ impl LauncherTable {
         self.checked(pane, raw)
     }
 
-    /// The entry `raw` of `pane`, when it has a port from 1 to 65535 and an absolute cwd.
+    /// The entry `raw` of `pane`, when it has an absolute cwd and, if it has a port, a port from
+    /// 1 to 65535.
     fn checked(&self, pane: &PaneName, raw: &RawEntry) -> Result<LauncherEntry, Finding> {
         let about = format!("the entry for {pane} in the launcher table {}", self.file);
-        let (port, cwd) = match (raw.port, &raw.cwd) {
-            (Some(port), Some(cwd)) => (port, cwd),
-            (port, cwd) => {
-                let lacks = match (port, cwd) {
-                    (None, None) => "no port and no cwd",
-                    (None, Some(_)) => "no port",
-                    (Some(_), _) => "no cwd",
-                };
-                let message = format!("{about} has {lacks}");
-                return Err(Finding::about(pane, ImportFinding::SourceMissing, message));
-            }
+        let Some(cwd) = &raw.cwd else {
+            let lacks = match raw.port {
+                None => "no port and no cwd",
+                Some(_) => "no cwd",
+            };
+            let message = format!("{about} has {lacks}");
+            return Err(Finding::about(pane, ImportFinding::SourceMissing, message));
         };
-        let fault = if port == 0 {
+        let port = raw.port;
+        let fault = if port == Some(0) {
             Some("has port 0, and a port runs from 1 to 65535")
         } else if !Path::new(cwd).is_absolute() {
             Some("has a cwd that is not an absolute path")
@@ -143,6 +144,7 @@ impl LauncherTable {
         }
         Ok(LauncherEntry {
             port,
+            about,
             cwd: cwd.clone(),
             command: match &raw.command {
                 None => LauncherCommand::Absent,

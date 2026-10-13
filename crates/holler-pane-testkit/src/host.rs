@@ -37,6 +37,7 @@ pub enum HostOp {
     StopOwned,
     Ps,
     ForegroundCommands,
+    ForegroundPids,
     AttachedClients,
 }
 
@@ -48,6 +49,7 @@ impl PortOp for HostOp {
             HostOp::StopOwned => "host.stop_owned",
             HostOp::Ps => "host.ps",
             HostOp::ForegroundCommands => "host.foreground_commands",
+            HostOp::ForegroundPids => "host.foreground_pids",
             HostOp::AttachedClients => "host.attached_clients",
         }
     }
@@ -75,6 +77,11 @@ impl PortOp for HostOp {
 ///   command name of each of the session's processes, in the order they started: the
 ///   basename of the argv's first element, as tmux names a pane's process (`sleep` for
 ///   `/usr/bin/sleep 30`). A name leaves with its process.
+/// - `foreground_pids` (#831) of a missing session is `pane-not-found`; otherwise the pids of
+///   the session's processes, ascending and without a repeat. The fake has no job control, so
+///   every process it holds is in the foreground, as `foreground_commands` treats them all: a
+///   shell a person typed `claude` into is listed beside it, and the adoption tells them apart
+///   by asking the harness which pid it knows. A process leaves with its name.
 /// - `attached_clients` (#647 part 2) of a missing session is `pane-not-found`; otherwise the
 ///   number of clients attached to it. A fresh session has none, as a fresh detached tmux
 ///   session has none (the suite pins it). A client is not a process: `stop_owned` and a
@@ -187,6 +194,31 @@ impl FakeHost {
             .ok_or_else(|| not_found(name))
     }
 
+    /// A process another fake started is in the session `name` too (#831): the fake `claude`
+    /// a `FakeClaude` runs by hand has a pid of its own, and the adoption matches the pids
+    /// `foreground_pids` lists against the harness's, so the two fakes must agree on one.
+    /// `program` is named as `run` names its program (the basename), and the process leaves
+    /// with `exit_process`, `stop_owned` and `end_session` like any other. `pane-not-found`
+    /// when there is no such session; a `pid` the session already holds is `usage`. It bypasses
+    /// the faults and the call log.
+    pub fn add_process(&self, name: &PaneName, program: &str, pid: u32) -> Result<(), PaneError> {
+        let mut state = self.lock();
+        let session = state
+            .sessions
+            .get_mut(name)
+            .ok_or_else(|| not_found(name))?;
+        if session.processes.iter().any(|held| held.pid == pid) {
+            return Err(PaneError::Usage {
+                message: format!("{name} already holds the process {pid}"),
+            });
+        }
+        session.processes.push(Process {
+            pid,
+            command: command_name(program),
+        });
+        Ok(())
+    }
+
     /// A tmux client attached to the session `name` (#647 part 2): what a Herdr pane runs to
     /// show the session, or a person's terminal. Each call adds one. `pane-not-found` when
     /// there is no such session, and nothing is created.
@@ -259,6 +291,14 @@ impl HostPort for FakeHost {
         self.faults.enter(HostOp::ForegroundCommands)?;
         self.lock()
             .each_process(name, |process| process.command.clone())
+    }
+
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.faults.enter(HostOp::ForegroundPids)?;
+        let mut pids = self.lock().each_process(name, |process| process.pid)?;
+        pids.sort_unstable();
+        pids.dedup();
+        Ok(pids)
     }
 
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {

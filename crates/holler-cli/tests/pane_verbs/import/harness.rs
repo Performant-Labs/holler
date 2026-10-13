@@ -1,14 +1,15 @@
-//! A pane whose tmux session runs Claude Code (#835). The import reads the command name of
-//! the foreground process of each tmux pane in the pane's session
-//! (`HostPort::foreground_commands`):
+//! A pane whose tmux session runs Claude Code (#835), and what the import does with it when
+//! `--adopt-claude-code` is absent. The import reads the command name of the foreground process
+//! of each tmux pane in the pane's session (`HostPort::foreground_commands`):
 //!
 //! - a session with a pane whose command is exactly `claude` is left alone by default: one
 //!   `info` finding `harness-claude-code`, the row's action `skipped`, no record, no harness
 //!   call for it, and it blocks nothing;
 //! - every other answer (`bash`, which the old launcher's OpenCode panes show, `opencode`, a
 //!   session with no process) is imported as OpenCode, as before;
-//! - `--adopt-claude-code` is refused as `usage` (exit 2), naming #831,
-//!   until #831's adoption step lands, before any file is read or any port is called;
+//! - `--adopt-claude-code` is no longer refused (#831's adoption step, which `adopt.rs` and
+//!   `adopt_undo.rs` pin); here only that it is not `usage`, and that the words of the finding
+//!   no longer say the pane waits for a story;
 //! - a pane whose harness could not be read is never recorded on a guess: `harness-unreadable`,
 //!   a problem, and a real run is refused (`import-blocked`).
 //!
@@ -16,7 +17,7 @@
 //! started through the test kit's `FakeHost::run`, whose command name is the basename of the
 //! argv's first element, as tmux reports it.
 
-use holler_cli::output::{not_implemented_message, Format};
+use holler_cli::output::Format;
 use holler_pane::pane::PaneRole;
 use holler_pane::{Argv, HostPort, PaneError, PaneName};
 use holler_pane_testkit::harness::HarnessOp;
@@ -24,7 +25,7 @@ use holler_pane_testkit::host::HostOp;
 use serde_json::Value;
 
 use super::rig::{
-    assert_no_store_write, data_of, error_of, message, one_finding, pane_row, text_line,
+    assert_no_store_write, data_of, error_of, findings, message, one_finding, pane_row, text_line,
     ImportRig,
 };
 use crate::doctor::rig::Seed;
@@ -187,36 +188,136 @@ fn a_pane_left_alone_blocks_nothing_even_unlabelled() {
 
 // --- the switch -------------------------------------------------------------------------
 
-/// Issue Work item 2, brief section 4: until #831 the switch is `usage` (exit 2), with the
-/// one wording of a story not landed (`not_implemented_message(831)`), refused before any
-/// file is read or any port is called, so a dry run is refused too and nothing is written.
+/// #831 replaces `adopt_claude_code_is_usage_naming_831_and_writes_nothing`: the switch is
+/// accepted (exit 0 for a dry run, in both formats, never `usage`), names no story, and a dry
+/// run writes nothing. What the adoption does is `adopt.rs`'s.
 #[test]
-fn adopt_claude_code_is_usage_naming_831_and_writes_nothing() {
+fn adopt_claude_code_is_not_refused_and_a_dry_run_writes_nothing() {
     let rig = claude_in_b();
     let before = rig.files();
     let mark = rig.mark();
-    let want = not_implemented_message(831);
-    for extra in [&["--adopt-claude-code"][..], &["--adopt-claude-code", "--dry-run"]] {
-        let run = rig.run(extra, Format::Json);
-        assert_eq!(run.code, 2, "{extra:?}: {run:?}");
-        let (code, text) = error_of(&run);
-        assert_eq!(code, "usage", "{extra:?}");
-        assert!(text.contains(&want), "{extra:?}: {text:?} names {want:?}");
-
-        let text = rig.run(extra, Format::Text);
-        assert_eq!(text.code, 2, "{extra:?}: {text:?}");
-        assert!(text.out.is_empty(), "nothing on stdout: {text:?}");
-        assert_eq!(text.err.lines().count(), 1, "one line: {text:?}");
-        assert!(text.err.contains(&want), "{text:?}");
+    for format in [Format::Json, Format::Text] {
+        let run = rig.run(&["--adopt-claude-code", "--dry-run"], format);
+        assert_eq!(run.code, 0, "{format:?}: {run:?}");
+        assert!(!run.out.contains("#831"), "{format:?}: {run:?}");
+        assert!(!run.err.contains("831"), "{format:?}: {run:?}");
     }
-    let calls = rig.calls_since(&mark);
-    assert_eq!(calls.herdr, vec![], "no Herdr call");
-    assert_eq!(calls.host, vec![], "no host call");
-    assert_eq!(calls.harness, vec![], "no harness call");
-    assert_no_store_write(&calls);
+    assert_no_store_write(&rig.calls_since(&mark));
     assert_eq!(rig.files(), before, "no file under the state root changed");
     assert!(rig.records().is_empty(), "no record");
     assert!(rig.fleet().is_none(), "no profile");
+}
+
+/// #831, AC3: the words of `harness-claude-code` no longer say the pane waits for a story; they
+/// say what the switch does. Code, level and action are unchanged.
+#[test]
+fn the_claude_code_finding_says_how_to_adopt_the_pane() {
+    let rig = claude_in_b();
+    let data = data_of(&rig.run(&["--dry-run"], Format::Json));
+    let finding = one_finding(&data, "harness-claude-code", B, "info");
+    let text = message(finding);
+    assert!(
+        text.contains("pass --adopt-claude-code to adopt it"),
+        "says what to pass: {text}"
+    );
+    assert!(
+        text.contains("otherwise the import leaves the pane alone"),
+        "says what happens otherwise: {text}"
+    );
+    assert!(!text.contains("831"), "names no story: {text}");
+    assert!(
+        !text.contains("until"),
+        "does not say the pane waits: {text}"
+    );
+    assert_left_alone_row(&data, B);
+}
+
+/// #831, AC3: without the switch the chain stops after `foreground_commands`, as before: no
+/// `foreground_pids`, and nothing but the OpenCode pane's harness calls.
+#[test]
+fn without_the_switch_a_claude_pane_makes_no_foreground_pids_call() {
+    let rig = claude_in_b();
+    let mark = rig.mark();
+    data_of(&rig.run(&["--dry-run"], Format::Json));
+    let calls = rig.calls_since(&mark);
+    assert!(
+        !calls.host.contains(&HostOp::ForegroundPids),
+        "the pane is left alone before the pids are read: {:?}",
+        calls.host
+    );
+    assert!(
+        calls.profiles.is_empty(),
+        "a dry run without the switch reads no profile: {:?}",
+        calls.profiles
+    );
+}
+
+// --- the launcher entry of a pane that runs Claude Code (A's second-pass block) -----------
+
+/// B's launcher entry with a cwd, a command and no port: the entry a Claude Code pane has no
+/// use for.
+const NO_PORT: &str = "cwd = \"/srv/demo/hj-c1r2\"\ncommand = [\"claude\"]";
+
+/// Named in the brief ("Launcher"), green before and after the story: it guards the move of the
+/// port check out of `checked`. A Claude Code pane whose entry has a cwd and no port, without
+/// the switch, is `harness-claude-code`, `skipped`, with no `source-missing` about it; the real
+/// run is not `import-blocked`, and the other pane is recorded.
+#[test]
+fn a_flag_off_claude_pane_whose_launcher_entry_has_a_cwd_and_no_port_stays_skipped() {
+    let rig = claude_in_b();
+    rig.write_launcher_with(B, NO_PORT);
+    let data = data_of(&rig.run(&["--dry-run"], Format::Json));
+    one_finding(&data, "harness-claude-code", B, "info");
+    assert_eq!(
+        findings_about(&data, B).len(),
+        1,
+        "no source-missing about it: {data}"
+    );
+    assert_left_alone_row(&data, B);
+
+    let real = data_of(&rig.run(&[], Format::Json));
+    assert_eq!(real["recorded"], 1, "{real}");
+    assert!(rig.record(A).is_some(), "the other pane is recorded");
+    assert!(rig.record(B).is_none());
+}
+
+/// Its twin for OpenCode, flag off: a port-less entry is the `source-missing` problem, message
+/// as `checked` words it today, and the real run is `import-blocked`. (The flag-on twin is
+/// `adopt.rs`'s.)
+#[test]
+fn a_port_less_launcher_entry_for_an_opencode_pane_is_source_missing_without_the_switch() {
+    let rig = claude_in_b();
+    rig.write_launcher_with(A, "cwd = \"/srv/demo/hj-c1r1\"\ncommand = [\"opencode\"]");
+    let data = data_of(&rig.run(&["--dry-run"], Format::Json));
+    let finding = one_finding(&data, "source-missing", A, "problem");
+    let text = message(finding);
+    assert!(
+        text.starts_with(&format!("the entry for {A} in the launcher table ")),
+        "{text}"
+    );
+    assert!(text.ends_with(" has no port"), "{text}");
+    assert_eq!(pane_row(&data, A)["action"], "blocked", "{data}");
+    let run = rig.run(&[], Format::Json);
+    assert_eq!(run.code, 3, "{run:?}");
+    assert_eq!(error_of(&run), ("import-blocked".to_owned(), blocked(1)));
+    assert!(rig.records().is_empty(), "no record");
+}
+
+/// A's finding 3: no port and a relative cwd is `source-unreadable` (the code the tree gives a
+/// relative cwd), not `source-missing`, so the relative-cwd check still runs for a port-less
+/// entry.
+#[test]
+fn a_port_less_entry_with_a_relative_cwd_is_source_unreadable_without_the_switch() {
+    let rig = claude_in_b();
+    rig.write_launcher_with(A, "cwd = \"relative/dir\"\ncommand = [\"opencode\"]");
+    let data = data_of(&rig.run(&["--dry-run"], Format::Json));
+    let finding = one_finding(&data, "source-unreadable", A, "problem");
+    assert!(
+        message(finding).contains("not an absolute path"),
+        "{finding}"
+    );
+    assert!(findings(&data, "source-missing").is_empty(), "{data}");
+    assert_eq!(pane_row(&data, A)["action"], "blocked", "{data}");
 }
 
 // --- an unreadable harness ----------------------------------------------------------------
@@ -319,6 +420,9 @@ impl HostPort for LostChain<'_> {
     }
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.host.foreground_commands(name)
+    }
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.host.foreground_pids(name)
     }
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
         self.host.attached_clients(name)

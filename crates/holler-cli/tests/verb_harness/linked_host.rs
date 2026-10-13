@@ -5,7 +5,7 @@
 //! The host and harness fakes share no state (#802). The test kit prescribes the wrapper this
 //! module is (`holler-pane-testkit/src/host.rs:12-17`): its `run` also starts what the argv
 //! describes and its `stop_owned` also ends what ran for the pane. [`LinkedHost`] is that wrapper
-//! once: `ensure_session`, `ps` and `foreground_commands` are the `FakeHost`'s, `run` is the
+//! once: `ensure_session`, `ps`, `foreground_commands` and `foreground_pids` are the `FakeHost`'s, `run` is the
 //! host's run then [`HarnessLink::started`], and `stop_owned` is the host's stop then
 //! [`HarnessLink::stopped`]. It lives here, not in the test kit, because a test-kit type is a
 //! public API of a non-test crate (brief D2); folding it into the test kit is a follow-up.
@@ -73,6 +73,10 @@ where
 
     fn foreground_commands(&self, name: &PaneName) -> Result<Vec<String>, PaneError> {
         self.host.borrow().foreground_commands(name)
+    }
+
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.host.borrow().foreground_pids(name)
     }
 
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {

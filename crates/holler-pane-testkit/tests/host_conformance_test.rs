@@ -12,9 +12,9 @@ use holler_pane_testkit::conformance::host::{host_cases, run_host_conformance};
 use holler_pane_testkit::conformance::Conformance;
 use holler_pane_testkit::host::FakeHost;
 
-/// The 9 case ids of the brief's table, in order, #835's `foreground_commands` case and #647
-/// part 2's `attached_clients` case.
-const DOCUMENTED_CASES: [&str; 11] = [
+/// The 9 case ids of the brief's table, in order, #835's `foreground_commands` case, #647
+/// part 2's `attached_clients` case and #831's `foreground_pids` case.
+const DOCUMENTED_CASES: [&str; 12] = [
     "ps-of-missing-session-is-pane-not-found",
     "run-in-missing-session-is-pane-not-found",
     "run-adds-a-process",
@@ -26,6 +26,7 @@ const DOCUMENTED_CASES: [&str; 11] = [
     "ps-lists-only-its-session",
     "foreground-commands-names-what-run-started",
     "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
+    "foreground-pids-hold-what-run-started-and-of-missing-is-pane-not-found",
 ];
 
 #[test]
@@ -67,6 +68,14 @@ enum Break {
     ForegroundNamesNothing,
     /// `foreground_commands` of a missing session answers an empty list.
     ForegroundOfMissingIsEmpty,
+    /// `foreground_pids` names nothing, as a default that guesses would (#831).
+    ForegroundPidsNothing,
+    /// `foreground_pids` of a missing session answers an empty list.
+    ForegroundPidsOfMissingIsEmpty,
+    /// `foreground_pids` answers its pids descending (the order is part of the port).
+    ForegroundPidsDescending,
+    /// `foreground_pids` repeats every pid.
+    ForegroundPidsRepeat,
     /// `attached_clients` always answers 1, as a wrapper that answers a constant would
     /// (#647 part 2).
     AttachedAlwaysOne,
@@ -163,6 +172,22 @@ impl HostPort for Mutant {
             Break::ForegroundNamesNothing => self.inner.foreground_commands(name).map(|_| vec![]),
             Break::ForegroundOfMissingIsEmpty if !self.exists(name) => Ok(vec![]),
             _ => self.inner.foreground_commands(name),
+        }
+    }
+
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        match self.broken {
+            Break::ForegroundPidsNothing => self.inner.foreground_pids(name).map(|_| vec![]),
+            Break::ForegroundPidsOfMissingIsEmpty if !self.exists(name) => Ok(vec![]),
+            Break::ForegroundPidsDescending => self.inner.foreground_pids(name).map(|mut pids| {
+                pids.reverse();
+                pids
+            }),
+            Break::ForegroundPidsRepeat => self
+                .inner
+                .foreground_pids(name)
+                .map(|pids| pids.iter().chain(pids.iter()).copied().collect()),
+            _ => self.inner.foreground_pids(name),
         }
     }
 
@@ -282,4 +307,28 @@ fn a_host_whose_attached_clients_of_a_missing_session_is_zero_fails() {
         Break::AttachedOfMissingIsZero,
         "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
     );
+}
+
+const FOREGROUND_PIDS_CASE: &str =
+    "foreground-pids-hold-what-run-started-and-of-missing-is-pane-not-found";
+
+#[test]
+fn a_host_whose_foreground_pids_names_nothing_fails() {
+    assert_suite_fails_on(Break::ForegroundPidsNothing, FOREGROUND_PIDS_CASE);
+}
+
+#[test]
+fn a_host_whose_foreground_pids_of_a_missing_session_is_empty_fails() {
+    assert_suite_fails_on(Break::ForegroundPidsOfMissingIsEmpty, FOREGROUND_PIDS_CASE);
+}
+
+/// The case starts two processes, so that the order of the pids is observable.
+#[test]
+fn a_host_whose_foreground_pids_are_not_ascending_fails() {
+    assert_suite_fails_on(Break::ForegroundPidsDescending, FOREGROUND_PIDS_CASE);
+}
+
+#[test]
+fn a_host_whose_foreground_pids_repeat_a_pid_fails() {
+    assert_suite_fails_on(Break::ForegroundPidsRepeat, FOREGROUND_PIDS_CASE);
 }

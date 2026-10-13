@@ -12,12 +12,16 @@
 //!   fake of their shape.
 
 use holler_pane::ports::{LoginStatus, SessionChoice};
-use holler_pane::{Argv, HarnessEndpoint, HarnessPort, PaneError, PaneName, ServeSpec};
-use holler_pane_testkit::claude::ClaudeOp;
+use holler_pane::{
+    Argv, HarnessEndpoint, HarnessPort, HarnessRouter, HostPort, PaneError, PaneId, PaneName,
+    ServeSpec,
+};
+use holler_pane_testkit::claude::{ClaudeOp, FakeClaude};
 use holler_pane_testkit::conformance::claude::{run_claude_conformance, ClaudeRig};
 use holler_pane_testkit::conformance::harness::{run_harness_conformance, HarnessRig};
-use holler_pane_testkit::harness::{HarnessOp, ServerState};
-use holler_pane_testkit::harnesses::FakeHarnesses;
+use holler_pane_testkit::harness::{FakeHarness, HarnessOp, ServerState};
+use holler_pane_testkit::harnesses::{FakeHarnesses, Lent};
+use holler_pane_testkit::host::FakeHost;
 
 fn name(text: &str) -> PaneName {
     PaneName::parse(text).unwrap()
@@ -155,4 +159,73 @@ fn agent_view_reaches_the_fake_its_endpoint_names() {
     );
     assert_eq!(h.opencode().faults().calls(), vec![HarnessOp::AgentView]);
     assert_eq!(h.claude().faults().calls(), vec![ClaudeOp::AgentView]);
+}
+
+/// `Lent` (#831) lends a fake a rig already owns to a router: a call reaches the borrowed fake
+/// its endpoint names, and each fake keeps its own state and call log.
+#[test]
+fn lent_fakes_are_routed_by_endpoint_and_keep_their_own_logs() {
+    let (server, process) = (FakeHarness::new(), FakeClaude::new());
+    let router = HarnessRouter::new(Lent(&server), Lent(&process));
+    let pane = PaneId::new("scratch:1");
+
+    let pid = process.run_by_hand(&name("demo-c1r1"), "sess-1");
+    let at = HarnessEndpoint::Process {
+        pane: name("demo-c1r1"),
+        pid,
+    };
+    assert_eq!(
+        router.shown_session(&pane, &at),
+        Ok(Some("sess-1".to_owned()))
+    );
+    assert_eq!(process.faults().calls(), vec![ClaudeOp::ShownSession]);
+    assert_eq!(server.faults().calls(), vec![]);
+
+    assert_eq!(router.health(&HarnessEndpoint::Port(48100)), Ok(false));
+    assert_eq!(server.faults().calls(), vec![HarnessOp::Health]);
+    assert_eq!(process.faults().calls(), vec![ClaudeOp::ShownSession]);
+}
+
+/// The pairing the adoption's rigs need (#831): the host and the Claude fake mint pids from
+/// tables of their own, so `FakeHost::add_process` puts a process `run_by_hand` started into the
+/// pane's tmux session under the pid `FakeClaude` minted. The pids `foreground_pids` lists are
+/// then exactly those the harness can be asked about by pid, and it knows one of them: `claude`'s
+/// (the shell beside it is the host's alone).
+#[test]
+fn a_hand_run_claude_process_has_one_pid_in_the_host_and_the_harness() {
+    let (host, claude) = (FakeHost::new(), FakeClaude::new());
+    let pane = name("demo-c1r1");
+    host.ensure_session(&pane, "/srv/demo").unwrap();
+    host.run(&pane, "/srv/demo", &Argv::new(vec!["bash".to_owned()]))
+        .unwrap();
+    let pid = claude.run_by_hand(&pane, "sess-1");
+    host.add_process(&pane, "claude", pid).unwrap();
+
+    let listed = host.foreground_pids(&pane).unwrap();
+    assert_eq!(listed.len(), 2, "the shell and claude: {listed:?}");
+    assert!(listed.contains(&pid));
+    assert_eq!(
+        host.foreground_commands(&pane),
+        Ok(vec!["bash".to_owned(), "claude".to_owned()])
+    );
+    let shown = |pid: u32| {
+        let at = HarnessEndpoint::Process {
+            pane: pane.clone(),
+            pid,
+        };
+        claude
+            .shown_session(&PaneId::new("scratch:1"), &at)
+            .unwrap()
+    };
+    let known: Vec<u32> = listed
+        .iter()
+        .copied()
+        .filter(|p| shown(*p).is_some())
+        .collect();
+    assert_eq!(
+        known,
+        [pid],
+        "the harness knows claude's pid and not the shell's"
+    );
+    assert_eq!(shown(pid), Some("sess-1".to_owned()));
 }
