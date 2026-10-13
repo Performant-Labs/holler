@@ -8,7 +8,6 @@ fills this file in at release time.
 ## [Unreleased]
 
 ## [0.5.0] - 2026-10-13
-<!-- DRAFT, refreshed 2026-10-12 against origin/main. The entries below are main's [Unreleased] entries (each story wrote its own), under the epic summary and the story index. PR 871 (pipeline pin), the release and handoff docs, PR 887 (docs) and PR 889 (a test fix) are not user-facing and are omitted. -->
 
 ### Enhancements
 - **Pane control (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): Holler becomes the one control plane for panes.** `holler pane` (list, get, watch, launch, relaunch, switch, reset, park, unpark, close, doctor, import) and `holler profile` (create, delete, list, show, apply, rename, export, import) now run against a hub-side pane and profile registry and real Herdr, tmux and OpenCode adapters; they were `not-implemented` stubs in 0.4.0. Every verb takes `--format=json` (one envelope, exit 0/1/2/3). Guide: [`docs/pane-control.md`](docs/pane-control.md). The detailed entries follow.
