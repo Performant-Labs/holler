@@ -7,9 +7,11 @@
 //! ([`FakeHarness::faults`]), switches for two quirks of raw OpenCode ([`Quirk`]), a data
 //! directory per port, the scenarios the port cannot cause (a server started from the argv
 //! `serve_command` built, a frozen or killed server, a session another client creates or
-//! deletes, a person moving the TUI, a TUI that exits, and what `agent_view` reports: a
-//! session's turns and a server's dispatchers, #647 part 2) and the inspection of servers, the
-//! specs asked for, TUIs and aborts.
+//! deletes, a person moving the TUI, a TUI that exits, what `agent_view` reports: a
+//! session's turns and a server's dispatchers, #647 part 2, and what `compact` and
+//! `session_activity` see: a session's context size, a server's compaction pin and a session's
+//! activity, #878) and the inspection of servers, the specs asked for, TUIs, aborts and
+//! compactions.
 //!
 //! The host and harness fakes share no state: `FakeHost::run` of a server's argv starts no
 //! server of this fake, `FakeHost::stop_owned` stops none, and `FakeHost::ps` never lists a
@@ -21,6 +23,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use holler_pane::error::RefusalCode;
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome, COMPACT_MODEL_UNPINNED};
+use holler_pane::tx_switch::activity_refusal;
 use holler_pane::{
     AgentKey, AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName,
     ServeSpec, TurnAgent,
@@ -59,6 +63,7 @@ pub enum HarnessOp {
     SelectSession,
     ShownSession,
     AgentView,
+    Compact,
 }
 
 impl PortOp for HarnessOp {
@@ -74,6 +79,7 @@ impl PortOp for HarnessOp {
             HarnessOp::SelectSession => "harness.select_session",
             HarnessOp::ShownSession => "harness.shown_session",
             HarnessOp::AgentView => "harness.agent_view",
+            HarnessOp::Compact => "harness.compact",
         }
     }
 }
@@ -112,6 +118,17 @@ pub struct ServerView {
     pub state: ServerState,
     /// The agent its argv named, which it runs as (`None`: the server's default).
     pub agent: Option<AgentKey>,
+}
+
+/// One compaction the fake ran (#878), as [`FakeHarness::compact_runs`] reports it: the port
+/// and session, the model the caller asked for (`None`: the server's pin) and the model it ran
+/// on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactRun {
+    pub port: u16,
+    pub session: String,
+    pub asked: Option<CompactModel>,
+    pub ran_on: CompactModel,
 }
 
 /// What [`FakeHarness::tui`] reports about the TUI in a pane.
@@ -168,6 +185,17 @@ pub struct TuiView {
 ///   directory, oldest first, and the dispatchers [`FakeHarness::seed_dispatchers`] gave the
 ///   server on the port. Nothing seeded is the empty view, as a real server's fresh session
 ///   and a project without an orchestrator answer.
+/// - `session_activity(port, session)`: what [`FakeHarness::set_activity`] set for the session
+///   in the data directory of `port`, `Idle` by default. It reaches nothing, and, like the
+///   trait's default it replaces, it is not in the call log, so an engine's call sequence is
+///   the same with or without a seeded activity.
+/// - `compact(port, session, model)` (#878) reaches the port, in `abort`'s order. A session
+///   outside its data directory is `session-not-found`; a session that is not idle is refused
+///   with `activity_refusal`'s code; then the model is `model`, else the server's pin
+///   ([`FakeHarness::set_compaction_pin`]), else [`COMPACT_MODEL_UNPINNED`]; a session with no
+///   context seeded ([`FakeHarness::seed_context`]) is `unavailable`, never a zero. Only then
+///   is the run logged ([`FakeHarness::compact_runs`]) and the seeded pair answered; the
+///   seeded context is left as it was.
 ///
 /// Every method reaches a server through its endpoint's port (#831); an endpoint that names a
 /// process is the refusal `process-unsupported` (`HarnessEndpoint::port`), which the router of
@@ -203,6 +231,15 @@ struct World {
     /// The agents that can dispatch, by the port of the server that lists them (#647 part 2):
     /// a server's agents are its project's.
     dispatchers: HashMap<u16, Vec<AgentKey>>,
+    /// The context size of each session and what a compaction brings it to, by data directory
+    /// and session id (#878).
+    contexts: HashMap<(String, String), (u64, u64)>,
+    /// What each session is doing, by data directory and session id (#878); `Idle` when unset.
+    activities: HashMap<(String, String), Activity>,
+    /// The compaction model each server's config pins, by port (#878).
+    pins: HashMap<u16, CompactModel>,
+    /// Every compaction that ran, oldest first (#878).
+    compact_runs: Vec<CompactRun>,
     /// How many session ids were minted: the next one is number `sessions_minted + 1`.
     sessions_minted: u64,
     /// How many pids were minted: the next one is `FIRST_PID + pids_minted`.
@@ -304,6 +341,35 @@ impl FakeHarness {
         self.lock().dispatchers.insert(port, dispatchers);
     }
 
+    /// The context of `session` in the data directory of `port` is `tokens_before` tokens, and
+    /// a compaction brings it to `compacts_to` (#878), replacing any seeded before: the pair
+    /// `compact` answers. It needs no running server, and does not check that the session
+    /// exists.
+    pub fn seed_context(&self, port: u16, session: &str, tokens_before: u64, compacts_to: u64) {
+        let mut world = self.lock();
+        let key = world.session_key(port, session);
+        world.contexts.insert(key, (tokens_before, compacts_to));
+    }
+
+    /// The config of the server on `port` pins `pin` as its compaction model, or none (#878):
+    /// the model `compact` runs on when its caller names none. It needs no running server.
+    pub fn set_compaction_pin(&self, port: u16, pin: Option<CompactModel>) {
+        let mut world = self.lock();
+        match pin {
+            Some(pin) => world.pins.insert(port, pin),
+            None => world.pins.remove(&port),
+        };
+    }
+
+    /// `session` in the data directory of `port` is doing `activity` (#878): what
+    /// `session_activity` answers and what `compact` refuses a session that is not idle by.
+    /// It needs no running server, and does not check that the session exists.
+    pub fn set_activity(&self, port: u16, session: &str, activity: Activity) {
+        let mut world = self.lock();
+        let key = world.session_key(port, session);
+        world.activities.insert(key, activity);
+    }
+
     /// Another client deleted `session` (`DELETE /session/:id`): it leaves its data
     /// directory, and every TUI showing it goes to its home screen and stays attached
     /// (opencode-pane-spike.md:222). `session-not-found` when no data directory holds
@@ -352,6 +418,11 @@ impl FakeHarness {
     /// Every abort a server acknowledged, oldest first, as `(port, session)`.
     pub fn aborts(&self) -> Vec<(u16, String)> {
         self.lock().aborts.clone()
+    }
+
+    /// Every compaction that ran, oldest first (#878): a refused or failed call is not one.
+    pub fn compact_runs(&self) -> Vec<CompactRun> {
+        self.lock().compact_runs.clone()
     }
 
     fn lock(&self) -> MutexGuard<'_, World> {
@@ -489,6 +560,50 @@ impl HarnessPort for FakeHarness {
         world.known(port, session)?;
         Ok(world.agent_view(port, session, max_turns))
     }
+
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        let port = at.port()?;
+        Ok(self.lock().activity(port, session))
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        self.faults.enter(HarnessOp::Compact)?;
+        let port = at.port()?;
+        let mut world = self.lock();
+        world.reach(port, HarnessOp::Compact)?;
+        world.known(port, session)?;
+        if let Some((code, doing)) = activity_refusal(world.activity(port, session)) {
+            return Err(PaneError::Refused {
+                code,
+                message: format!("session {session} {doing}"),
+            });
+        }
+        let ran_on = match model.or_else(|| world.pins.get(&port)) {
+            Some(ran_on) => ran_on.clone(),
+            None => return Err(unpinned(port)),
+        };
+        let key = world.session_key(port, session);
+        let Some(&(tokens_before, tokens_after)) = world.contexts.get(&key) else {
+            return Err(PaneError::Unavailable {
+                what: format!("the context size of session {session} on port {port}"),
+            });
+        };
+        world.compact_runs.push(CompactRun {
+            port,
+            session: session.to_owned(),
+            asked: model.cloned(),
+            ran_on,
+        });
+        Ok(CompactOutcome {
+            tokens_before,
+            tokens_after,
+        })
+    }
 }
 
 impl World {
@@ -553,6 +668,18 @@ impl World {
     /// The data directory of `port`.
     fn dir(&self, port: u16) -> &str {
         self.dirs.get(&port).map_or(DEFAULT_DIR, String::as_str)
+    }
+
+    /// The key of `session` in the data directory of `port`, as a session's turns, context
+    /// and activity are held.
+    fn session_key(&self, port: u16, session: &str) -> (String, String) {
+        (self.dir(port).to_owned(), session.to_owned())
+    }
+
+    /// What `session` in the data directory of `port` is doing: `Idle` unless set.
+    fn activity(&self, port: u16, session: &str) -> Activity {
+        let key = self.session_key(port, session);
+        self.activities.get(&key).copied().unwrap_or(Activity::Idle)
     }
 
     /// The sessions of the data directory of `port`, in creation order.
@@ -674,6 +801,17 @@ fn frozen(op: HarnessOp) -> PaneError {
 fn unreachable_server(port: u16) -> PaneError {
     PaneError::Unavailable {
         what: format!("the harness server on port {port}"),
+    }
+}
+
+/// What `compact` answers when it was named no model and the server on `port` pins none.
+fn unpinned(port: u16) -> PaneError {
+    PaneError::Refused {
+        code: COMPACT_MODEL_UNPINNED,
+        message: format!(
+            "no model was named and the harness server on port {port} pins no compaction model; \
+             nothing was sent"
+        ),
     }
 }
 

@@ -31,3 +31,14 @@ are N/A). Append-only; every phase adds its entry.
 - **Assumed:** OpenCode 1.19.0's `summarize` answers `200 true` and its assistant messages carry `info.tokens {input, output, reasoning, cache{read, write}}` (the shape in `fixtures/agents/messages.json` is a real 1.19.0 reply; `summarize`'s status is from the OpenAPI document only, never run). The Claude half stays `compact-unsupported`.
 - **Hedged:** `HarnessOp` was grepped for exhaustive lists (A's warn 5): only `HarnessOp::as_str` matches on every variant, and `HARNESS_READS` in the doctor rig is an allow-list that needs no entry. The conformance cases accept `compact-model-unpinned` for a fresh unpinned server, so an opt-in real run with a pin and an empty session would fail case 20 (`unavailable`): not run here.
 - **Evidence:** three runs recorded in the handoff (committed state, stub scaffold, oracle scaffold); scaffolds reverted and unstaged, with four emptied untracked files left for F to overwrite (a safety check blocked `rm`). Staged by explicit path: the 24 test and test-support files only. Pre-existing: `token_load_test.rs:60` fails `cargo clippy -D warnings`.
+
+## F, phase 5, implement against the RED: 2026-10-12
+
+- **Decided:** implemented Part A as the brief and T's contract say (`docs/handoffs/878/handoff-F.md`); every authored test is GREEN.
+  - The adapter's compaction `Call` is a struct update of `call_until` with `request: timeouts.compact`, opened after the model is resolved (A warn 2); nothing before it gets the 120 s.
+  - The verb prints through `output::emit` with its own `Compacted` (A warn 1); `switch.rs` is untouched.
+  - The fake keys context and activity by data directory and session, the pin by port; a refused call changes nothing and the seeded pair is not consumed.
+  - ADR-0003 gets the `pane compact` row in its own block (T's ask); ADR-0021 decision 50 is the next free number today.
+- **Assumed:** OpenCode 1.19.0's `summarize` answers `200` on success and the context size is the sum of the last assistant message's `info.tokens` (T's stand-in, the OpenAPI document; never run).
+- **Hedged:** two workspace failures in untouched code (`holler-body` `rebind_test`, `holler-cli` `interrupt_test`) passed when re-run alone; recorded as load-timing flakes, not fixed.
+- **Evidence:** the runs in the handoff's Tier 1 section; `docs/handoffs/878/evidence.md`.

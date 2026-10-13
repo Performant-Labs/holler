@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use holler_adapter_opencode::Resolver;
-use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, HerdrPane, HerdrPort, HerdrSnapshot, HerdrSpec,
     HostPort, Key, Pane, PaneError, PaneId, PaneName, PaneObservation, PaneStore, ServeSpec,
@@ -276,8 +276,8 @@ impl HerdrPort for LazyHerdr {
 
 /// A port the wiring built from its configuration, or the configuration error that kept it from
 /// being built, which every method then answers (W-4, W-E). Every method is forwarded explicitly,
-/// so a method with a default (`HarnessPort::send_prompt`, `session_activity` and the four
-/// process methods of #831) reaches the inner port, never the default.
+/// so a method with a default (`HarnessPort::send_prompt`, `session_activity`, the four
+/// process methods of #831 and `compact`, #878) reaches the inner port, never the default.
 pub struct Wired<P: ?Sized>(Result<Arc<P>, PaneError>);
 
 /// A wired `HarnessPort`: OpenCode (D7) or Claude Code (#831), or what keeps it from being
@@ -361,6 +361,15 @@ impl HarnessPort for Wired<dyn HarnessPort> {
 
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.port()?.session_activity(at, session)
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        self.port()?.compact(at, session, model)
     }
 
     fn process_command(

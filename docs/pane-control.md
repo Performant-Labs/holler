@@ -147,8 +147,8 @@ session**, and a mismatch is not answered the same way by every verb:
 
 ## 3. The verbs
 
-`holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`
-and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
+`holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `compact`, `park`, `unpark`, `close`,
+`doctor` and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
 
 Each verb's `--help` is the full reference for its flags; this section names the flags that change what it does.
 Two flag groups are shared:
@@ -163,8 +163,8 @@ Two flag groups are shared:
 **Exit codes.** Every verb ends with 0 on success, or with the class of its error's code: 2 usage, 3 refusal, 1 runtime
 failure (section 9). Every verb can answer `usage`, `unavailable`, `timeout` and `store-corrupt`; the codes beyond those
 are the verb's row of [ADR-0021 section 9](adr/ADR-0021.md#9-failure-taxonomy-and-the-cli-output), and each subsection
-below names the main ones. The verbs that act on an existing pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
-`close`) refuse an unmanaged pane, named by its label or its Herdr pane id, with the open code `pane-unmanaged` (3)
+below names the main ones. The verbs that act on an existing pane (`relaunch`, `switch`, `reset`, `compact`, `park`,
+`unpark`, `close`) refuse an unmanaged pane, named by its label or its Herdr pane id, with the open code `pane-unmanaged` (3)
 where they would otherwise say `pane-not-found` (section 1). `doctor`, `profile apply` and `pane import` have rules of
 their own, given in their subsections.
 
@@ -297,6 +297,32 @@ and the record as it was. So `--first` needs a body attached to the pane's serve
 follow as `holler say --pane PANE TEXT`. After the record, the message is queued through the hub, accepted and not waited
 for. If the hub refuses it then (the pane was parked or held in between), the run fails with that code, and the message
 says the session was created, shown and recorded but the first message did not land.
+
+### `holler pane compact PANE`
+
+Compact the context of a pane's session of record through its harness's API (#878), never by typing `/compact` into the
+TUI (I4). The compaction runs on the model the pane's own OpenCode server config pins (`agent.compaction.model`, which
+`scripts/pane-restart` writes); the verb has no model flag, and takes only `--profile` (scoping) and `--format`.
+
+```bash
+holler pane compact demo-alpha
+```
+
+Text prints `compacted demo-alpha: 90000 -> 12000 tokens`; JSON's `data` is `{"pane", "session", "tokens_before",
+"tokens_after"}`. Both counts are read from the harness, the second after the act. It exits 0 only when the context shrank;
+a compaction that left it as large or larger is `unavailable` (1), whose message says the context did not shrink and names
+both counts. Nothing is retried, and nothing is recorded in the registry. A compaction is a model call: the verb prints
+nothing until it ends, at most 120 s for an OpenCode pane.
+
+Refused (3), with nothing sent to a model: `pane-parked`, `pane-unhealthy` and `pane-shown-driven-mismatch` as the record
+says (the refusals of a prompt to the pane), `session-not-found` for a pane with no session of record, `server-unhealthy` (relaunch
+it first), `session-busy`, `session-holds-question` or `session-holds-permission` while the session is not idle (try again
+once it is), `compact-model-unpinned` when the pane's server config pins no compaction model, and `compact-unsupported`
+for a Claude Code pane, which cannot be compacted this way yet (#878's spike decides it). The orchestrator's pane is not
+refused: compaction keeps the session.
+
+The OpenCode side is written from OpenCode 1.19.0's API document and not yet run against a real server: it asks
+`POST /session/:id/summarize` and reads the context's size from the session's last assistant message's token counts.
 
 ### `holler pane park --reason TEXT --release-when WHEN`
 
@@ -928,7 +954,8 @@ change.
 are always a refusal, exit 3: among them `agent-unusable` and `agent-key-invalid` (section 2), `orchestrator-not-relaunched`
 and `spec-not-launchable` of `profile apply` (section 6), `import-blocked` of `pane import` (section 3), and `pane-exists`,
 `grid-occupied`, `port-in-use`, `grid-unreachable`, `orchestrator-pane`, `server-unhealthy`, `session-of-other-pane`,
-`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). A Claude Code pane (#831,
+`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). `pane compact` (#878,
+section 3) adds `compact-unsupported` and `compact-model-unpinned`. A Claude Code pane (#831,
 section 2) adds `port-policy-unsupported`, `harness-change-refused`, `claude-login-env-refused`, `process-in-use`,
 `agent-unsupported`, `harness-dialog-open`, `session-holds-permission`, `interrupt-text-unsupported`,
 `answer-unsupported`, and the harness's own `session-mismatch` and `inbound-held` for a message it did not run. DRIVEN
@@ -1079,4 +1106,6 @@ Deferred, so not documented here as existing; none of them is available:
 - a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - recreating the Herdr workspace from the stored profiles (#666);
-- a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet).
+- a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet);
+- compacting a Claude Code pane's context (the `pane compact` verb answers it `compact-unsupported` until #878's spike
+  decides whether `/compact` through its inbox works and where its token counts can be read).
