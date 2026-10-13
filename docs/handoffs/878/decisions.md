@@ -42,3 +42,9 @@ are N/A). Append-only; every phase adds its entry.
 - **Assumed:** OpenCode 1.19.0's `summarize` answers `200` on success and the context size is the sum of the last assistant message's `info.tokens` (T's stand-in, the OpenAPI document; never run).
 - **Hedged:** two workspace failures in untouched code (`holler-body` `rebind_test`, `holler-cli` `interrupt_test`) passed when re-run alone; recorded as load-timing flakes, not fixed.
 - **Evidence:** the runs in the handoff's Tier 1 section; `docs/handoffs/878/evidence.md`.
+
+## T (phase 7, verify GREEN + Tier 2)
+- **Decided:** PASS. The suite is GREEN on F's code; no test changed.
+- **Assumed:** the `holler-body` `rebind_test` and `interrupt_test` failures under full-workspace load are flakes, since they pass 3/3 and 11/11 alone and the code is untouched by this branch.
+- **Hedged:** `cargo machete` is not installed locally, so it was not run; CI covers it.
+- **Evidence:** `docs/handoffs/878/handoff-T-green.md`; two mutations (shrink rule, `rsplit_once`) each failed the named tests and were restored.
