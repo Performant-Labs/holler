@@ -55,3 +55,13 @@ Run handoff directory `docs/handoffs/831` - branch `issue-831-implementation` - 
 - **Hedged:** `cargo machete` is not installed locally, so it was not run; F added no dependency. The undo's equality check against the real hub store has no test.
 - **Evidence:** `cargo test --workspace` (CI skip) exit 0; `pane_verbs -- adopt` 47 x3; adapter `foreground_pids*` x5; real tmux `--ignored` 10; doctests 12; four mutants fail named tests (Several, NoSession, login env, non-leader group member); `lint.sh` 0; `changelog-check` ok.
 - **Read:** `handoff-F.md`, `handoff-T-red.md`, `decisions.md`, `import/adopt.rs`, `exec.rs::ps_group`, `pipeline.config.json`.
+
+## A, Phase 9 anti-duplication: 2026-10-12
+
+- **Decided:** PASS (`docs/handoffs/831/handoff-A-dup.md`). F extended every object the Reuse map named: one `record()`, the join's `begin`/`finish`, `labelled`, `unread_finding`, `spec_from_pane`, the one undo of `writes.rs` generalised, `exec::run` and the shared bounded runner for `ps`, `tmux::decimal` shared. The only new module is `import/adopt.rs`, which the brief justifies.
+  1. Warn: `extend`'s spec lookup resembles `profile_scope::with_edit`; different crate and different semantics (keep versus replace), so not a parallel path.
+  2. Warn: `Lent` is a new borrowing forwarder in the test kit; test-only, single use.
+- **Assumed:** the diff base is the third A pass (`23d7ff6`); the earlier branch history is the brief and its amendments.
+- **Hedged:** read the production diff in full and the test-kit and conformance diffs; the CLI test files (about 2,000 lines of new cases) were not read, only counted and listed by name.
+- **Evidence:** `git diff 23d7ff6..1f962c0`; greps for other `spec_from_pane`/`panes.push`, `ps` calls and `HarnessPort` forwarders; line counts (`ports.rs` 785, `adapter-host/lib.rs` 592).
+- **Read:** the brief's Reuse map, `handoff-F.md`, `handoff-A.md`, `adopt.rs`, `assess.rs`, `observe.rs`, `import.rs`, `writes.rs`, the CLI `import.rs`/`launcher.rs`, the host adapter's `exec.rs`/`lib.rs`/`tmux.rs`, the wiring and test-kit diffs.
