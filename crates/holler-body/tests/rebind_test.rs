@@ -146,8 +146,28 @@ async fn until_request(server: &FakeServer, since: usize, method: &str, path: &s
     }
 }
 
+/// Wait, bounded, until the fake has accepted an `/event` connection beyond the first `seen`
+/// (read `server.event_connections()` before the action that makes the body open a new stream).
+/// `push_event` reaches only connections already subscribed, so pushing earlier loses the event
+/// and the turn never ends (#864).
+async fn until_event_stream(server: &FakeServer, seen: usize) {
+    let deadline = Instant::now() + WAIT;
+    while server.event_connections() <= seen {
+        assert!(
+            Instant::now() < deadline,
+            "no /event connection after the first {seen}: the body never reconnected"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// One prompt to `alpha` that the fake ends with `end` on `id`: proves which session it reached.
-async fn prompt_reaches(sm: &Arc<SessionManager>, server: &FakeServer, id: &str) -> PromptOutcome {
+async fn prompt_reaches(
+    sm: &Arc<SessionManager>,
+    server: &FakeServer,
+    id: &str,
+    streams_seen: usize,
+) -> PromptOutcome {
     let since = server.requests().len();
     let manager = Arc::clone(sm);
     let turn = tokio::spawn(async move {
@@ -162,6 +182,7 @@ async fn prompt_reaches(sm: &Arc<SessionManager>, server: &FakeServer, id: &str)
         &format!("/session/{id}/prompt_async"),
     )
     .await;
+    until_event_stream(server, streams_seen).await;
     server.push_event(session_idle(id));
     tokio::time::timeout(WAIT, turn)
         .await
@@ -176,6 +197,7 @@ async fn a_rebind_re_points_the_session_and_keeps_its_name() {
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
     until_attached(&sm, &server, 0, "alpha", OLD).await;
     let since = server.requests().len();
+    let streams = server.event_connections();
     let frame = rebind(&sm, "alpha", NEW).await;
     assert_eq!(
         frame["result"],
@@ -196,7 +218,7 @@ async fn a_rebind_re_points_the_session_and_keeps_its_name() {
         Some(NEW),
         "presence advertises it, same name"
     );
-    prompt_reaches(&sm, &server, NEW).await;
+    prompt_reaches(&sm, &server, NEW, streams).await;
 }
 
 /// The refusals, each failing closed with the old binding kept: an unknown name, a spawn
@@ -224,7 +246,7 @@ async fn the_refusals_keep_the_old_binding() {
         (-32602, Some("session not found on the endpoint".to_owned()))
     );
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(OLD));
-    prompt_reaches(&sm, &server, OLD).await;
+    prompt_reaches(&sm, &server, OLD, 0).await;
 }
 
 /// A session with a turn in flight is `session_busy`, with the existing timing fields, and keeps
@@ -245,6 +267,7 @@ async fn a_busy_session_refuses_the_rebind() {
     assert_eq!(refusal(&frame).0, -32009, "{frame}");
     assert!(frame.pointer("/error/data/state").is_some(), "{frame}");
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(OLD));
+    until_event_stream(&server, 0).await;
     server.push_event(session_idle(OLD));
     tokio::time::timeout(WAIT, turn)
         .await
@@ -287,7 +310,7 @@ async fn a_silent_endpoint_is_refused_in_time_and_a_late_attach_is_never_swapped
         Some(OLD),
         "the late attach is not swapped in"
     );
-    prompt_reaches(&sm, &server, OLD).await;
+    prompt_reaches(&sm, &server, OLD, 0).await;
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(OLD));
 }
 
@@ -299,6 +322,7 @@ async fn the_re_attach_after_an_error_follows_the_new_id() {
     let server = FakeServer::start().await;
     let sm = start(&[attach("alpha", &server.endpoint(), OLD)]);
     until_attached(&sm, &server, 0, "alpha", OLD).await;
+    let streams = server.event_connections();
     rebind(&sm, "alpha", NEW).await;
     let since = server.requests().len();
     let manager = Arc::clone(&sm);
@@ -314,6 +338,7 @@ async fn the_re_attach_after_an_error_follows_the_new_id() {
         &format!("/session/{NEW}/prompt_async"),
     )
     .await;
+    until_event_stream(&server, streams).await;
     server.push_event(session_error(NEW));
     tokio::time::timeout(WAIT, turn)
         .await
@@ -323,7 +348,9 @@ async fn the_re_attach_after_an_error_follows_the_new_id() {
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(NEW));
 
     let again = server.requests().len();
-    prompt_reaches(&sm, &server, NEW).await;
+    // The error dropped the driver: the next prompt re-attaches and opens a stream of its own.
+    let streams = server.event_connections();
+    prompt_reaches(&sm, &server, NEW, streams).await;
     let after: Vec<String> = server
         .requests()
         .iter()
@@ -409,4 +436,40 @@ async fn a_restart_reverts_to_the_configured_id() {
 async fn presence_advertises_the_configured_id_before_the_task_runs() {
     let sm = start(&[attach("alpha", "http://127.0.0.1:9", OLD)]);
     assert_eq!(advertised(&sm, "alpha").as_deref(), Some(OLD));
+}
+
+/// #864: `push_event` reaches only an `/event` connection already subscribed, so an idle pushed
+/// before the body's stream is up is lost and the turn never ends. The fake counts subscriptions
+/// and the wait helper blocks on the count: this pins both with no body in the loop, so it fails
+/// at once (not after `WAIT`) if either stops holding.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_event_pushed_before_the_stream_connects_is_lost_and_the_wait_sees_the_connection() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let server = FakeServer::start().await;
+    assert_eq!(server.event_connections(), 0);
+    server.push_event(session_idle(NEW));
+
+    let mut stream = tokio::net::TcpStream::connect(server.endpoint().trim_start_matches("http://"))
+        .await
+        .unwrap();
+    stream
+        .write_all(b"GET /event HTTP/1.1\r\nHost: fake\r\n\r\n")
+        .await
+        .unwrap();
+    until_event_stream(&server, 0).await;
+    assert_eq!(server.event_connections(), 1);
+
+    let mut seen = Vec::new();
+    let mut buf = [0u8; 1024];
+    let early = tokio::time::timeout(Duration::from_millis(300), async {
+        loop {
+            let n = stream.read(&mut buf).await.unwrap();
+            seen.extend_from_slice(&buf[..n]);
+            if String::from_utf8_lossy(&seen).contains("session.idle") {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(early.is_err(), "the idle pushed before the connection must not replay");
 }
