@@ -29,6 +29,11 @@
 //!     a single process has no server to list agents or turns, so it cannot tell, and says so
 //!     with an empty view, never a guess. Run over the router of the two harnesses, it also
 //!     pins that a process endpoint's `agent_view` reaches the process harness.
+//! 14. `compact` of a process endpoint is `compact-unsupported` (#878, ADR-0021 "Compaction"):
+//!     whether Claude Code accepts `/compact` as a prompt, and where its token counts can be
+//!     read, are the spike's questions (Part B of the brief), and until they are answered no
+//!     harness of this shape compacts. Run over the router of the two harnesses, it also pins
+//!     that a process endpoint's `compact` is not answered by the server harness.
 //!
 //! **The bounds.** A launched process must be located within [`LOCATE_WITHIN`], half the launch
 //! engine's `DEFAULT_BUDGET`, which must also hold the Herdr and tmux steps of a launch; what a
@@ -43,7 +48,9 @@
 
 use std::time::{Duration, Instant};
 
-use holler_pane::ports::{Activity, SessionChoice, ABORT_UNSUPPORTED, SESSION_MISMATCH};
+use holler_pane::ports::{
+    Activity, SessionChoice, ABORT_UNSUPPORTED, COMPACT_UNSUPPORTED, SESSION_MISMATCH,
+};
 use holler_pane::tx_launch::{wait_located, wait_until, BOOT_POLL};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
@@ -125,7 +132,7 @@ fn constant_name(text: &str) -> PaneName {
 }
 
 /// The suite, in order: the one table that the runner iterates and [`claude_cases`] lists.
-const CASES: [(&str, Case); 13] = [
+const CASES: [(&str, Case); 14] = [
     (
         "process-command-starts-nothing",
         process_command_starts_nothing,
@@ -163,6 +170,7 @@ const CASES: [(&str, Case); 13] = [
         "agent-view-of-a-process-is-empty",
         agent_view_of_a_process_is_empty,
     ),
+    ("compact-is-unsupported", compact_is_unsupported),
 ];
 
 /// The ids of the cases [`run_claude_conformance`] runs, in the order it runs them.
@@ -440,6 +448,25 @@ fn agent_view_of_a_process_is_empty(
     };
     let view = succeeds(&format!("agent_view of {at}"), h.agent_view(&at, &id, 3))?;
     expect_eq(&format!("agent_view of {at}"), view, AgentView::default())
+}
+
+/// Case 14 (#878): `compact` of a process endpoint is `compact-unsupported`. Nothing is
+/// launched: the refusal does not depend on what the process is doing.
+fn compact_is_unsupported(
+    h: &dyn HarnessPort,
+    _: &Hands<'_>,
+    rig: &ClaudeRig,
+) -> Result<(), String> {
+    let id = new_id(h)?;
+    let at = HarnessEndpoint::Process {
+        pane: rig.panes[0].clone(),
+        pid: ABORTED_PID,
+    };
+    expect_code(
+        &format!("compact of {at}"),
+        h.compact(&at, &id, None),
+        COMPACT_UNSUPPORTED.as_str(),
+    )
 }
 
 // --- helpers ---

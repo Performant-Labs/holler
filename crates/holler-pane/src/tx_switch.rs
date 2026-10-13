@@ -92,6 +92,10 @@
 
 mod plan;
 
+/// The live health and idle checks of the plan, which `tx_compact` (#878) calls and does not
+/// copy; `plan` itself stays private.
+pub(crate) use plan::{check_health, check_idle};
+
 use crate::error::RefusalCode;
 use crate::findings::{doctor_command, quoted};
 use crate::hub::{Advertised, PromptMode};

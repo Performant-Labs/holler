@@ -49,8 +49,14 @@
 //!   and reconcile read the hub's live attach bodies, re-point one, and ask the hub's one prompt
 //!   path; its three methods are required, as #835's rule asks. [`HarnessPort::send_prompt`]
 //!   stays as the adapter's transport, with no verb or engine caller since then.
+//! - #878's default-armed [`HarnessPort::compact`], which compacts a session's context through
+//!   the harness API on the model its own config pins, with [`CompactOutcome`],
+//!   [`CompactModel`] and the refusals [`COMPACT_UNSUPPORTED`] (the default) and
+//!   [`COMPACT_MODEL_UNPINNED`]. A wrapper forwards it explicitly, and a test per wrapper pins
+//!   the forward.
 
 mod agent_view;
+mod compact;
 mod process;
 mod router;
 
@@ -67,6 +73,10 @@ use crate::probe::{run_probe, ProbeResult};
 use crate::profile::{ProfileScope, ProfileStore};
 
 pub use self::agent_view::{AgentView, TurnAgent};
+use self::compact::compact_unsupported;
+pub use self::compact::{
+    CompactModel, CompactOutcome, COMPACT_MODEL_UNPINNED, COMPACT_UNSUPPORTED,
+};
 use self::process::process_unsupported;
 pub use self::process::{
     HarnessEndpoint, LoginStatus, SessionChoice, ABORT_UNSUPPORTED, INBOUND_HELD,
@@ -656,6 +666,31 @@ pub trait HarnessPort: Send + Sync {
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         let _ = (at, session);
         Ok(Activity::Idle)
+    }
+
+    /// Compact the context of `session` at `at` through the harness API, never by typing
+    /// `/compact` into a TUI (I4), and answer its size before and after, each read from the
+    /// harness after the act, never inferred (#878, ADR-0021 "Compaction").
+    ///
+    /// `model` names the model to run the compaction on; `None` (what the verb passes) means
+    /// the compaction model the harness's own config pins. A harness never compacts on a model
+    /// neither names: it refuses [`COMPACT_MODEL_UNPINNED`] and sends nothing. A session the
+    /// harness does not have is `session-not-found`, and a session that is not idle is refused
+    /// with `activity_refusal`'s code (`session-busy`, ...), each with nothing sent. A count the
+    /// harness cannot read is `unavailable`, never zero. Bounded otherwise than I5: the model
+    /// call and the reads after it may take the harness's compaction bound (ADR-0021 section 2).
+    ///
+    /// The default refuses with [`COMPACT_UNSUPPORTED`]: a harness that cannot compact says so
+    /// as a stable refusal. A wrapper must forward it explicitly, or its default answers in
+    /// place of the harness it wraps.
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        let _ = (at, session, model);
+        Err(compact_unsupported())
     }
 
     /// The argv that starts the single process of `name`, holding the session `session`

@@ -220,8 +220,12 @@ fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError
 /// The pane's harness answers its health check now (I6), at the record's endpoint. One that
 /// does not is refused with the remedy doctor gives a down server, taken from the one remedy
 /// table, which has one for every named pane; were it ever `None`, the pane doctor command
-/// line stands in. A check that fails is passed on as it is.
-fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+/// line stands in. A check that fails is passed on as it is. `tx_compact` calls it too (#878).
+pub(crate) fn check_health(
+    ports: Ports<'_>,
+    record: &Pane,
+    at: &HarnessEndpoint,
+) -> Result<(), PaneError> {
     if ports.harness.health(at)? {
         return Ok(());
     }
@@ -250,8 +254,13 @@ fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result
 /// A reset, and a single process's switch (a relaunch), does not drop a conversation that is
 /// mid-turn or waiting on an answer: the pane's session of record must be idle. A pane with no
 /// session of record has no conversation to drop, and is not asked. A query that fails is
-/// passed on as it is.
-fn check_idle(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+/// passed on as it is. `tx_compact` calls it too (#878): a compaction is a model call, so it
+/// does not run on top of a turn in flight.
+pub(crate) fn check_idle(
+    ports: Ports<'_>,
+    record: &Pane,
+    at: &HarnessEndpoint,
+) -> Result<(), PaneError> {
     let Some(session) = &record.session_of_record else {
         return Ok(());
     };

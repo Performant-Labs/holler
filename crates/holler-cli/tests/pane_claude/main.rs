@@ -17,10 +17,13 @@
 //!   default-run `say_pane_scenario_test`, #850; item 18);
 //! - `driven`: the drive rule of a single process, the body of a Claude Code pane followed by
 //!   `switch` and `reset` and recorded as DRIVEN by `doctor` (#850, item 19).
+//! - `compact`: `pane compact` on a Claude Code pane is `compact-unsupported` after the engine's
+//!   checks, and on an OpenCode pane it compacts through the router (#878).
 
 #[path = "../verb_harness/mod.rs"]
 mod verb_harness;
 
+mod compact;
 mod doctor;
 mod driven;
 mod launch;

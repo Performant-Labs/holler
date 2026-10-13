@@ -11,7 +11,7 @@
 //! and predate #831 (in `pane_verbs`, `profile_verbs` and `pane_integration`) keep their own
 //! linking, unchanged.
 
-use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, HarnessRouter, PaneError, PaneId, PaneName,
     ServeSpec,
@@ -126,6 +126,15 @@ impl HarnessPort for FakeHarnesses {
 
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.0.session_activity(at, session)
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        self.0.compact(at, session, model)
     }
 
     fn process_command(

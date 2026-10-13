@@ -13,6 +13,7 @@
 
 pub mod args;
 pub mod close;
+pub mod compact;
 pub mod doctor;
 pub mod get;
 pub mod hub_refusal;
@@ -48,6 +49,7 @@ pub enum PaneCmd {
     Close(close::PaneClose),
     Doctor(doctor::PaneDoctor),
     Import(import::PaneImport),
+    Compact(compact::PaneCompact),
 }
 
 /// Whether `arg` could be a Herdr pane id rather than a pane name: it has a `:` and is not a
@@ -66,6 +68,7 @@ fn acting_pane(cmd: &PaneCmd) -> Option<&str> {
         PaneCmd::Park(args) => args.pane.as_deref(),
         PaneCmd::Unpark(args) => args.pane.as_deref(),
         PaneCmd::Close(args) => args.pane.as_deref(),
+        PaneCmd::Compact(args) => Some(&args.pane),
         PaneCmd::List(_)
         | PaneCmd::Get(_)
         | PaneCmd::Watch(_)
@@ -104,5 +107,6 @@ pub fn run(cmd: &PaneCmd, ctx: &mut VerbCtx<'_>) -> i32 {
         PaneCmd::Close(args) => close::run(args, ctx),
         PaneCmd::Doctor(args) => doctor::run(args, ctx),
         PaneCmd::Import(args) => import::run(args, ctx),
+        PaneCmd::Compact(args) => compact::run(args, ctx),
     }
 }

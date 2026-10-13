@@ -28,6 +28,8 @@
 //! - [`probe`] — [`ProbeResult`] and the [`run_probe`] stub.
 //! - [`hub`], [`driven`] and [`gate`] (#839) — the hub port, the join of a pane to the body
 //!   that drives it, and the prompt gate's one predicate and selection.
+//! - [`tx_compact`] (#878) — the engine of `holler pane compact`: health, idle, the harness's
+//!   `compact` and the shrink rule, on a record the CLI resolved.
 //! - `profile_snapshot`, `profile_diff`, `tx_apply`, `tx_launch`, `tx_switch`,
 //!   `reconcile`, `findings`, `import` — empty stubs, declared here so that no two
 //!   stories edit this file; each names the story that fills it.
@@ -37,8 +39,9 @@
 //! #636 reports; `HarnessPort` is final (the spike #635 confirmed it, and #642 built it),
 //! amended since by #645 (the prompt seam), #802 (`serve_command` and `verify_serving`,
 //! with `HostPort::run`'s directory), #831 (a second harness, Claude Code: every call
-//! keyed by a `HarnessEndpoint`, and the methods of a single-process harness) and #647
-//! part 2 (the required reads `HarnessPort::agent_view` and `HostPort::attached_clients`).
+//! keyed by a `HarnessEndpoint`, and the methods of a single-process harness), #647
+//! part 2 (the required reads `HarnessPort::agent_view` and `HostPort::attached_clients`)
+//! and #878 (the default-armed `HarnessPort::compact`).
 //!
 //! **Serde policy.** The stored records and the params structs refuse unknown fields:
 //! a record read, changed and written back by a peer that does not know a field would
@@ -64,6 +67,7 @@ pub mod profile_snapshot;
 pub mod reconcile;
 pub mod reply;
 pub mod tx_apply;
+pub mod tx_compact;
 pub mod tx_launch;
 pub mod tx_switch;
 pub mod unmanaged;

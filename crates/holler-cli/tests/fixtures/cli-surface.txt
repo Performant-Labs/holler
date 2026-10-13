@@ -172,6 +172,11 @@ pane import | --from /srv/state --herdr-session main --launcher /srv/state/launc
 # #835
 pane import | --from /srv/state --herdr-session main --adopt-claude-code --dry-run
 
+# #878
+pane compact | demo-c1r1
+pane compact | demo-c1r1 --profile demo
+pane compact | demo-c1r1 --profile demo --format=json
+
 # #662
 profile create | Demo
 profile create | "Some Profile" --from-current

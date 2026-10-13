@@ -495,6 +495,28 @@ fn abort_is_refused_abort_unsupported() {
     assert_eq!(refused.code(), "abort-unsupported", "{refused}");
 }
 
+// --- compact (#878) -------------------------------------------------------------------------
+
+/// Claude Code is `compact-unsupported` in #878's Part A: the adapter inherits the port's default
+/// and does not override it. Whether it accepts `/compact` as a prompt, and where its token
+/// counts can be read, is the spike's question (Part B of the brief), so until it is answered
+/// the adapter sends nothing: a busy process, an idle one and a process it does not know all get
+/// the refusal, and no frame reaches the inbox (a `/compact` over it would arrive as peer text
+/// for the model, not as a typed command).
+#[test]
+fn compact_is_refused_compact_unsupported_and_sends_nothing() {
+    let rig = Rig::new(json!([entry(4242, SESSION, "busy", None)]));
+    for (at, session) in [(endpoint(4242), SESSION), (endpoint(1), "s-unknown")] {
+        let refused = rig.harness.compact(&at, session, None).unwrap_err();
+        assert_eq!(refused.code(), "compact-unsupported", "{refused}");
+    }
+    assert!(
+        rig.inbox.writes().is_empty(),
+        "nothing was written to an inbox: {:?}",
+        rig.inbox.writes()
+    );
+}
+
 // --- agent_view (#647 part 2) ---------------------------------------------------------------
 
 /// A process endpoint answers the empty view: one Claude Code process has no server that lists

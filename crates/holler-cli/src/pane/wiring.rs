@@ -84,7 +84,7 @@ use holler_adapter_opencode::{
     TmuxSocket as TuiSocket,
 };
 use holler_pane::hub::{Advertised, HubPort, PromptMode};
-use holler_pane::ports::{LoginStatus, SessionChoice};
+use holler_pane::ports::{CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     Actor, AgentView, Argv, Cursor, HarnessEndpoint, HarnessPort, HarnessRouter, HerdrPane,
     HerdrPort, HerdrSnapshot, HerdrSpec, HostPort, Key, Pane, PaneError, PaneEvent, PaneId,
@@ -467,6 +467,16 @@ impl HarnessPort for Unwired {
         _session: &str,
         _max_turns: usize,
     ) -> Result<AgentView, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
+
+    // `not-implemented`, never the `compact-unsupported` default (#878), as `abort` answers.
+    fn compact(
+        &self,
+        _at: &HarnessEndpoint,
+        _session: &str,
+        _model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
         Err(PaneError::NotImplemented)
     }
 }

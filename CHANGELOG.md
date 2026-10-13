@@ -35,6 +35,18 @@ fills this file in at release time.
   reports a body that is behind. `holler body support claude` is a `PATH` lookup for such a row. No hub or wire change.
   [ADR 0014](docs/adr/ADR-0014.md) points 7 to 11 and [ADR 0021](docs/adr/ADR-0021.md) sections 5 and 15 (items 9 and
   19) record the contract.
+- Pane control, compaction (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane compact
+  PANE [--profile NAME]` compacts the context of a pane's session of record through the harness API, never by typing
+  `/compact` into its TUI ([#878](https://github.com/Performant-Labs/holler/issues/878)). It runs on the compaction model
+  the pane's own OpenCode server config pins (`agent.compaction.model`) and has no model flag: with no pin it is refused
+  `compact-model-unpinned` and nothing is sent. It prints the context's size before and after (`compacted PANE: BEFORE ->
+  AFTER tokens`, or `tokens_before` and `tokens_after` in JSON) and exits 0 only when the context shrank (1, naming both
+  counts, when it did not). A busy, question-holding or permission-waiting session is refused first, as are a parked,
+  unhealthy or mismatched pane. `HarnessPort` gains the default-armed `compact` (`compact-unsupported`, which a Claude Code
+  pane answers until the spike decides it); the OpenCode adapter asks `POST /session/:id/summarize` under its own 120 s
+  bound (`Timeouts::compact`), written from OpenCode 1.19.0's API document and not yet run against a real server.
+  [ADR 0021](docs/adr/ADR-0021.md) section 8 ("Compaction") and decision 51 record it, and
+  [`docs/pane-control.md`](docs/pane-control.md) documents the verb.
 - The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
   `holler-pane` (`holler_pane::bounded`) instead of four private copies
   ([#696](https://github.com/Performant-Labs/holler/issues/696), epic

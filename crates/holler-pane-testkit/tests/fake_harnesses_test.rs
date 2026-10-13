@@ -11,7 +11,7 @@
 //! - a call reaches the fake its endpoint names, and the calls that carry no endpoint go to the
 //!   fake of their shape.
 
-use holler_pane::ports::{LoginStatus, SessionChoice};
+use holler_pane::ports::{CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     Argv, HarnessEndpoint, HarnessPort, HarnessRouter, HostPort, PaneError, PaneId, PaneName,
     ServeSpec,
@@ -19,7 +19,7 @@ use holler_pane::{
 use holler_pane_testkit::claude::{ClaudeOp, FakeClaude};
 use holler_pane_testkit::conformance::claude::{run_claude_conformance, ClaudeRig};
 use holler_pane_testkit::conformance::harness::{run_harness_conformance, HarnessRig};
-use holler_pane_testkit::harness::{FakeHarness, HarnessOp, ServerState};
+use holler_pane_testkit::harness::{CompactRun, FakeHarness, HarnessOp, ServerState};
 use holler_pane_testkit::harnesses::{FakeHarnesses, Lent};
 use holler_pane_testkit::host::FakeHost;
 
@@ -159,6 +159,122 @@ fn agent_view_reaches_the_fake_its_endpoint_names() {
     );
     assert_eq!(h.opencode().faults().calls(), vec![HarnessOp::AgentView]);
     assert_eq!(h.claude().faults().calls(), vec![ClaudeOp::AgentView]);
+}
+
+// --- #878: `compact` is default-armed, so a wrapper that forgets it answers the default ------
+
+/// The OpenCode fake of `fake`, serving one session with a context to compact and a pin: a
+/// `compact` that reaches it answers an outcome, which the default `compact-unsupported` never
+/// does, so the answer tells a forward from a forgotten one.
+fn seeded_server(fake: &FakeHarness) -> String {
+    let argv = fake
+        .serve_command(&name("demo-c1r1"), 48100, &ServeSpec::default())
+        .unwrap();
+    fake.start_server(&argv).unwrap().unwrap();
+    let session = fake.create_session(&HarnessEndpoint::Port(48100)).unwrap();
+    fake.seed_context(48100, &session, 90_000, 12_000);
+    fake.set_compaction_pin(
+        48100,
+        Some(CompactModel {
+            provider: "pinned-provider".to_owned(),
+            model_id: "pinned-model".to_owned(),
+        }),
+    );
+    session
+}
+
+const COMPACTED: CompactOutcome = CompactOutcome {
+    tokens_before: 90_000,
+    tokens_after: 12_000,
+};
+
+fn process_endpoint() -> HarnessEndpoint {
+    HarnessEndpoint::Process {
+        pane: name("demo-c2r1"),
+        pid: 1,
+    }
+}
+
+/// The bare router (`holler_pane::HarnessRouter`, the one the wiring builds too): a port
+/// endpoint's `compact` reaches the server harness, which compacts, and a process endpoint's
+/// reaches the process harness, which refuses `compact-unsupported`. A router without its own
+/// `compact` answers the default for both and fails the first.
+#[test]
+fn the_router_forwards_compact_by_endpoint() {
+    let router = HarnessRouter::new(FakeHarness::new(), FakeClaude::new());
+    let session = seeded_server(router.server());
+
+    assert_eq!(
+        router.compact(&HarnessEndpoint::Port(48100), &session, None),
+        Ok(COMPACTED),
+        "a port endpoint reaches the server harness"
+    );
+    assert_eq!(
+        router.server().compact_runs().len(),
+        1,
+        "and it ran there, once"
+    );
+    let refused = router
+        .compact(&process_endpoint(), "s-1", None)
+        .expect_err("the process harness cannot compact");
+    assert_eq!(refused.code(), "compact-unsupported");
+    assert_eq!(
+        router
+            .server()
+            .faults()
+            .calls()
+            .iter()
+            .filter(|op| **op == HarnessOp::Compact)
+            .count(),
+        1,
+        "the process endpoint never reached the server harness"
+    );
+}
+
+/// The router of the two fakes: the same, through `FakeHarnesses`' own forward. A
+/// `FakeHarnesses` that forgets `compact` answers the default `compact-unsupported` for a port
+/// endpoint too.
+#[test]
+fn fake_harnesses_forwards_compact_to_the_fake_its_endpoint_names() {
+    let h = FakeHarnesses::new();
+    let session = seeded_server(h.opencode());
+
+    assert_eq!(
+        h.compact(&HarnessEndpoint::Port(48100), &session, None),
+        Ok(COMPACTED)
+    );
+    assert_eq!(
+        h.opencode().compact_runs(),
+        vec![CompactRun {
+            port: 48100,
+            session,
+            asked: None,
+            ran_on: CompactModel {
+                provider: "pinned-provider".to_owned(),
+                model_id: "pinned-model".to_owned(),
+            },
+        }],
+        "the port endpoint's compact ran on the OpenCode fake, with its arguments"
+    );
+    assert_eq!(
+        h.opencode().faults().calls().last(),
+        Some(&HarnessOp::Compact)
+    );
+
+    let refused = h
+        .compact(&process_endpoint(), "s-1", None)
+        .expect_err("the Claude fake cannot compact");
+    assert_eq!(refused.code(), "compact-unsupported");
+    assert_eq!(
+        h.opencode()
+            .faults()
+            .calls()
+            .iter()
+            .filter(|op| **op == HarnessOp::Compact)
+            .count(),
+        1,
+        "the process endpoint did not reach the OpenCode fake"
+    );
 }
 
 /// `Lent` (#831) lends a fake a rig already owns to a router: a call reaches the borrowed fake
