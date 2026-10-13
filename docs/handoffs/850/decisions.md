@@ -52,3 +52,11 @@ Run record for the build run. The brief is `docs/handoffs/850-brief.md`.
 - **Evidence:**
   - `handoff-F.md` (the commands and counts); `evidence.md` (eight excerpts of unchanged code).
   - The CI command `cargo test --workspace -- --skip roster_stays_accurate_under_concurrent_body_load`: exit 0, 2934 passed, 0 failed; `scripts/lint.sh` and `scripts/changelog-check.sh` exit 0.
+
+## T (Phase 7, verify GREEN) — 2026-10-12
+- **Decided:**
+  - Suite GREEN (CI command exit 0, 2934/0); lint, changelog check, docs_cli_test, wire_selftest pass; no test needed repair (F flagged none); verdict PASS.
+  - The clippy failure in `token_load_test.rs` is pre-existing (file untouched) and not a blocker.
+- **Assumed:** the clippy error is toolchain-specific and CI's own toolchain is the authority.
+- **Hedged:** the fake's two-call relaunch leaves a ~1e-4 per-run window in one test; 3 clean repeats.
+- **Evidence:** `handoff-T-green.md`; mutation of `START_WAIT` 5 s to 1 s fails `a_turn_too_short_to_see_ends_after_the_start_wait`, reverted.
