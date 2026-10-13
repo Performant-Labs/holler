@@ -47,6 +47,9 @@ pub struct FakeState {
     /// its own captured generation against the current one each loop tick
     /// and closes the connection the moment they differ.
     generation: Arc<AtomicU64>,
+    /// How many `/event` connections have subscribed, ever (#864). Never decreases, so a caller
+    /// that read it before an action can tell a connection made after it from an older one.
+    event_connections: usize,
 }
 
 impl FakeState {
@@ -63,6 +66,7 @@ impl FakeState {
             stall_exists: false,
             event_tx,
             generation: Arc::new(AtomicU64::new(0)),
+            event_connections: 0,
         }
     }
 }
@@ -102,6 +106,17 @@ impl FakeServer {
     pub fn push_event(&self, event: Value) {
         let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = state.event_tx.send(event.to_string());
+    }
+
+    /// How many `/event` connections have subscribed so far, ever (#864). `push_event` reaches
+    /// only connections already subscribed, so a test that pushes right after a rebind or a
+    /// re-attach reads this before the action and waits for it to grow before pushing.
+    #[allow(dead_code)] // #864: only `rebind_test.rs` of the files that include this one reads it
+    pub fn event_connections(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .event_connections
     }
 
     /// Closes every currently-open `/event` connection right now.
@@ -258,7 +273,8 @@ async fn serve_sse(
     write_half.flush().await?;
 
     let (mut rx, my_generation, generation) = {
-        let state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.event_connections += 1;
         (
             state.event_tx.subscribe(),
             state.generation.load(Ordering::SeqCst),

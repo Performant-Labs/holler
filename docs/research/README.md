@@ -66,6 +66,14 @@ ADR numbers nor the code paths they cite exist on `holler-server`'s current `mai
   `research/session-status-and-wait` branch; the `wait` verb it argued for shipped (see
   [`../orchestrating.md`](../orchestrating.md)), the rest is unverified against current code.
 
+## Compaction spike
+
+- [**compaction-spike.md**](compaction-spike.md) (2026-10-12, #878) — whether a pane can be compacted
+  through the harness: OpenCode `summarize` verified on 1.18.35 only (recorded replies in
+  [`compaction-spike-fixtures/opencode/`](compaction-spike-fixtures/opencode/)), and Claude Code
+  2.1.296, where `/compact` over the inbox does not compact, so it stays `compact-unsupported`.
+  Probes: `scripts/spikes/opencode-compact.sh`, `scripts/spikes/claude-compact.sh`.
+
 ## Positioning
 
 - [**positioning.md**](positioning.md) — the page the top-level [README](../../README.md) links:
