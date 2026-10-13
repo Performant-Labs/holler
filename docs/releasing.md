@@ -39,7 +39,7 @@ Format: standard SemVer, starting at `0.1.0`.
 
 - **A git checkout** (a clone or a linked worktree): the 7-character hash of `HEAD`
   (`git rev-parse --short=7 HEAD`), followed by `-dirty` when a tracked file differs from `HEAD`,
-  staged or not, as in `0.4.0 (bda1069-dirty)`. Untracked files do not count.
+  staged or not, as in `0.5.0 (bda1069-dirty)`. Untracked files do not count.
 - **No checkout** (a source archive, which has no `.git`, including one unpacked inside some other
   repository): the build-time variable `HOLLER_GIT_SHA` (its first word) when it is set and not
   empty, else `unknown`. Whoever builds from an archive sets it to the commit the archive was made

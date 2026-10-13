@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/Performant-Labs/holler/main/install
 Downloads the latest [release](https://github.com/Performant-Labs/holler/releases) binary for
 your platform (macOS/Apple Silicon, Linux/x86_64, or Linux/arm64 — Windows isn't a supported
 target, see [#378](https://github.com/Performant-Labs/holler/issues/378)) to
-`~/.local/bin/holler`. Pin a specific version with `HOLLER_VERSION=v0.3.0`, or change the
+`~/.local/bin/holler`. Pin a specific version with `HOLLER_VERSION=v0.5.0`, or change the
 install directory with `HOLLER_INSTALL_DIR=/usr/local/bin` (prefix either as an env var before
 the command above).
 
@@ -274,6 +274,49 @@ When minting the body's token, label it with this instance's own prefix, `<prefi
 bare `body` or a host name: a generic label is how two real, unrelated pairings become
 indistinguishable later, which is exactly what almost caused the incident above.
 ```
+
+## Pane control (`holler pane`, `holler profile`)
+
+Holler can be the one thing that creates, restarts and switches the panes your agents run in. A **pane** is one Herdr
+pane showing one tmux session; its **harness** is either an OpenCode server (`--harness opencode`, the default) or one
+Claude Code process (`--harness claude --port-policy none`); the hub's pane registry records its **session of record**,
+the one session the pane shows and the hub drives. A **profile** is a named set of pane specs (a grid layout plus each
+pane's directory, harness, model, effort, role, env var names and context ceilings).
+
+```bash
+# the adapters are configured by environment variables (HOLLER_HERDR_SESSION, HOLLER_HERDR_WORKSPACES, HOLLER_TMUX_SOCKET, ...)
+holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 --project ~/work/demo --model anthropic/claude-sonnet-5-5 --effort medium --ctx-soft 800000 --ctx-hard 900000
+holler pane list                        # every pane: place, harness, health, session of record, hold; unmanaged Herdr panes in a second table
+holler pane doctor [PANE] [--fix]       # compare the record with reality; repair or report
+holler pane switch PANE SESSION         # move a pane to another session; also: reset, relaunch, park, unpark, close, get, watch
+holler pane compact PANE                # compact an OpenCode pane's context through the harness API (a Claude Code pane answers compact-unsupported)
+holler profile create fleet --from-current
+holler profile apply fleet --dry-run    # the plan; drop --dry-run to converge the live panes on the profile
+holler profile show fleet
+holler profile rename fleet fleet-2
+holler profile export fleet --out fleet.json
+holler profile import fleet.json
+holler say --pane demo-alpha "hello"    # say, interrupt and answer also take --pane NAME
+```
+
+- Every `pane` and `profile` verb takes `--format=json` (one envelope: `schema_version`, `ok`, `data`, `error`), and exits
+  0 on success, 1 on a runtime failure, 2 on usage, 3 on a refusal. With no hub running they exit 1 with `unavailable`.
+- Grid positions are written row first (`r2c1`); `c1r2` and `2,1` are accepted on input.
+- `holler roster` now ends with the columns PANE, POS, PROFILE, HEALTH, SHOWN and DRIVEN, and prints a loud first line
+  when a pane shows a different session than the hub drives; `roster --profile NAME` filters; `roster --json` gains the
+  matching keys. DRIVEN follows each pane's session of record (#839), so `say`, `interrupt` and `answer` with `--pane`
+  reach an OpenCode pane's body; `pane reset --first` goes through the hub's park and hold gate.
+- A Claude Code pane that was set up by hand stays outside the registry (`scripts/pane-restart` restarts it); the
+  import leaves it alone, and `--adopt-claude-code` is refused until #831 closes. `say --pane` does not reach a Claude
+  Code pane until #850 (a body driver) merges.
+- `holler --version` now prints the version, then the commit the binary was built from:
+
+  ```output
+  holler 0.5.0 (abc1234)
+  ```
+
+The full operator guide, including the cutover from the launcher's files and the rollback, is
+[docs/pane-control.md](docs/pane-control.md). [PENDING #850/#831: update the Claude Code lines above when they merge.]
 
 ## Where Holler fits
 

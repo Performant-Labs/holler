@@ -528,7 +528,13 @@ fn the_docs_readme_index_guide_and_changelog_carry_the_change() {
         "the pointer"
     );
     let log = read("CHANGELOG.md");
-    let unreleased = section(&log, "## [Unreleased]", "\n## [");
+    // `[Unreleased]` plus the newest released section: the release flow (docs/releasing.md)
+    // moves these entries under `## [x.y.z]` and leaves `[Unreleased]` empty, so the check
+    // holds both before and after the cut. Missing from both still fails.
+    let from = &log[log.find("## [Unreleased]").expect("no `## [Unreleased]`")..];
+    let unreleased = section(from, "## [Unreleased]", "\n## [");
+    let newest = section(&from[unreleased.len()..], "\n## [", "\n## [");
+    let unreleased = format!("{unreleased}{newest}");
     let enh = section(&unreleased, "### Enhancements", "\n### ");
     assert!(enh.contains("#803"), "an Enhancements item for #803");
     let breaking = section(&unreleased, "### Breaking Changes", "\n### ");

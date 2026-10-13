@@ -78,6 +78,18 @@ fn from_heading(doc: &str, start: &str) -> String {
     rest[..end].to_string()
 }
 
+/// `## [Unreleased]` plus the newest released section below it. The release flow
+/// (docs/releasing.md) moves the `[Unreleased]` entries under the new `## [x.y.z]` heading and
+/// leaves `[Unreleased]` empty, so an entry is "unreleased" both before the cut and after it.
+/// An entry missing from both still fails.
+fn unreleased_and_newest_release(changelog: &str) -> String {
+    let Some(at) = changelog.find("## [Unreleased]") else { return String::new() };
+    let rest = &changelog[at..];
+    let mut ends = rest.match_indices("\n## [").map(|(i, _)| i);
+    let end = ends.nth(1).unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
 fn ticked(word: &str) -> String {
     format!("`{word}`")
 }
@@ -486,11 +498,10 @@ fn profile_apply_reference_names_its_words() {
 #[test]
 fn changelog_unreleased_names_the_guide() {
     let changelog = read("CHANGELOG.md");
-    let unreleased = from_heading(&changelog, "## [Unreleased]");
-    let unreleased = unreleased.split("\n## [").next().unwrap_or_default();
+    let unreleased = unreleased_and_newest_release(&changelog);
     assert!(
         unreleased.lines().any(|l| l.contains("/issues/652") && l.contains("pane-control.md")),
-        "CHANGELOG.md's [Unreleased] has no line linking /issues/652 and naming pane-control.md"
+        "CHANGELOG.md's [Unreleased] (or the newest release section) has no line linking /issues/652 and naming pane-control.md"
     );
 }
 
@@ -784,10 +795,9 @@ fn the_sentences_driven_replaced_are_gone_and_the_entry_is_written() {
     assert_none("section 9 lacks the open codes of #839", missing);
 
     let changelog = read("CHANGELOG.md");
-    let unreleased = from_heading(&changelog, "## [Unreleased]");
-    let unreleased = unreleased.split("\n## [").next().unwrap_or_default();
+    let unreleased = unreleased_and_newest_release(&changelog);
     assert!(
         unreleased.lines().any(|l| l.contains("/issues/839") && l.contains("/issues/828")),
-        "CHANGELOG.md's [Unreleased] has no entry linking /issues/839 and /issues/828"
+        "CHANGELOG.md's [Unreleased] (or the newest release section) has no entry linking /issues/839 and /issues/828"
     );
 }

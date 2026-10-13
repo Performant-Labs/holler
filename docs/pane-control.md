@@ -319,10 +319,10 @@ Refused (3), with nothing sent to a model: `pane-parked`, `pane-unhealthy` and `
 says (the refusals of a prompt to the pane), `session-not-found` for a pane with no session of record, `server-unhealthy` (relaunch
 it first), `session-busy`, `session-holds-question` or `session-holds-permission` while the session is not idle (try again
 once it is), `compact-model-unpinned` when the pane's server config pins no compaction model, and `compact-unsupported`
-for a Claude Code pane, which cannot be compacted this way yet (#878's spike decides it). The orchestrator's pane is not
+for a Claude Code pane, which cannot be compacted this way (#878's spike found that `/compact` sent over its inbox does not compact). The orchestrator's pane is not
 refused: compaction keeps the session.
 
-The OpenCode side is written from OpenCode 1.19.0's API document and not yet run against a real server: it asks
+The OpenCode side is written from OpenCode 1.19.0's API document and run against a real server only on OpenCode 1.18.35 (#888), not 1.19.0: it asks
 `POST /session/:id/summarize` and reads the context's size from the session's last assistant message's token counts.
 
 ### `holler pane park --reason TEXT --release-when WHEN`
@@ -1001,7 +1001,7 @@ old launcher's files to the registry. This is its procedure; where it differs fr
 guide is the standing text.
 
 Before step 1, confirm the binary: `holler --version` prints the version and then the commit the binary was built from,
-such as `0.4.0 (bda1069)` (issue [#851](https://github.com/Performant-Labs/holler/issues/851)). It must name the commit
+such as `0.5.0 (bda1069)` (issue [#851](https://github.com/Performant-Labs/holler/issues/851)). It must name the commit
 of `main` the cutover runs, without `-dirty`; a version number alone does not tell two builds apart.
 
 One fact about the live fleet comes first; it is a fact, not a step:
@@ -1142,5 +1142,5 @@ Deferred, so not documented here as existing; none of them is available:
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - recreating the Herdr workspace from the stored profiles (#666);
 - a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet);
-- compacting a Claude Code pane's context (the `pane compact` verb answers it `compact-unsupported` until #878's spike
-  decides whether `/compact` through its inbox works and where its token counts can be read).
+- compacting a Claude Code pane's context (the `pane compact` verb answers it `compact-unsupported`, since #878's spike found that
+  `/compact` through its inbox does not compact).

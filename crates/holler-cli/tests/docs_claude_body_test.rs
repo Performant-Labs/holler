@@ -88,7 +88,14 @@ fn the_contract_is_amended() {
     // and #839's, which is history and stays); after it #831's bullet says it reaches the pane
     // through its body (#850), and the new bullet is the third.
     let raw = read("CHANGELOG.md");
-    let unreleased = raw.split("\n## [").find(|s| s.starts_with("Unreleased")).unwrap_or_default();
+    // `## [Unreleased]` plus the newest released section: the release flow (docs/releasing.md)
+    // moves the entries under the new `## [x.y.z]` heading and leaves `[Unreleased]` empty.
+    let sections: Vec<&str> = raw.split("\n## [").collect();
+    let unreleased = sections
+        .iter()
+        .position(|s| s.starts_with("Unreleased"))
+        .map(|at| sections[at..sections.len().min(at + 2)].join("\n"))
+        .unwrap_or_default();
     let naming = unreleased.split("\n- ").filter(|bullet| bullet.contains("#850")).count();
     if naming < 3 {
         missing.push(format!(
