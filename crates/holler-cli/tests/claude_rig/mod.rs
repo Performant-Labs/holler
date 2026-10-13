@@ -19,7 +19,7 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -82,6 +82,9 @@ impl<'a> Process<'a> {
 /// The program, its scripted state and the inbox listener of one test.
 pub struct FakeProgram {
     dir: PathBuf,
+    /// A short directory under `/tmp` that holds the inbox socket: a socket path must fit
+    /// `SUN_LEN` (104 bytes on macOS), which the runner's temp directory does not.
+    sock_dir: PathBuf,
     inbox_dir: PathBuf,
     lines: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
@@ -109,7 +112,11 @@ impl FakeProgram {
         std::fs::write(&bin, script).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let socket = dir.join("inbox.sock");
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let sock_dir =
+            PathBuf::from(format!("/tmp/hlc850-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&sock_dir).unwrap();
+        let socket = sock_dir.join("inbox.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
         let lines: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -130,7 +137,7 @@ impl FakeProgram {
                 }
             })
         };
-        let rig = Self { dir, inbox_dir, lines, stop, listener: Some(handle) };
+        let rig = Self { dir, sock_dir, inbox_dir, lines, stop, listener: Some(handle) };
         rig.set_processes(&[]);
         rig
     }
@@ -160,7 +167,7 @@ impl FakeProgram {
     /// Record the inbox socket of the process `pid`, as its launch hook would.
     pub fn register(&self, pid: u32) {
         let file = self.inbox_dir.join(pid.to_string());
-        std::fs::write(&file, self.dir.join("inbox.sock").display().to_string()).unwrap();
+        std::fs::write(&file, self.sock_dir.join("inbox.sock").display().to_string()).unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
@@ -207,6 +214,7 @@ impl Drop for FakeProgram {
         if let Some(handle) = self.listener.take() {
             let _ = handle.join();
         }
+        let _ = std::fs::remove_dir_all(&self.sock_dir);
     }
 }
 
