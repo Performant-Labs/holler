@@ -48,3 +48,9 @@ are N/A). Append-only; every phase adds its entry.
 - **Assumed:** the `holler-body` `rebind_test` and `interrupt_test` failures under full-workspace load are flakes, since they pass 3/3 and 11/11 alone and the code is untouched by this branch.
 - **Hedged:** `cargo machete` is not installed locally, so it was not run; CI covers it.
 - **Evidence:** `docs/handoffs/878/handoff-T-green.md`; two mutations (shrink rule, `rsplit_once`) each failed the named tests and were restored.
+
+## A (phase 8, anti-duplication)
+- **Decided:** PASS. F extended `check_health`/`check_idle` (visibility only), `activity_refusal`, `known`, `Call::send`, `unexpected_status`, `session_activity`, `messages`, `resolve_pane_record`, `unmanaged::missing` and `output::emit`; the new files are the ones the brief names.
+- **Assumed:** the three-line `Refused` wrapper around `activity_refusal` at three sites is wording that differs per site, not a parallel path.
+- **Hedged:** warn that `holler-pane-testkit/src/harness.rs` grew from 692 to 830 lines (under the 900 lint limit); a split is follow-up work.
+- **Evidence:** `docs/handoffs/878/handoff-A-dup.md`.
