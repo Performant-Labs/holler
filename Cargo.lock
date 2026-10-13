@@ -1178,6 +1178,8 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "holler-pane",
+ "holler-pane-testkit",
  "holler-proto",
  "reqwest",
  "rstest",

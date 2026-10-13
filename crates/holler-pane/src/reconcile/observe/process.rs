@@ -8,17 +8,19 @@
 //!   `harness.session_activity`: a process that waits for a person is `pane-waiting`, with the
 //!   reason. It never asks `harness.agent_view`: a single process has no server to list agents.
 //! - **Compare**: `no-session-of-record`, and the one mismatch, the process holding another
-//!   session than the session of record (`shown-driven-mismatch`). The rules that need a
-//!   server's list are skipped: `session-of-record-missing`, `tui-foreign-session`,
+//!   session than the session of record (`shown-driven-mismatch`). Its body is found by the
+//!   parent's `check_driven`, over an empty server list (#850, ADR-0021 section 15 item 19): a
+//!   body that is behind is a `shown-driven-mismatch` with the switch as its remedy. The rules
+//!   that need a server's list are skipped: `session-of-record-missing`, `tui-foreign-session`,
 //!   `stray-session` and `server-wedged`. A process that is gone shows nothing, so its screen
 //!   is not read and no mismatch is reported beside its `server-down`.
 //! - **Repair**, with `--fix`: a relaunch on the session of record, through the caller's
 //!   [`Relaunch`], and only while the process is idle, so a repair never drops a running turn
 //!   (the rule `reset` and `switch` keep); one that works or waits is `not-fixable`, with the
 //!   relaunch remedy. The orchestrator's pane is repaired only by a pass that names it.
-//! - **Record**: the parent's, unless a relaunch was attempted. The relaunch stores its own
-//!   record (a new pid, the session of record held), and a failed one has stopped and rolled
-//!   back the process, so what the chain saw before it is no longer the pane's state.
+//! - **Record**: the parent's, DRIVEN included, unless a relaunch was attempted. The relaunch
+//!   stores its own record (a new pid, the session of record held), and a failed one has stopped
+//!   and rolled back the process, so what the chain saw before it is no longer the pane's state.
 
 use crate::findings::{quoted, Finding, FindingKind, FixError, FixState};
 use crate::pane::PaneRole;
@@ -26,19 +28,21 @@ use crate::ports::Activity;
 use crate::{HarnessEndpoint, Pane, Ports};
 
 use super::{
-    check_session_of_record, observe_failed, observe_screen, record, screen_text, shown_differs,
-    summary, Checked, ReconcileRequest, Relaunch, Screen, Server, HARNESS_HEALTH,
+    check_driven, check_session_of_record, observe_failed, observe_screen, record_with,
+    screen_text, shown_differs, summary, Bodies, Checked, ReconcileRequest, Relaunch, Screen,
+    Server, HARNESS_HEALTH,
 };
 
 /// The activity call of a single process's chain, named as `<port>.<method>`.
 const HARNESS_SESSION_ACTIVITY: &str = "harness.session_activity";
 
 /// Run the chain of the single-process pane `pane`, whose harness is at `at`, after the
-/// parent's tmux check (its findings are `findings`).
+/// parent's tmux check (its findings are `findings`), joining it to its body among `bodies`.
 pub(super) fn check(
     ports: Ports<'_>,
     request: &ReconcileRequest<'_>,
     relaunch: Option<Relaunch<'_>>,
+    bodies: Bodies<'_>,
     pane: &Pane,
     at: &HarnessEndpoint,
     mut findings: Vec<Finding>,
@@ -59,8 +63,9 @@ pub(super) fn check(
         activity,
     };
     let (screen, relaunched) = check_held(&fixer, pane, screen, &mut findings);
+    let driven = check_driven(bodies, pane, &server, &screen, &mut findings);
     if !relaunched {
-        findings.extend(record(ports, request, pane, &server, &screen));
+        findings.extend(record_with(ports, request, pane, &server, &screen, driven));
     }
     Checked {
         findings,

@@ -17,12 +17,13 @@
 //!   `--pane` sends an id, which the hub resolves to the body that advertises it, and its
 //!   refusal that no live body does is `pane-not-driven` ([`pane_not_driven`]).
 //!   `prompt_target::route` stays as #670 froze it. A Claude
-//!   Code pane (#831) has no body for the hub to reach until #850: its `interrupt` is a
-//!   relaunch on its session of record (`interrupt_cmd::interrupt_pane`), its `interrupt` with
-//!   text is [`INTERRUPT_TEXT_UNSUPPORTED`] and its `answer` [`ANSWER_UNSUPPORTED`], each after
-//!   the same pane gates ([`resolve_pane_record`]); its `say` is routed as any pane's, to a
-//!   hub that reaches no body for it, and is given no CLI-side path (ADR-0021 section 15
-//!   item 18).
+//!   Code pane (#831) is reached through its body like any pane (ADR-0021 section 15 item
+//!   19, #850): its `say` is routed as any pane's, through the hub's gate, and is given no
+//!   CLI-side path. Its body cannot cancel a turn in a process it does not own (ADR 0014
+//!   point 10), so its `interrupt` is a relaunch on its session of record
+//!   (`interrupt_cmd::interrupt_pane`, ADR-0021 section 15 item 9), its `interrupt` with text
+//!   is [`INTERRUPT_TEXT_UNSUPPORTED`] and its `answer` [`ANSWER_UNSUPPORTED`], each after the
+//!   same pane gates ([`resolve_pane_record`]).
 //! - **The routed `say --queue`** ([`QUEUE_ACCEPT_WAIT`], [`queue_outcome`]): returns
 //!   once the hub has accepted the prompt instead of waiting for the turn's reply.
 //! - **The pane arm of a held refusal** ([`pane_hold_refusal`]): the hub's pane-state
@@ -238,8 +239,10 @@ fn control_refusal(session: &str, pane: Option<&str>, e: ControlError, json: boo
 /// that owns the routing.
 pub use holler_pane::gate::{PANE_PARKED, PANE_SHOWN_DRIVEN_MISMATCH, PANE_UNHEALTHY};
 /// `interrupt --pane` with replacement text on a pane whose interrupt is a relaunch (a Claude
-/// Code pane, #831): the relaunch drops the turn in flight, and no body exists to run the text
-/// after it until #850. Refusal, exit 3.
+/// Code pane, #831): the relaunch drops the turn in flight and is not an atomic
+/// cancel-and-redirect, since the new process must run its launch hook before a message can
+/// reach it, so the text is said after the interrupt (ADR-0021 section 15 item 9). Refusal,
+/// exit 3.
 pub const INTERRUPT_TEXT_UNSUPPORTED: RefusalCode =
     RefusalCode::from_static("interrupt-text-unsupported");
 /// `answer --pane` on a single-process pane (a Claude Code pane, #831): nothing but a keypress
