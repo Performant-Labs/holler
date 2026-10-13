@@ -47,3 +47,11 @@ Run handoff directory `docs/handoffs/831` - branch `issue-831-implementation` - 
 - **Hedged:** `cargo fmt -p holler-cli` reformats ~100 untouched files under the local rustfmt; they were reverted and only the touched files are formatted. The undo's equality check is proven against the testkit store only.
 - **Evidence:** `cargo test --workspace --no-fail-fast` (CI skip) green after one docs fix; `pane_verbs` 455, `docs_pane_control_test` 23, adapter `foreground_pids` 13 + 6, doctests 12; real tmux `--ignored` 10 of 10; clippy `-D warnings` clean on the touched crates' lib and relevant test targets; `scripts/lint.sh` exit 0; `docs/handoffs/831/evidence.md`.
 - **Read:** the brief, `handoff-A.md`, `handoff-T-red.md`; every test file T wrote; `import/{observe,assess,files,findings}.rs`, `import.rs`; the CLI `import.rs`, `writes.rs`, `launcher.rs`, `sources.rs`; the host adapter; `ports.rs`; `pane.rs`; `profile_snapshot.rs`; the testkit `host.rs`, `claude.rs`, `harnesses.rs`; ADR-0021 and the guide at the cited lines.
+
+## T, Phase 7 verify / GREEN: 2026-10-12
+
+- **Decided:** GREEN, no blocking issue (`docs/handoffs/831/handoff-T-green.md`). No test edited; F flagged none and none failed.
+- **Assumed:** the lone workspace clippy error (`token_load_test.rs:60`) is pre-existing, since the diff does not touch that file and F reported the same at main.
+- **Hedged:** `cargo machete` is not installed locally, so it was not run; F added no dependency. The undo's equality check against the real hub store has no test.
+- **Evidence:** `cargo test --workspace` (CI skip) exit 0; `pane_verbs -- adopt` 47 x3; adapter `foreground_pids*` x5; real tmux `--ignored` 10; doctests 12; four mutants fail named tests (Several, NoSession, login env, non-leader group member); `lint.sh` 0; `changelog-check` ok.
+- **Read:** `handoff-F.md`, `handoff-T-red.md`, `decisions.md`, `import/adopt.rs`, `exec.rs::ps_group`, `pipeline.config.json`.
