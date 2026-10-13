@@ -113,7 +113,10 @@ impl FakeServer {
     /// re-attach reads this before the action and waits for it to grow before pushing.
     #[allow(dead_code)] // #864: only `rebind_test.rs` of the files that include this one reads it
     pub fn event_connections(&self) -> usize {
-        0
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .event_connections
     }
 
     /// Closes every currently-open `/event` connection right now.
@@ -270,7 +273,8 @@ async fn serve_sse(
     write_half.flush().await?;
 
     let (mut rx, my_generation, generation) = {
-        let state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.event_connections += 1;
         (
             state.event_tx.subscribe(),
             state.generation.load(Ordering::SeqCst),
