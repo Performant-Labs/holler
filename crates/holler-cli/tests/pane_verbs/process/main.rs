@@ -41,7 +41,7 @@ use serde_json::Value;
 /// long as the verb is a stub, and in `docs_rows::STORY_GROUPS` for the layout checks).
 pub const PANE_VERBS: &[&str] = &[
     "list", "get", "watch", "launch", "relaunch", "switch", "reset", "park", "unpark", "close",
-    "doctor", "import",
+    "doctor", "import", "compact",
 ];
 
 /// The verbs of `holler profile` (permanent, like [`PANE_VERBS`]).

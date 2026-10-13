@@ -59,11 +59,16 @@
 //! refuses a pane that is not idle (a relaunch drops the turn in flight) and does not ask for a
 //! session list: whether the target has a conversation is the relaunch plan's
 //! (`process_command` with a resume-only choice: `session-not-found`, before anything is
-//! stopped; plan review W1). It asks the hub nothing: no body drives such a pane until #850, so
-//! its `reset --first` is refused `pane-not-driven` in the plan. Steps 2 to 5 are then
-//! `tx_launch::relaunch_recorded`: the pane's processes stopped, its process run on the target
-//! (switch) or on a fresh session (reset), located, seen holding it and recorded with its new
-//! pid, its stored DRIVEN kept.
+//! stopped; plan review W1). Its body is found as a server pane's is, over an empty server list
+//! (the drive rule, ADR-0021 section 15 item 19, #850), and `reset --first` is checked as above.
+//! Steps 2, 3 and the record's first write are then `tx_launch::relaunch_recorded`: the pane's
+//! processes stopped, its process run on the target (switch) or on a fresh session (reset),
+//! located, seen holding it and recorded with its new pid, its stored DRIVEN kept. Then, when a
+//! body drives the pane, step 4 re-points it to the session the relaunched process holds
+//! (`hub.rebind`, which the body checks against `claude agents --json`), and a second
+//! compare-and-swap records the id it acknowledged as DRIVEN. Until that write the record names
+//! the new session with the old DRIVEN, so the hub's gate refuses a prompt to either id: the
+//! window is a refusal, never a delivery to the wrong session. A pane no body drives skips both.
 //!
 //! No step of an in-place run calls Herdr or the host, so nothing is ever typed into a TUI
 //! (I4), and no step serves, attaches, aborts or deletes anything; a relaunch calls them as
@@ -81,9 +86,15 @@
 //! `holler pane switch` to the session of record re-points it; nothing is compensated.
 //!
 //! An in-place run makes at most thirteen port calls, each bounded by I5, so it needs no budget
-//! of its own; a relaunch runs under `tx_launch`'s budget.
+//! of its own; a relaunch runs under `tx_launch`'s budget, and its plan and drive step add at most
+//! `hub.advertised`, the store's list, `hub.rebind`, one `cas_put` and, with `--first`, two
+//! `hub.prompt` calls (#850), each bounded by I5 on its own.
 
 mod plan;
+
+/// The live health and idle checks of the plan, which `tx_compact` (#878) calls and does not
+/// copy; `plan` itself stays private.
+pub(crate) use plan::{check_health, check_idle};
 
 use crate::error::RefusalCode;
 use crate::findings::{doctor_command, quoted};
@@ -232,7 +243,7 @@ pub fn switch(ports: Ports<'_>, request: &SwitchRequest) -> Result<Switched, Swi
     let plan = plan(ports, request)?;
     let pane = match plan.record.harness.kind.shape() {
         Shape::ServerAndTui => switch_in_place(ports, request, &plan)?,
-        Shape::SingleProcess => relaunched(ports, request, &plan.record)?,
+        Shape::SingleProcess => relaunched_and_driven(ports, request, &plan)?,
     };
     if let Some(text) = &request.first {
         prompt(ports, &pane, text)?;
@@ -334,6 +345,39 @@ fn relaunched(
         what: format!("the relaunch of {} stored no record", record.name),
     })?;
     Ok(stored)
+}
+
+/// A single process's run (#831) with the drive rule (#850, ADR-0021 section 15 item 19): the
+/// relaunch, which stores the record, then, when a body drives the pane, step 4 re-points it to the
+/// session the relaunched process holds and a second compare-and-swap, at the generation the
+/// relaunch stored, records the id it acknowledged as DRIVEN. Both are after the act, so a failure
+/// of either is `acted`. Returns the record as last stored.
+fn relaunched_and_driven(
+    ports: Ports<'_>,
+    request: &SwitchRequest,
+    plan: &Plan,
+) -> Result<Pane, SwitchFailure> {
+    let stored = relaunched(ports, request, &plan.record)?;
+    let Some(body) = plan.driver.as_ref() else {
+        return Ok(stored);
+    };
+    let acted = |error| SwitchFailure {
+        error,
+        acted: true,
+        created: None,
+        unprompted: None,
+    };
+    let held = stored.session_of_record.clone().ok_or_else(|| {
+        acted(PaneError::Unavailable {
+            what: format!("the relaunch of {} recorded no session", stored.name),
+        })
+    })?;
+    let mut next = stored.clone();
+    next.last_observed.driven = drive(ports, Some(body), &held).map_err(acted)?;
+    ports
+        .pane_store
+        .cas_put(&next, stored.generation)
+        .map_err(acted)
 }
 
 /// Step 6: queue `text` to the session of record of `pane`, the record the run stored, through

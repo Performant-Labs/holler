@@ -10,7 +10,7 @@
 //! the server suite (#802): the port only builds the argv, and the host runs it in the pane's
 //! tmux session and stops it there.
 
-use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
     TurnAgent,
@@ -20,8 +20,9 @@ use holler_pane_testkit::conformance::claude::{claude_cases, run_claude_conforma
 use holler_pane_testkit::conformance::Conformance;
 
 /// The case ids, in order. W1 (switch keeps its `session-not-found`) is case 6; W12 (delivery is
-/// proven at `send_prompt`) is cases 8 and 9. #647 part 2's `agent_view` is case 13.
-const DOCUMENTED_CASES: [&str; 13] = [
+/// proven at `send_prompt`) is cases 8 and 9. #647 part 2's `agent_view` is case 13, and #878's
+/// `compact` is case 14.
+const DOCUMENTED_CASES: [&str; 14] = [
     "process-command-starts-nothing",
     "launch-then-located",
     "new-session-ids-are-distinct",
@@ -35,6 +36,7 @@ const DOCUMENTED_CASES: [&str; 13] = [
     "abort-is-unsupported",
     "login-status-answers",
     "agent-view-of-a-process-is-empty",
+    "compact-is-unsupported",
 ];
 
 fn launch_fake(fake: &FakeClaude, _: &PaneName, argv: &Argv) -> Result<(), PaneError> {
@@ -117,6 +119,8 @@ enum Broken {
     LoginFails,
     /// `agent_view` guesses a turn it cannot know (#647 part 2).
     GuessesATurn,
+    /// `compact` answers an outcome for a harness that cannot compact (#878).
+    AcksCompact,
 }
 
 /// The fake, with one rule broken.
@@ -243,6 +247,20 @@ impl HarnessPort for Mutant {
         }
         Ok(view)
     }
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        if self.is(Broken::AcksCompact) {
+            return Ok(CompactOutcome {
+                tokens_before: 90_000,
+                tokens_after: 12_000,
+            });
+        }
+        self.inner.compact(at, session, model)
+    }
 }
 
 fn run_mutant(broken: Broken) -> Conformance {
@@ -303,6 +321,7 @@ fn every_case_has_a_mutant_that_it_catches() {
         (Broken::AcksAbort, "abort-is-unsupported"),
         (Broken::LoginFails, "login-status-answers"),
         (Broken::GuessesATurn, "agent-view-of-a-process-is-empty"),
+        (Broken::AcksCompact, "compact-is-unsupported"),
     ];
     let covered: Vec<&str> = pairs.iter().map(|&(_, case)| case).collect();
     assert_eq!(

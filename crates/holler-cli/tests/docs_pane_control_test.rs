@@ -566,6 +566,89 @@ fn section_3_names_every_flag_of_pane_import() {
     assert_none("section 3's `pane import` subsection does not name these flags", missing);
 }
 
+/// `text` with every run of whitespace (a wrapped line included) as one space.
+fn flat(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// #831 (AC1, AC3): the amendment the adoption makes comes first, and the guide and the ADR say the
+/// flag is built: section 3's table lists the five adoption findings at their levels; no sentence
+/// still says the flag will adopt, would adopt or is refused until #831's adoption step lands;
+/// section 10 names the new `HostPort::foreground_pids`; and the ADR names the method, its `ps -t`
+/// mechanism, and no longer says item 17 is "not yet" built or that the `pane import` row refuses
+/// the flag.
+#[test]
+fn the_adoption_is_documented_as_built() {
+    let doc = guide();
+    let adr = flat(&read("docs/adr/ADR-0021.md"));
+    let mut missing = Vec::new();
+
+    let s3 = flat(&section(&doc, 3));
+    for (code, level) in [
+        ("claude-code-adopted", "info"),
+        ("claude-process-unmatched", "problem"),
+        ("claude-login-env", "problem"),
+        ("claude-model-not-anthropic", "warning"),
+        ("spec-kind-differs", "warning"),
+    ] {
+        if !s3.contains(&format!("| `{code}` | {level} |")) {
+            missing.push(format!("section 3's table has no row `{code}` at level {level}"));
+        }
+    }
+    let flat_guide = flat(&doc);
+    for stale in [
+        "will be a re-run of the import with `--adopt-claude-code`",
+        "`--adopt-claude-code` would also adopt",
+        "until the adoption step of",
+        "adoption step lands",
+        "until it lands, `--adopt-claude-code` is refused",
+    ] {
+        if flat_guide.contains(stale) {
+            missing.push(format!("the guide still says: {stale}"));
+        }
+    }
+    if !flat(&section(&doc, 10)).contains("foreground_pids") {
+        missing.push("section 10 does not name `foreground_pids`".into());
+    }
+    for (what, text) in [
+        ("the ADR does not name `foreground_pids`", "foreground_pids"),
+        ("the ADR does not name the `ps -t` mechanism", "ps -t"),
+    ] {
+        if !adr.contains(text) {
+            missing.push(what.into());
+        }
+    }
+    for stale in ["As built: not yet.", "adoption step lands (section 15, item 17)"] {
+        if adr.contains(stale) {
+            missing.push(format!("the ADR still says: {stale}"));
+        }
+    }
+    assert_none("the adoption's documentation", missing);
+}
+
+/// #831 (AC3): the clap help of the flag says what it does now, not that it is refused until a
+/// story lands, and the verb's long help does not either.
+#[test]
+fn the_import_help_no_longer_says_the_flag_is_refused() {
+    let cli = Cli::command();
+    let verb = cli.find_subcommand("pane").and_then(|c| c.find_subcommand("import")).unwrap();
+    let flag = verb.get_arguments().find(|a| a.get_long() == Some("adopt-claude-code")).unwrap();
+    let help = flat(&flag.get_help().map(ToString::to_string).unwrap_or_default());
+    let long = flat(&verb.get_long_about().map(ToString::to_string).unwrap_or_default());
+    let mut missing = Vec::new();
+    for (what, text) in [("the flag's help", &help), ("the verb's long help", &long)] {
+        for stale in ["Refused (usage)", "refused (usage)", "adoption step lands"] {
+            if text.contains(stale) {
+                missing.push(format!("{what} still says: {stale}"));
+            }
+        }
+    }
+    if !(help.contains("Claude Code") && help.contains("fleet")) {
+        missing.push(format!("the flag's help does not say it adopts Claude Code panes and extends fleet: {help:?}"));
+    }
+    assert_none("the import's help", missing);
+}
+
 /// The lines of `doc` that break #665's rule: each of `BUILT_BY_665` is named on at least one line,
 /// and no line naming one of them says PROPOSED.
 fn built_lines_marked_proposed(doc: &str) -> Vec<String> {

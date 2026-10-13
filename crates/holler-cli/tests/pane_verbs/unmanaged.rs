@@ -262,6 +262,7 @@ fn every_verb_that_acts_on_a_pane_refuses_an_unmanaged_one_with_pane_unmanaged()
             &["pane", "park", name, "--reason", "x", "--release-when", "y"][..],
             &["pane", "unpark", name][..],
             &["pane", "close", name][..],
+            &["pane", "compact", name][..],
         ] {
             assert_fails(&rig, verb, 3, "pane-unmanaged", false);
         }
@@ -414,6 +415,7 @@ fn a_label_that_is_not_a_valid_pane_name_is_still_refused_by_every_acting_verb()
             ][..],
             &["pane", "unpark", label][..],
             &["pane", "close", label][..],
+            &["pane", "compact", label][..],
         ] {
             assert_fails(&rig, verb, 3, "pane-unmanaged", false);
         }

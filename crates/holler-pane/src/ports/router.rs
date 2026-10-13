@@ -10,7 +10,7 @@
 //!
 //! | Call | Goes to |
 //! |---|---|
-//! | every method keyed by an endpoint (`verify_serving`, `health`, `create_session`, `list_sessions`, `abort`, `attach_tui`, `shown_session`, `send_prompt`, `session_activity`, `agent_view`) | the server harness for [`HarnessEndpoint::Port`], the process harness for [`HarnessEndpoint::Process`] |
+//! | every method keyed by an endpoint (`verify_serving`, `health`, `create_session`, `list_sessions`, `abort`, `attach_tui`, `shown_session`, `send_prompt`, `session_activity`, `agent_view`, `compact`) | the server harness for [`HarnessEndpoint::Port`], the process harness for [`HarnessEndpoint::Process`] |
 //! | `serve_command`, `select_session` (a server's argv; a TUI's switch) | the server harness |
 //! | `process_command`, `new_session_id`, `locate_process`, `login_status` | the process harness |
 //!
@@ -22,7 +22,8 @@ use crate::error::PaneError;
 use crate::pane::{PaneId, PaneName};
 
 use super::{
-    Activity, AgentView, HarnessEndpoint, HarnessPort, LoginStatus, ServeSpec, SessionChoice,
+    Activity, AgentView, CompactModel, CompactOutcome, HarnessEndpoint, HarnessPort, LoginStatus,
+    ServeSpec, SessionChoice,
 };
 
 /// A `HarnessPort` over a server harness `S` (OpenCode) and a single-process harness `P`
@@ -122,6 +123,15 @@ impl<S: HarnessPort, P: HarnessPort> HarnessPort for HarnessRouter<S, P> {
 
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         self.by(at).session_activity(at, session)
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        self.by(at).compact(at, session, model)
     }
 
     fn process_command(

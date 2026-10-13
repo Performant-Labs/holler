@@ -11,7 +11,7 @@
 //! and predate #831 (in `pane_verbs`, `profile_verbs` and `pane_integration`) keep their own
 //! linking, unchanged.
 
-use holler_pane::ports::{Activity, LoginStatus, SessionChoice};
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome, LoginStatus, SessionChoice};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, HarnessRouter, PaneError, PaneId, PaneName,
     ServeSpec,
@@ -65,6 +65,120 @@ impl Default for FakeHarnesses {
 }
 
 impl HarnessPort for FakeHarnesses {
+    fn serve_command(
+        &self,
+        name: &PaneName,
+        port: u16,
+        spec: &ServeSpec,
+    ) -> Result<Argv, PaneError> {
+        self.0.serve_command(name, port, spec)
+    }
+
+    fn verify_serving(&self, at: &HarnessEndpoint, spec: &ServeSpec) -> Result<(), PaneError> {
+        self.0.verify_serving(at, spec)
+    }
+
+    fn health(&self, at: &HarnessEndpoint) -> Result<bool, PaneError> {
+        self.0.health(at)
+    }
+
+    fn create_session(&self, at: &HarnessEndpoint) -> Result<String, PaneError> {
+        self.0.create_session(at)
+    }
+
+    fn list_sessions(&self, at: &HarnessEndpoint) -> Result<Vec<String>, PaneError> {
+        self.0.list_sessions(at)
+    }
+
+    fn abort(&self, at: &HarnessEndpoint, session: &str) -> Result<(), PaneError> {
+        self.0.abort(at, session)
+    }
+
+    fn attach_tui(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+        session: &str,
+    ) -> Result<(), PaneError> {
+        self.0.attach_tui(pane, at, session)
+    }
+
+    fn select_session(&self, pane: &PaneId, session: &str) -> Result<(), PaneError> {
+        self.0.select_session(pane, session)
+    }
+
+    fn shown_session(
+        &self,
+        pane: &PaneId,
+        at: &HarnessEndpoint,
+    ) -> Result<Option<String>, PaneError> {
+        self.0.shown_session(pane, at)
+    }
+
+    fn send_prompt(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        text: &str,
+    ) -> Result<(), PaneError> {
+        self.0.send_prompt(at, session, text)
+    }
+
+    fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
+        self.0.session_activity(at, session)
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        self.0.compact(at, session, model)
+    }
+
+    fn process_command(
+        &self,
+        name: &PaneName,
+        spec: &ServeSpec,
+        session: &SessionChoice,
+    ) -> Result<Argv, PaneError> {
+        self.0.process_command(name, spec, session)
+    }
+
+    fn new_session_id(&self) -> Result<String, PaneError> {
+        self.0.new_session_id()
+    }
+
+    fn locate_process(&self, name: &PaneName, session: &str) -> Result<Option<u32>, PaneError> {
+        self.0.locate_process(name, session)
+    }
+
+    fn login_status(&self) -> Result<LoginStatus, PaneError> {
+        self.0.login_status()
+    }
+
+    fn agent_view(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        max_turns: usize,
+    ) -> Result<AgentView, PaneError> {
+        self.0.agent_view(at, session, max_turns)
+    }
+}
+
+/// A harness fake lent to a [`HarnessRouter`] (#831): `HarnessPort` over a borrowed fake, every
+/// method forwarded as it is. A rig that owns its `FakeHarness` already (the import rig's world
+/// makes the servers of its OpenCode panes) lends it here, beside a `FakeClaude` of its own, so
+/// that one router reaches both without the rig giving the fake up.
+///
+/// ```text
+/// let router = HarnessRouter::new(Lent(&world.harness), Lent(&claude));
+/// ```
+pub struct Lent<'a, T>(pub &'a T);
+
+impl<T: HarnessPort> HarnessPort for Lent<'_, T> {
     fn serve_command(
         &self,
         name: &PaneName,

@@ -673,14 +673,17 @@ fn ac11_the_adapter_is_send_sync_and_static() {
     assert_send_sync::<OpenCodeHarness>();
 }
 
-/// #802 removed `boot_try` with the adapter's own boot poll: the engine waits now.
+/// #802 removed `boot_try` with the adapter's own boot poll: the engine waits now. #878 added
+/// the fifth bound, `compact`: 120 s, the only one a model call (a summarize) is allowed to
+/// reach.
 #[test]
-fn ac11_default_timeouts_are_10s_5s_2s_5s() {
+fn ac11_default_timeouts_are_10s_5s_2s_5s_120s() {
     let expected = Timeouts {
         call: Duration::from_secs(10),
         request: Duration::from_secs(5),
         health: Duration::from_secs(2),
         settle: Duration::from_secs(5),
+        compact: Duration::from_secs(120),
     };
     assert_eq!(Timeouts::default(), expected);
 }

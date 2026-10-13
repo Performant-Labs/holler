@@ -66,6 +66,10 @@ fn a_wedged_host_times_out_every_method() {
         Err(timeout("host.foreground_commands"))
     );
     assert_eq!(
+        host.foreground_pids(&a),
+        Err(timeout("host.foreground_pids"))
+    );
+    assert_eq!(
         host.attached_clients(&a),
         Err(timeout("host.attached_clients"))
     );
@@ -92,6 +96,7 @@ fn host_op_names_are_port_dot_method() {
         HostOp::ForegroundCommands.as_str(),
         "host.foreground_commands"
     );
+    assert_eq!(HostOp::ForegroundPids.as_str(), "host.foreground_pids");
     assert_eq!(HostOp::AttachedClients.as_str(), "host.attached_clients");
 }
 
@@ -374,6 +379,98 @@ fn a_fault_on_foreground_commands_fails_that_call_only() {
             HostOp::ForegroundCommands
         ]
     );
+}
+
+// --- foreground_pids (#831) ---
+
+/// The pids of a session's processes, ascending, one session's only; a fresh session (the fake
+/// has no shell) has none, and a missing one is `pane-not-found`, as `ps` answers.
+#[test]
+fn foreground_pids_lists_the_sessions_processes_ascending() {
+    let (host, a) = host_with("demo-c1r1");
+    assert_eq!(host.foreground_pids(&a), Ok(vec![]));
+    host.run(&a, "/srv/demo", &argv(&["bash"])).unwrap();
+    host.run(&a, "/srv/demo", &argv(&["claude"])).unwrap();
+    let b = name("demo-c2r1");
+    host.ensure_session(&b, "/srv/demo").unwrap();
+    host.run(&b, "/srv/demo", &argv(&["sleep", "30"])).unwrap();
+    let in_a = host.ps(&a).unwrap();
+    assert_eq!(in_a.len(), 2);
+    let mut want = in_a;
+    want.sort_unstable();
+    assert_eq!(host.foreground_pids(&a), Ok(want));
+    assert_eq!(host.foreground_pids(&b), host.ps(&b));
+    assert_eq!(
+        host.foreground_pids(&name("demo-c9r9")),
+        Err(not_found(&name("demo-c9r9")))
+    );
+}
+
+/// A process that exits, `stop_owned` and an ended session each take the pids with the
+/// processes.
+#[test]
+fn foreground_pids_follow_the_processes_out() {
+    let (host, a) = host_with("demo-c1r1");
+    host.run(&a, "/srv/demo", &argv(&["claude"])).unwrap();
+    host.run(&a, "/srv/demo", &argv(&["sleep", "30"])).unwrap();
+    let pids = host.foreground_pids(&a).unwrap();
+    host.exit_process(&a, pids[0]).unwrap();
+    assert_eq!(host.foreground_pids(&a), Ok(vec![pids[1]]));
+    host.stop_owned(&a).unwrap();
+    assert_eq!(host.foreground_pids(&a), Ok(vec![]));
+    host.end_session(&a).unwrap();
+    assert_eq!(host.foreground_pids(&a), Err(not_found(&a)));
+}
+
+/// A fault queued for `foreground_pids` fails that call only, and the call is logged.
+#[test]
+fn a_fault_on_foreground_pids_fails_that_call_only() {
+    let (host, a) = host_with("demo-c1r1");
+    host.run(&a, "/srv/demo", &argv(&["claude"])).unwrap();
+    let unavailable = PaneError::Unavailable {
+        what: "made-up".to_owned(),
+    };
+    host.faults()
+        .fail_next(HostOp::ForegroundPids, unavailable.clone());
+    assert_eq!(host.foreground_pids(&a), Err(unavailable));
+    assert_eq!(host.foreground_pids(&a).map(|pids| pids.len()), Ok(1));
+    let calls = host.faults().calls();
+    assert_eq!(
+        calls[calls.len() - 2..],
+        [HostOp::ForegroundPids, HostOp::ForegroundPids]
+    );
+}
+
+/// `add_process` puts a process another fake started into the session under the pid that fake
+/// minted, so `ps`, `foreground_commands` and `foreground_pids` all show that pid; it is not a
+/// call through the port; a pid the session holds already is `usage`; a missing session is
+/// `pane-not-found`.
+#[test]
+fn add_process_shares_one_pid_with_another_fake() {
+    let (host, a) = host_with("demo-c1r1");
+    host.run(&a, "/srv/demo", &argv(&["bash"])).unwrap();
+    let shell = host.ps(&a).unwrap()[0];
+    let before = host.faults().calls();
+    host.add_process(&a, "/opt/demo/bin/claude", 30_000)
+        .unwrap();
+    assert_eq!(host.faults().calls(), before, "not a call through the port");
+    assert_eq!(host.ps(&a), Ok(vec![shell, 30_000]));
+    assert_eq!(
+        host.foreground_commands(&a),
+        Ok(vec!["bash".to_owned(), "claude".to_owned()])
+    );
+    assert_eq!(host.foreground_pids(&a), Ok(vec![shell, 30_000]));
+    assert!(matches!(
+        host.add_process(&a, "claude", 30_000),
+        Err(PaneError::Usage { .. })
+    ));
+    let missing = name("demo-c9r9");
+    assert_eq!(
+        host.add_process(&missing, "claude", 30_001),
+        Err(not_found(&missing))
+    );
+    host.exit_process(&a, 30_000).unwrap();
+    assert_eq!(host.foreground_pids(&a), Ok(vec![shell]));
 }
 
 // --- attached_clients (#647 part 2) ---

@@ -1,8 +1,10 @@
 //! The join, per pane (#650): what one pane directory becomes, from its files, Herdr's
 //! snapshot and what its chain observed. Pure: the port calls are `observe`'s.
 //!
-//! A pane whose tmux session runs Claude Code is left alone first (#835): one
-//! `harness-claude-code` finding, no record and nothing else, so it blocks nothing. Every other
+//! A pane whose tmux session runs Claude Code is left alone first (#835) when the run was not
+//! asked to adopt it: one `harness-claude-code` finding, no record and nothing else, so it
+//! blocks nothing. With `--adopt-claude-code` it is joined by `adopt` instead (#831), through
+//! the same steps 1, 2 and 5 and the same record ([`finish`], [`HarnessPart`]). Every other
 //! pane is joined:
 //!
 //! 1. **The Herdr pane** is the snapshot entry in the run's Herdr session whose label is the
@@ -19,8 +21,10 @@
 //! 5. **The role** is the orchestrator's for a pane named by `--orchestrator`.
 //! 6. **The command** is the launcher entry's argv; a string is `command-not-argv`.
 //!
-//! A pane with a problem gets no record. Every other pane gets the record a real run writes,
-//! at generation 0, in the profile `fleet`.
+//! An OpenCode pane needs the launcher entry's port: an entry without one is `source-missing`
+//! here (the launcher table keeps a port-less entry since #831, for a Claude Code pane), in the
+//! words the table's own check used. A pane with a problem gets no record. Every other pane
+//! gets the record a real run writes, at generation 0, in the profile `fleet`.
 
 use crate::findings::quoted;
 use crate::pane::{
@@ -29,6 +33,7 @@ use crate::pane::{
 use crate::tx_launch::HOST_NAME;
 use crate::{Argv, GridPos, HerdrPane, Pane, PaneName, Ports, ProfileName};
 
+use super::adopt::{self, Adoption};
 use super::files::{FileState, LauncherCommand, PaneFiles, SessionFiles};
 use super::findings::{Finding, ImportFinding, Level};
 use super::observe::{lost_finding, observe_all, tmux_finding, Chain, Observed, Target};
@@ -50,6 +55,9 @@ pub(super) struct Context<'a> {
     pub orchestrators: &'a [PaneName],
     /// The profile every record joins.
     pub fleet: &'a ProfileName,
+    /// Whether the run adopts the panes whose tmux session runs Claude Code
+    /// (`--adopt-claude-code`, #831).
+    pub adopt: bool,
 }
 
 /// What one pane directory became.
@@ -99,11 +107,11 @@ impl Outcome {
         )
     }
 
-    /// A pane whose tmux session runs Claude Code (#835): no record, never blocking.
+    /// A pane whose tmux session runs Claude Code (#835), in a run not asked to adopt it: no
+    /// record, never blocking.
     pub(super) fn claude_code(name: &PaneName) -> Self {
-        let message = "its tmux session runs Claude Code, and the import does not adopt such a \
-                       pane until #831's adoption step lands (--adopt-claude-code), so it leaves \
-                       the pane alone";
+        let message = "its tmux session runs Claude Code: pass --adopt-claude-code to adopt it, \
+                       otherwise the import leaves the pane alone";
         Self::left_alone(
             name,
             Action::Skipped,
@@ -114,7 +122,7 @@ impl Outcome {
 }
 
 /// Observe every pane of `panes` at once, then join each; a pane whose tmux session runs
-/// Claude Code is left alone instead (#835).
+/// Claude Code is left alone instead (#835), or adopted when the run was asked to (#831).
 pub(super) fn assess_all(
     ports: Ports<'_>,
     context: &Context<'_>,
@@ -124,7 +132,8 @@ pub(super) fn assess_all(
         .iter()
         .map(|files| Target {
             name: &files.name,
-            port: files.launcher.as_ref().map(|entry| entry.port),
+            port: files.launcher.as_ref().and_then(|entry| entry.port),
+            adopt: adopt::target(context, &files.name),
         })
         .collect();
     let observed = observe_all(ports, &targets);
@@ -132,29 +141,70 @@ pub(super) fn assess_all(
         .iter()
         .zip(observed)
         .map(|(files, observed)| match observed {
-            Observed::ClaudeCode => Outcome::claude_code(&files.name),
+            Observed::ClaudeCode(Adoption::NotAsked) => Outcome::claude_code(&files.name),
+            Observed::ClaudeCode(adoption) => adopt::assess_adopted(context, files, adoption),
             Observed::Seen(chain) => assess(context, files, Some(&chain)),
             Observed::Lost => assess(context, files, None),
         })
         .collect()
 }
 
-/// What a pane's chain gave the record.
-struct Seen {
-    health: Health,
-    session: Option<String>,
+/// What the harness gives a record, the part in which an OpenCode pane's record and an adopted
+/// Claude Code pane's differ (#831); [`record`] takes the rest from the files and the join.
+pub(super) struct HarnessPart {
+    pub harness: HarnessInfo,
+    pub session: Option<String>,
+    /// Whether the record keeps `pane.env`'s `OC_DEFAULT_AGENT` (OpenCode), or has no agent
+    /// (Claude Code, whose relaunch refuses one).
+    pub keeps_agent: bool,
+    pub command: Option<Argv>,
 }
 
-/// Join one pane: its findings, its row and (when it has no problem) its record. `chain` is
-/// what the pane's chain observed, `None` when it did not finish.
+/// Join one OpenCode pane: its findings, its row and (when it has no problem) its record.
+/// `chain` is what the pane's chain observed, `None` when it did not finish.
 fn assess(context: &Context<'_>, files: &PaneFiles, chain: Option<&Chain>) -> Outcome {
     let name = &files.name;
-    let mut findings = files.problems.clone();
-    let herdr = join(context, name, &mut findings);
-    let port = files.launcher.as_ref().map(|entry| entry.port);
+    let (mut findings, herdr) = begin(context, files);
+    if let Some(entry) = files.launcher.as_ref().filter(|entry| entry.port.is_none()) {
+        let message = format!("{} has no port", entry.about);
+        findings.push(Finding::about(name, ImportFinding::SourceMissing, message));
+    }
+    let port = files.launcher.as_ref().and_then(|entry| entry.port);
     let (health, listed) = observations(name, port, chain, &mut findings);
     let session = session_of_record(name, port, &files.sessions, listed, &mut findings);
     let command = command_of(files, &mut findings);
+    let part = port.map(|port| HarnessPart {
+        harness: HarnessInfo {
+            kind: HarnessKind::Opencode,
+            port: Some(port),
+            pid: None,
+            health,
+        },
+        session,
+        keeps_agent: true,
+        command,
+    });
+    finish(context, files, herdr, findings, part)
+}
+
+/// The start of every join: the problems the files met, then steps 1 and 2 (the Herdr pane and
+/// its position).
+pub(super) fn begin(context: &Context<'_>, files: &PaneFiles) -> (Vec<Finding>, Option<HerdrPane>) {
+    let mut findings = files.problems.clone();
+    let herdr = join(context, &files.name, &mut findings);
+    (findings, herdr)
+}
+
+/// The end of every join: step 5 (the role), the row, and the record built from `part` when
+/// the pane has a Herdr pane and no problem.
+pub(super) fn finish(
+    context: &Context<'_>,
+    files: &PaneFiles,
+    herdr: Option<HerdrPane>,
+    findings: Vec<Finding>,
+    part: Option<HarnessPart>,
+) -> Outcome {
+    let name = &files.name;
     let role = if context.orchestrators.contains(name) {
         PaneRole::Orchestrator
     } else {
@@ -162,10 +212,10 @@ fn assess(context: &Context<'_>, files: &PaneFiles, chain: Option<&Chain>) -> Ou
     };
     let pos = herdr.as_ref().map(|pane| pane.grid);
     let blocked = findings.iter().any(|f| f.level() == Level::Problem);
-    let seen = Seen { health, session };
     let record = herdr
         .filter(|_| !blocked)
-        .and_then(|herdr| record(context, files, herdr, seen, role, command));
+        .zip(part)
+        .and_then(|(herdr, part)| record(context, files, herdr, role, part));
     let row = PaneRow {
         name: name.clone(),
         action: if record.is_some() {
@@ -185,7 +235,7 @@ fn assess(context: &Context<'_>, files: &PaneFiles, chain: Option<&Chain>) -> Ou
 }
 
 /// The Herdr panes in the run's session that carry `name` as their label.
-fn labelled<'s>(context: &Context<'s>, name: &PaneName) -> Vec<&'s HerdrPane> {
+pub(super) fn labelled<'s>(context: &Context<'s>, name: &PaneName) -> Vec<&'s HerdrPane> {
     context
         .snapshot
         .iter()
@@ -383,17 +433,16 @@ fn command_of(files: &PaneFiles, findings: &mut Vec<Finding>) -> Option<Argv> {
     }
 }
 
-/// The record a real run writes for `files`: what the files and this run's observations
-/// give, `generation` 0, in the profile `fleet`, with nothing observed yet (`at` 0: the first
-/// doctor pass fills it). `None` when `pane.env` or the launcher entry was not read whole
-/// (a problem then says why).
+/// The record a real run writes for `files`: what the files, the harness `part` and this run's
+/// observations give, `generation` 0, in the profile `fleet`, with nothing observed yet (`at`
+/// 0: the first doctor pass fills it). `None` when `pane.env` or the launcher entry was not
+/// read whole (a problem then says why).
 fn record(
     context: &Context<'_>,
     files: &PaneFiles,
     herdr: HerdrPane,
-    seen: Seen,
     role: PaneRole,
-    command: Option<Argv>,
+    part: HarnessPart,
 ) -> Option<Pane> {
     let (env, launcher) = (files.env.as_ref()?, files.launcher.as_ref()?);
     Some(Pane {
@@ -406,13 +455,8 @@ fn record(
             cwd: launcher.cwd.clone(),
             herdr_api_version: Some(context.version.to_owned()),
         },
-        harness: HarnessInfo {
-            kind: HarnessKind::Opencode,
-            port: Some(launcher.port),
-            pid: None,
-            health: seen.health,
-        },
-        session_of_record: seen.session,
+        harness: part.harness,
+        session_of_record: part.session,
         role,
         hold: Hold::None,
         last_observed: LastObserved {
@@ -422,10 +466,10 @@ fn record(
         },
         profile: Some(context.fleet.clone()),
         model: env.model.clone(),
-        opencode_agent: env.opencode_agent.clone(),
+        opencode_agent: env.opencode_agent.clone().filter(|_| part.keeps_agent),
         env: env.env.clone(),
         context: env.context,
-        command,
+        command: part.command,
         probe: PaneProbe {
             check: None,
             expect: Vec::new(),

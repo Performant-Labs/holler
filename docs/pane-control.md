@@ -24,13 +24,14 @@ observed, never inferred from files (I6).
 
 **The boundary.** The rule is about registry panes, the panes with a record. A record's harness kind is `opencode` (an
 OpenCode server and its TUI) or, since issue [#831](https://github.com/Performant-Labs/holler/issues/831), `claude` (one Claude Code process that
-`holler pane launch PANE --harness claude` started, section 2). A pane that no record names (in the fleet, a Claude Code
+`holler pane launch PANE --harness claude` started, or that the import adopted with `--adopt-claude-code`, section
+2). A pane that no record names (in the fleet, a Claude Code
 pane set up by hand) is outside the rule: no `holler pane` verb restarts it, and for such a Claude Code pane
-`scripts/pane-restart` is still the way to restart it, now and after the cutover's sign-off. Adopting those panes into
-the registry will be a re-run of the import with `--adopt-claude-code`, the last step of #831 (section 12). The import
-(`pane import`) creates no record for a pane whose files name another harness (the finding `harness-not-opencode`), and
-by default none for a pane whose tmux session has a foreground process named `claude`, a Claude Code pane (the finding
-`harness-claude-code`, sections 3 and 10). A Herdr pane that no record names is **unmanaged**, a state that is observed
+`scripts/pane-restart` is still the way to restart it until it is adopted. A re-run of the import with
+`--adopt-claude-code` adopts those panes into the registry (#831, sections 3 and 10), after which `holler pane relaunch
+PANE` restarts each under Holler. The import (`pane import`) creates no record for a pane whose files name another
+harness (the finding `harness-not-opencode`), and by default none for a pane whose tmux session has a foreground process
+named `claude`, a Claude Code pane (the finding `harness-claude-code`, sections 3 and 10). A Herdr pane that no record names is **unmanaged**, a state that is observed
 and never stored:
 `holler pane list` over the whole registry shows it in a table of its own (section 4), and `holler pane get PANE` shows it
 when PANE is its label or its Herdr pane id. A verb that acts on a pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
@@ -78,9 +79,9 @@ holler pane launch demo-beta --herdr-session demo --workspace demo --grid r1c2 -
 - **The prompt verbs.** `holler interrupt --pane NAME` on a Claude Code pane relaunches it on its session of record (the
   operator's decision: no keypress, and a signal would end the process), dropping the turn in flight; with text it is
   refused `interrupt-text-unsupported`, and `holler answer --pane NAME CHOICE` is refused `answer-unsupported`.
-  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: no body drives its session until
-  [#850](https://github.com/Performant-Labs/holler/issues/850) (section 12), so it is refused `pane-not-driven`, and so
-  is `holler pane reset PANE --first TEXT`.
+  `holler say --pane NAME TEXT` and `holler pane reset PANE --first TEXT` reach a Claude Code pane through its body (a
+  `[[session]]` row the operator writes from the pane's record, ADR 0014 points 7 to 11 and the README's "A Claude Code
+  pane"; nothing here starts it), and a switch or a reset re-points that body (ADR-0021 section 15, item 19). With no body running they are refused `pane-not-driven`.
 - A pane's harness kind is never changed: `relaunch` with another `--harness`, or `profile apply` of a spec that names
   another harness for a recorded pane, is refused `harness-change-refused`. Close the pane and launch it again instead.
 
@@ -147,8 +148,8 @@ session**, and a mismatch is not answered the same way by every verb:
 
 ## 3. The verbs
 
-`holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `park`, `unpark`, `close`, `doctor`
-and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
+`holler pane` has `list`, `get`, `watch`, `launch`, `relaunch`, `switch`, `reset`, `compact`, `park`, `unpark`, `close`,
+`doctor` and `import`. `holler profile` has `create`, `delete`, `list`, `show`, `apply`, `rename`, `export` and `import`.
 
 Each verb's `--help` is the full reference for its flags; this section names the flags that change what it does.
 Two flag groups are shared:
@@ -163,8 +164,8 @@ Two flag groups are shared:
 **Exit codes.** Every verb ends with 0 on success, or with the class of its error's code: 2 usage, 3 refusal, 1 runtime
 failure (section 9). Every verb can answer `usage`, `unavailable`, `timeout` and `store-corrupt`; the codes beyond those
 are the verb's row of [ADR-0021 section 9](adr/ADR-0021.md#9-failure-taxonomy-and-the-cli-output), and each subsection
-below names the main ones. The verbs that act on an existing pane (`relaunch`, `switch`, `reset`, `park`, `unpark`,
-`close`) refuse an unmanaged pane, named by its label or its Herdr pane id, with the open code `pane-unmanaged` (3)
+below names the main ones. The verbs that act on an existing pane (`relaunch`, `switch`, `reset`, `compact`, `park`,
+`unpark`, `close`) refuse an unmanaged pane, named by its label or its Herdr pane id, with the open code `pane-unmanaged` (3)
 where they would otherwise say `pane-not-found` (section 1). `doctor`, `profile apply` and `pane import` have rules of
 their own, given in their subsections.
 
@@ -285,8 +286,8 @@ holler pane reset demo-alpha --first "Read the brief and start."
 Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
 an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. The pane's body is re-pointed to the new
 session and DRIVEN recorded as for `switch`. A Claude Code pane is reset by a relaunch on a fresh session id, refused as
-`switch` is (`session-holds-permission` included); `--first` on a Claude Code pane is refused `pane-not-driven` until a
-body drives it (#850).
+`switch` is (`session-holds-permission` included); `--first` on a Claude Code pane goes through its body as on any pane,
+and is refused `pane-not-driven` with none.
 
 **`--first` goes through the hub's gate (#839).** Before anything moves, the hub is asked, without sending, whether it
 would admit the first message: a parked pane (`pane-parked`), a pane whose body's session is held (`session-held`, which
@@ -297,6 +298,32 @@ and the record as it was. So `--first` needs a body attached to the pane's serve
 follow as `holler say --pane PANE TEXT`. After the record, the message is queued through the hub, accepted and not waited
 for. If the hub refuses it then (the pane was parked or held in between), the run fails with that code, and the message
 says the session was created, shown and recorded but the first message did not land.
+
+### `holler pane compact PANE`
+
+Compact the context of a pane's session of record through its harness's API (#878), never by typing `/compact` into the
+TUI (I4). The compaction runs on the model the pane's own OpenCode server config pins (`agent.compaction.model`, which
+`scripts/pane-restart` writes); the verb has no model flag, and takes only `--profile` (scoping) and `--format`.
+
+```bash
+holler pane compact demo-alpha
+```
+
+Text prints `compacted demo-alpha: 90000 -> 12000 tokens`; JSON's `data` is `{"pane", "session", "tokens_before",
+"tokens_after"}`. Both counts are read from the harness, the second after the act. It exits 0 only when the context shrank;
+a compaction that left it as large or larger is `unavailable` (1), whose message says the context did not shrink and names
+both counts. Nothing is retried, and nothing is recorded in the registry. A compaction is a model call: the verb prints
+nothing until it ends, at most 120 s for an OpenCode pane.
+
+Refused (3), with nothing sent to a model: `pane-parked`, `pane-unhealthy` and `pane-shown-driven-mismatch` as the record
+says (the refusals of a prompt to the pane), `session-not-found` for a pane with no session of record, `server-unhealthy` (relaunch
+it first), `session-busy`, `session-holds-question` or `session-holds-permission` while the session is not idle (try again
+once it is), `compact-model-unpinned` when the pane's server config pins no compaction model, and `compact-unsupported`
+for a Claude Code pane, which cannot be compacted this way (#878's spike found that `/compact` sent over its inbox does not compact). The orchestrator's pane is not
+refused: compaction keeps the session.
+
+The OpenCode side is written from OpenCode 1.19.0's API document and run against a real server only on OpenCode 1.18.35 (#888), not 1.19.0: it asks
+`POST /session/:id/summarize` and reads the context's size from the session's last assistant message's token counts.
 
 ### `holler pane park --reason TEXT --release-when WHEN`
 
@@ -348,11 +375,11 @@ Adopt the panes the old launcher runs into the registry, as the profile `fleet` 
 `holler pane import --from STATE_ROOT --herdr-session NAME [--launcher FILE] [--orchestrator PANE] [--dry-run] [--adopt-claude-code]`:
 `--launcher FILE` names the launcher table (default `STATE_ROOT/launcher.toml`), `--orchestrator PANE` (repeatable)
 names the orchestrator's pane, since a role is never read from a name, and `--dry-run` reports and writes nothing.
-`--herdr-session` is declared optional and is required at run time (`usage` without it). `--adopt-claude-code` would
-also adopt the Claude Code panes the import leaves alone (`harness-claude-code`); until the adoption step of
-[#831](https://github.com/Performant-Labs/holler/issues/831) lands (ADR-0021 section 15, item 17) it is refused with
-`usage`, in a dry run too. The import adopts what is running: it never starts, stops, types into or moves anything, and
-deletes nothing from the source files.
+`--herdr-session` is declared optional and is required at run time (`usage` without it). `--adopt-claude-code` also
+adopts the Claude Code panes the import otherwise leaves alone (`harness-claude-code`), and lets a run extend an existing
+profile `fleet` (issue [#831](https://github.com/Performant-Labs/holler/issues/831), ADR-0021 section 15, item 17; see
+"Adopting the Claude Code panes" below). The import adopts what is running: it never starts, stops, types into or moves
+anything, and deletes nothing from the source files.
 
 ```bash
 holler pane import --from /srv/fleet-state --herdr-session demo --orchestrator demo-mo --dry-run
@@ -381,6 +408,11 @@ run is refused), `warning` (the pane is recorded without what the finding names)
 | `session-not-found` | warning | The files agree on a session the pane's healthy server does not have. |
 | `command-not-argv` | warning | The launcher table gives the command as a string: the pane is recorded without one. |
 | `ignored-entry` | info | A directory of the state root that holds none of the pane files. |
+| `claude-code-adopted` | info | With `--adopt-claude-code`: the pane, whose tmux session runs Claude Code, is adopted with the Claude Code harness. The message names the next step, `holler pane relaunch NAME`. |
+| `claude-process-unmatched` | problem | With `--adopt-claude-code`: no process of the pane's tmux session is one Claude Code lists, more than one is, or the one it lists holds no session. The pane is not adopted on a guess. |
+| `claude-login-env` | problem | With `--adopt-claude-code`: the pane's `pane.env` sets a variable that changes Claude Code's login (the message names it, never its value). |
+| `claude-model-not-anthropic` | warning | With `--adopt-claude-code`: the provider of the pane's `OC_MODEL` is not `anthropic`. The pane is adopted with that model, which a relaunch passes to `claude` as it is. |
+| `spec-kind-differs` | warning | With `--adopt-claude-code` and an existing `fleet`: `fleet` already has a spec for the pane, of another harness kind. The spec is kept as it is, so `profile apply` reports the pane as differing. |
 
 Six of these codes are also spelled as something else: `session-not-found` and `command-not-argv` are closed error codes
 (section 9), and `tmux-session-missing`, `observe-failed`, `server-wedged` and `server-down` are doctor kinds (section 5);
@@ -391,8 +423,31 @@ Its exit codes follow its own row of ADR-0021 section 9. A dry run exits 0 with 
 real run exits 0 when it wrote the plan or had nothing to write; 3 with `import-blocked` (an open code: a pane has a
 problem, and nothing is written) or `profile-exists` (section 10); 2 with `usage`; otherwise by the class of the error
 that stopped it. `usage` comes before any file is read or any port is called, so a dry run gets it too: a missing
-`--herdr-session`, a `--from` that is not a directory, an `--orchestrator` that names no pane directory, or
-`--adopt-claude-code` until #831's adoption step lands.
+`--herdr-session`, a `--from` that is not a directory, or an `--orchestrator` that names no pane directory.
+
+**Adopting the Claude Code panes (`--adopt-claude-code`, #831).** A pane the import would leave alone as
+`harness-claude-code` gets a record instead, with the harness kind `claude`: the pid of its `claude` process, no port,
+health `unknown`, and the session that process holds, read from Claude Code's own listing (`claude agents --json`) by
+pid, never from the old `last-session` files. tmux names only a pane's first process, the shell a person typed `claude`
+into, so the import asks the host for the pids of each tmux pane's foreground process group
+(`HostPort::foreground_pids`, section 10) and Claude Code which of them it knows, in order, stopping at the second. The
+record takes the model, effort, context ceilings and other variable names from `pane.env` as written, the directory from
+the launcher table (whose `port` such a pane may omit), no command (Holler cannot see its argv) and no agent (a relaunch
+refuses one for Claude Code, so `OC_DEFAULT_AGENT` is ignored). None of the OpenCode checks applies to it: no server is
+asked, and the session files and the launcher's `command` are not read. A pane needs a single Herdr label to be adopted;
+without one it is `pane-unlabelled` or `pane-label-ambiguous` and nothing more is read. A pane whose `sessions.toml`
+names `claude` stays `harness-not-opencode` (`skipped`), with the switch too: only a pane the classification finds
+running Claude Code is adopted. With the switch, a run whose profile `fleet` exists extends it, Claude Code and OpenCode
+panes alike: the records are written first, then their specs are added to `fleet` by one compare-and-swap at the
+generation the run read (a `fleet` changed since is `generation-conflict`, and the records are deleted again); a dry run
+says `profile fleet (fleet) to extend: N specs added, M total`. An existing spec for a recorded pane is kept as it is.
+Without the switch an existing `fleet` is still `profile-exists`. The undo of an extension deletes only the records it
+wrote and never touches `fleet`, and it relies on the store keeping a record as written apart from its generation (the
+record it deletes must equal the one the run planned, so another actor's record of the same name is kept). An adopted
+pane's process was not started by Holler, so a message sent to it is held (`inbound-held`) and `pane doctor` shows it
+waiting until `holler pane relaunch NAME` restarts it under Holler on the same session. A process restarted or
+`/clear`ed between the dry run and the real run keeps the session the plan read; `pane doctor` then reports
+`shown-driven-mismatch`.
 
 ### `holler profile create NAME`
 
@@ -593,9 +648,8 @@ named `hj-c1r2` is a name, and it sits at `r2c1`), PROFILE, HEALTH, SHOWN and DR
 the same cells `pane list` prints for the same record, and an empty cell is `-`; a session with no pane (the io body, an
 alpha or beta agent) shows `-` in all six. A roster row is joined to a pane when the part of its name before the first
 `/` is the pane's name. The rows are the hub's, one per session a body serves, so a pane that no body serves has no row:
-a Claude Code pane has none until a body drives its session ([#850](https://github.com/Performant-Labs/holler/issues/850)),
-and `pane list` shows it meanwhile. The roster calls no adapter and shows no unmanaged pane (`pane list` does), and it
-reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
+a Claude Code pane has one once its body runs, and `pane list` shows it always. The roster calls no adapter and shows no
+unmanaged pane (`pane list` does), and it reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
 DRIVEN are both known and differ, the first line of the output says so:
 `2 pane(s) show a different session than the hub drives: demo-alpha, demo-beta`.
 `holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
@@ -928,7 +982,8 @@ change.
 are always a refusal, exit 3: among them `agent-unusable` and `agent-key-invalid` (section 2), `orchestrator-not-relaunched`
 and `spec-not-launchable` of `profile apply` (section 6), `import-blocked` of `pane import` (section 3), and `pane-exists`,
 `grid-occupied`, `port-in-use`, `grid-unreachable`, `orchestrator-pane`, `server-unhealthy`, `session-of-other-pane`,
-`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). A Claude Code pane (#831,
+`session-busy`, `session-holds-question`, `pane-parked` and `pane-unmanaged` (section 1). `pane compact` (#878,
+section 3) adds `compact-unsupported` and `compact-model-unpinned`. A Claude Code pane (#831,
 section 2) adds `port-policy-unsupported`, `harness-change-refused`, `claude-login-env-refused`, `process-in-use`,
 `agent-unsupported`, `harness-dialog-open`, `session-holds-permission`, `interrupt-text-unsupported`,
 `answer-unsupported`, and the harness's own `session-mismatch` and `inbound-held` for a message it did not run. DRIVEN
@@ -963,6 +1018,14 @@ One fact about the live fleet comes first; it is a fact, not a step:
   pane is taken for OpenCode when its `claude` has exited (it shows its shell), is not in the foreground (a wrapper
   script runs it, or it is suspended) or was started under another name. It is a default, not a proof; step 1 checks it,
   and [ADR-0021 section 13](adr/ADR-0021.md#13-migration-from-the-launchers-files) ("Decided (#835)") is the contract.
+- **Those Claude Code panes are adopted by a re-run with `--adopt-claude-code` (#831).** The same import, run again with
+  the switch after the main import, records each pane it leaves alone as a Claude Code pane and adds its spec to the
+  existing `fleet` (section 3, "Adopting the Claude Code panes"). Its pid comes from a host read new with #831,
+  `HostPort::foreground_pids`: the pids of the foreground process group of each tmux pane of the session (tmux's
+  `#{pane_tty}`, then one `ps -t TTY -o pid= -o pgid= -o tpgid=` per pane, numbers only), so the `claude` a person typed
+  into a shell is found and the shell is not. Each pid is matched against Claude Code's own listing; the report ends with
+  `holler pane relaunch NAME` for each adopted pane. A host whose `ps` has no `-t` answers `unavailable`, and the pane is
+  `harness-unreadable`, never adopted on a guess.
 
 The steps, in order:
 
@@ -1044,9 +1107,11 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 ```
 
 - **After the sign-off** only the script's OpenCode path is retired, in a later story, not this one. Its Claude Code path
-  (issue #784) stays: a Claude Code pane set up by hand is not in the registry, no verb restarts it, and
+  (issue #784) stays: a Claude Code pane set up by hand is not in the registry until the import adopts it
+  (`--adopt-claude-code`, section 3), no verb restarts it until then, and for such a Claude Code pane
   `scripts/pane-restart` stays its way. Claude Code panes are not part of the 7-day criterion. A Claude Code pane that
-  `holler pane launch PANE --harness claude` started has a record, and `holler pane relaunch PANE` restarts it.
+  `holler pane launch PANE --harness claude` started, or that the import adopted, has a record, and `holler pane
+  relaunch PANE` restarts it.
 - **What the script does to a registry pane.** It takes that pane out of the new regime: it rewrites `pane.env` and
   starts a TUI on a new session that is no pane's session of record, and the record's model and session of record go
   stale. The next `doctor` reports what it observes about the pane, by the kinds of section 5, depending on where the
@@ -1074,9 +1139,8 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 Deferred, so not documented here as existing; none of them is available:
 
 - applying a pane's model, effort and environment to its harness server (#829);
-- adopting the Claude Code panes the import leaves alone (#831's last step, ADR-0021 section 15, item 17; until it lands,
-  `--adopt-claude-code` is refused);
-- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - recreating the Herdr workspace from the stored profiles (#666);
-- a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet).
+- a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet);
+- compacting a Claude Code pane's context (the `pane compact` verb answers it `compact-unsupported`, since #878's spike found that
+  `/compact` through its inbox does not compact).

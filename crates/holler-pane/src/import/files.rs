@@ -21,8 +21,9 @@ pub struct PaneFiles {
     /// What `pane.env` gives; `None` when it is missing, or could not be read whole (a
     /// problem in [`PaneFiles::problems`] says which).
     pub env: Option<EnvValues>,
-    /// The pane's entry in the launcher table; `None` when it, or its port or cwd, is
-    /// missing, or the table could not be read (a problem says which).
+    /// The pane's entry in the launcher table; `None` when it or its cwd is missing, or the
+    /// table could not be read (a problem says which). An entry without a port is kept
+    /// (#831): only an OpenCode pane needs one, which the join says (`source-missing`).
     pub launcher: Option<LauncherEntry>,
     /// The three files that name a session.
     pub sessions: SessionFiles,
@@ -47,7 +48,11 @@ pub struct EnvValues {
 /// One pane's entry in the launcher table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LauncherEntry {
-    pub port: u16,
+    /// From 1 to 65535; `None` when the entry has none, which only a pane that runs Claude Code
+    /// may omit (#831).
+    pub port: Option<u16>,
+    /// The entry, as a finding about it names it (`the entry for P in the launcher table F`).
+    pub about: String,
     /// An absolute path.
     pub cwd: String,
     pub command: LauncherCommand,

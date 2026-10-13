@@ -68,6 +68,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use holler_pane::HarnessPort;
 use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 use holler_proto::{Mode, Presence, SessionAd, SessionName, SessionState, WireError};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -209,8 +210,18 @@ impl SessionManager {
     /// Spawn one task per session in `registry`. Every session starts `idle`
     /// with no driver up yet — the first `Prompt`/`Replace` it receives
     /// spawns the real `AcpDriver` (spawn-mode session config; see the
-    /// module's own #188 dependency).
+    /// module's own #188 dependency). A body started so has no Claude Code
+    /// harness: its rows that attach to a Claude Code process are refused at
+    /// their attach ([`Self::start_with`]).
     pub fn start(registry: &SessionRegistry) -> Self {
+        Self::start_with(registry, None)
+    }
+
+    /// [`Self::start`] with `claude`, the Claude Code harness the rows that
+    /// attach to a Claude Code process drive (#850, ADR 0014 point 8):
+    /// `holler body run` builds it as the pane wiring does and hands it here,
+    /// and every such row of the body shares it.
+    pub fn start_with(registry: &SessionRegistry, claude: Option<Arc<dyn HarnessPort>>) -> Self {
         // Capacity is advisory (lossy) for a broadcast channel: a lagging
         // subscriber misses old presence-changed notices, never blocks a
         // session task's own send. 64 headroom for however many
@@ -231,7 +242,8 @@ impl SessionManager {
                 presence.clone(),
                 presence_tx.clone(),
                 name.clone(),
-            );
+            )
+            .with_claude(claude.clone());
             let join = tokio::spawn(task::run(rx, inner));
             sessions.insert(
                 name.clone(),
@@ -334,8 +346,8 @@ impl SessionManager {
     /// (`session/rebind`, issue #839): the session task attaches the new id
     /// and swaps it in only if that finishes before `deadline`, and answers
     /// every refusal itself (a spawn session, a busy one, an id the endpoint
-    /// does not have, a deadline that passed). Only the HTTP attach driver
-    /// re-points.
+    /// does not have, a deadline that passed). An attach driver re-points:
+    /// the HTTP one, and the one of a Claude Code process (#850).
     pub async fn rebind(
         &self,
         name: &SessionName,

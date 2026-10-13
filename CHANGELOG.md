@@ -8,13 +8,76 @@ fills this file in at release time.
 ## [Unreleased]
 
 ## [0.5.0] - 2026-10-13
-<!-- DRAFT, refreshed 2026-10-12 against origin/main ef881fc. Entries below the epic summary and PENDING list are main's [Unreleased] verbatim (each story wrote its own). Merged since the earlier draft: #803 (PR 866), #647 part 2 (872), #839 (863), #844 (870), #845 (873, Part of; follow-up #875), #846 (868; follow-up #869), #847 (865), #848 (867), #696 (874; follow-up #877), #853 (861), #835 (860); PR 871 (pipeline pin) is tooling and omitted. The story index (one line per issue) is in the release drafts, not here. Resolve every [PENDING #N] before release. -->
+<!-- DRAFT, refreshed 2026-10-12 against origin/main. The entries below are main's [Unreleased] entries (each story wrote its own), under the epic summary and the story index. PR 871 (pipeline pin), the release and handoff docs, PR 887 (docs, open) and PR 889 (a test fix, open) are not user-facing and are omitted. -->
 
 ### Enhancements
 - **Pane control (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): Holler becomes the one control plane for panes.** `holler pane` (list, get, watch, launch, relaunch, switch, reset, park, unpark, close, doctor, import) and `holler profile` (create, delete, list, show, apply, rename, export, import) now run against a hub-side pane and profile registry and real Herdr, tmux and OpenCode adapters; they were `not-implemented` stubs in 0.4.0. Every verb takes `--format=json` (one envelope, exit 0/1/2/3). Guide: [`docs/pane-control.md`](docs/pane-control.md). The detailed entries follow.
-- [PENDING #850] A body driver for a Claude Code pane, so `holler say --pane` reaches it and the roster has a row for it ([#850](https://github.com/Performant-Labs/holler/issues/850); no PR yet; #839 has merged). TODO(PR number)
-- [PENDING #831] Adopting existing Claude Code panes into the registry (`pane import --adopt-claude-code`) and the real-binary test; [#831](https://github.com/Performant-Labs/holler/issues/831) stays open until then (the harness is merged: PR 857, and PR 860 for the import guard).
+- Stories merged since 0.4.0 under epic [#633](https://github.com/Performant-Labs/holler/issues/633) (the main ones; each has its entry below), issue then PR:
+  - Claude Code pane body, `say --pane` reaches it: [#850](https://github.com/Performant-Labs/holler/issues/850), [PR 880](https://github.com/Performant-Labs/holler/pull/880).
+  - Claude Code harness for panes, launch and drive: [#831](https://github.com/Performant-Labs/holler/issues/831), [PR 857](https://github.com/Performant-Labs/holler/pull/857), [PR 883](https://github.com/Performant-Labs/holler/pull/883), [PR 886](https://github.com/Performant-Labs/holler/pull/886).
+  - `pane import` leaves Claude Code panes alone: [#835](https://github.com/Performant-Labs/holler/issues/835), [PR 860](https://github.com/Performant-Labs/holler/pull/860).
+  - `holler pane compact` (OpenCode only; Claude Code stays `compact-unsupported`): [#878](https://github.com/Performant-Labs/holler/issues/878), [PR 882](https://github.com/Performant-Labs/holler/pull/882).
+  - `holler pane doctor`: `unattached` and `agent-cannot-dispatch` (part 2): [#647](https://github.com/Performant-Labs/holler/issues/647), [PR 872](https://github.com/Performant-Labs/holler/pull/872).
+  - `pane switch` after `relaunch` re-sends `select_session` (follow-up #875): [#845](https://github.com/Performant-Labs/holler/issues/845), [PR 873](https://github.com/Performant-Labs/holler/pull/873).
+  - OpenCode TUI query forces UTF-8 on its tmux client: [#844](https://github.com/Performant-Labs/holler/issues/844), [PR 870](https://github.com/Performant-Labs/holler/pull/870).
+  - `profile apply` builds a whole grid; a refused step exits 3: [#853](https://github.com/Performant-Labs/holler/issues/853), [PR 861](https://github.com/Performant-Labs/holler/pull/861).
+  - DRIVEN follows the session of record; `reset --first` through the hub's gate: [#839](https://github.com/Performant-Labs/holler/issues/839), [PR 863](https://github.com/Performant-Labs/holler/pull/863).
+  - setup wizard builds registry panes through `holler pane` and `holler profile apply`: [#803](https://github.com/Performant-Labs/holler/issues/803), [PR 866](https://github.com/Performant-Labs/holler/pull/866).
+  - one bounded subprocess runner (follow-up #877): [#696](https://github.com/Performant-Labs/holler/issues/696), [PR 874](https://github.com/Performant-Labs/holler/pull/874).
+  - test only: one `verb_harness` module for the LinkedHost fakes (follow-up #869): [#846](https://github.com/Performant-Labs/holler/issues/846), [PR 868](https://github.com/Performant-Labs/holler/pull/868).
+  - test only: `last_seen` test no longer races presence frames: [#847](https://github.com/Performant-Labs/holler/issues/847), [PR 865](https://github.com/Performant-Labs/holler/pull/865).
+  - test only: wizard rename scan skips `docs/handoffs/`: [#848](https://github.com/Performant-Labs/holler/issues/848), [PR 867](https://github.com/Performant-Labs/holler/pull/867).
+  - `holler --version` prints the commit: [#851](https://github.com/Performant-Labs/holler/issues/851), [PR 854](https://github.com/Performant-Labs/holler/pull/854).
+  - `holler profile` rename, export, import; `profile-drift` finding: [#665](https://github.com/Performant-Labs/holler/issues/665), [PR 858](https://github.com/Performant-Labs/holler/pull/858).
+  - roster shows pane, SHOWN and DRIVEN: [#648](https://github.com/Performant-Labs/holler/issues/648), [PR 856](https://github.com/Performant-Labs/holler/pull/856).
+  - `pane list` shows unmanaged panes: [#832](https://github.com/Performant-Labs/holler/issues/832), [PR 836](https://github.com/Performant-Labs/holler/pull/836), [PR 840](https://github.com/Performant-Labs/holler/pull/840).
+  - `pane import` adopts the launcher's panes: [#650](https://github.com/Performant-Labs/holler/issues/650), [PR 827](https://github.com/Performant-Labs/holler/pull/827).
+  - `holler profile apply`: [#664](https://github.com/Performant-Labs/holler/issues/664), [PR 824](https://github.com/Performant-Labs/holler/pull/824).
+  - OpenCode adapter applies and verifies the pane's agent: [#642](https://github.com/Performant-Labs/holler/issues/642), [PR 823](https://github.com/Performant-Labs/holler/pull/823), [PR 705](https://github.com/Performant-Labs/holler/pull/705).
+  - `--agent` on launch, relaunch and `profile show`: [#644](https://github.com/Performant-Labs/holler/issues/644), [PR 822](https://github.com/Performant-Labs/holler/pull/822).
+  - operator guide for `holler pane`, cutover and rollback: [#652](https://github.com/Performant-Labs/holler/issues/652), [PR 849](https://github.com/Performant-Labs/holler/pull/849).
+  - wizard Stage 1 asks which Herdr session to build in: [#838](https://github.com/Performant-Labs/holler/issues/838), [PR 841](https://github.com/Performant-Labs/holler/pull/841).
+  - setup wizard renamed `/setup-wizard` to `/herdr-setup`: [#820](https://github.com/Performant-Labs/holler/issues/820), [PR 820](https://github.com/Performant-Labs/holler/pull/820).
 - Test only, no user-visible change (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): the four LinkedHost fakes in `holler-cli`'s tests are one `verb_harness` module ([#846](https://github.com/Performant-Labs/holler/issues/846), [PR 868](https://github.com/Performant-Labs/holler/pull/868)); the remote-admin `last_seen` test no longer races the body's presence frames ([#847](https://github.com/Performant-Labs/holler/issues/847), [PR 865](https://github.com/Performant-Labs/holler/pull/865)); the wizard rename scan skips `docs/handoffs/` as `docs_cli_test` does ([#848](https://github.com/Performant-Labs/holler/issues/848), [PR 867](https://github.com/Performant-Labs/holler/pull/867)).
+- Pane control, Claude Code panes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import --adopt-claude-code` adopts the fleet's existing Claude Code panes into the registry
+  ([#831](https://github.com/Performant-Labs/holler/issues/831)), where it was refused (`usage`) before. A pane whose tmux
+  session runs `claude` gets a record with the Claude Code harness: the pid of its process and the session it holds, read
+  from Claude Code's own listing by pid, health `unknown`, and the model, ceilings and variable names of its `pane.env`
+  (no agent, no command). The pid comes from a new read-only host method, `HostPort::foreground_pids`, which the tmux
+  adapter answers with each pane's tty and one `ps -t` per pane (numbers only), so a `claude` typed into a shell is found.
+  Nothing is adopted on a guess: no such process, more than one, no session, or a login variable in `pane.env` blocks the
+  pane, with five new findings (`claude-code-adopted`, `claude-process-unmatched`, `claude-login-env`,
+  `claude-model-not-anthropic`, `spec-kind-differs`). With the switch, an existing profile `fleet` is extended by one
+  compare-and-swap instead of `profile-exists`, and a failed extension deletes only its own records. The report ends with
+  `holler pane relaunch NAME` for each adopted pane. A launcher-table entry may omit `port` for such a pane.
+  [ADR 0021](docs/adr/ADR-0021.md) sections 2 and 15 (item 17) and
+  [`docs/pane-control.md`](docs/pane-control.md) sections 3 and 10 record it.
+- Pane control, a body for a Claude Code pane (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
+  [#850](https://github.com/Performant-Labs/holler/issues/850)): `holler say --pane NAME TEXT` and `holler pane reset
+  PANE --first TEXT` reach a Claude Code pane through the hub, with its holds and its pane gate in force. The pane's
+  body is an attach row of `holler body run` with `harness = "claude"` and the pane's session of record as
+  `session_id`, a UUID, and no endpoint (the README's "A Claude Code pane"; the operator writes it, the setup wizard
+  derives none). The body delivers through the Claude Code adapter that the pane verbs use (one frame to the process's
+  inbox socket, the process found by its session on every call) and follows the turn with `claude agents --json`; it
+  reads nothing the process prints, so `say` returns no reply text, and it has no in-place interrupt: a cancel in flight
+  is refused, naming `holler interrupt --pane NAME`, which relaunches the pane. A `switch` or a `reset` of a Claude Code
+  pane re-points its body to the new session and records DRIVEN, and `holler pane doctor` records DRIVEN for it and
+  reports a body that is behind. `holler body support claude` is a `PATH` lookup for such a row. No hub or wire change.
+  [ADR 0014](docs/adr/ADR-0014.md) points 7 to 11 and [ADR 0021](docs/adr/ADR-0021.md) sections 5 and 15 (items 9 and
+  19) record the contract.
+- Pane control, compaction (epic [#633](https://github.com/Performant-Labs/holler/issues/633)): `holler pane compact
+  PANE [--profile NAME]` compacts the context of a pane's session of record through the harness API, never by typing
+  `/compact` into its TUI ([#878](https://github.com/Performant-Labs/holler/issues/878)). It runs on the compaction model
+  the pane's own OpenCode server config pins (`agent.compaction.model`) and has no model flag: with no pin it is refused
+  `compact-model-unpinned` and nothing is sent. It prints the context's size before and after (`compacted PANE: BEFORE ->
+  AFTER tokens`, or `tokens_before` and `tokens_after` in JSON) and exits 0 only when the context shrank (1, naming both
+  counts, when it did not). A busy, question-holding or permission-waiting session is refused first, as are a parked,
+  unhealthy or mismatched pane. `HarnessPort` gains the default-armed `compact` (`compact-unsupported`, which a Claude Code
+  pane answers: the spike found that `/compact` sent over its inbox does not compact, so it stays unsupported); the OpenCode adapter asks `POST /session/:id/summarize` under its own 120 s
+  bound (`Timeouts::compact`), written from OpenCode 1.19.0's API document; the spike ran it against OpenCode 1.18.35 only ([#888](https://github.com/Performant-Labs/holler/issues/888)).
+  [ADR 0021](docs/adr/ADR-0021.md) section 8 ("Compaction") and decision 51 record it, and
+  [`docs/pane-control.md`](docs/pane-control.md) documents the verb.
 - The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
   `holler-pane` (`holler_pane::bounded`) instead of four private copies
   ([#696](https://github.com/Performant-Labs/holler/issues/696), epic
@@ -50,7 +113,7 @@ fills this file in at release time.
   first message of `holler pane reset --first` now goes through the hub's prompt path: a parked, held or unhealthy pane
   refuses it before anything moves (`pane-parked`, `session-held`, `pane-unhealthy`, `pane-shown-driven-mismatch`), and a
   pane no body drives refuses it (`pane-not-driven`; it worked through the harness before), a Claude Code pane included
-  until [#850](https://github.com/Performant-Labs/holler/issues/850) gives it a body. `control/say` gains an optional
+  until it has a body ([#850](https://github.com/Performant-Labs/holler/issues/850), below). `control/say` gains an optional
   `check_only`, and the hub's `not_connected` refusal of an offline body gains an optional `data.reason` of `offline`,
   which is how `say --pane` tells a pane no body drives from a turn that outlived its wait. This replaces the caution
   about `reset --first` on a parked or held pane in the #649 entry below. [ADR 0021](docs/adr/ADR-0021.md) section 11 records
@@ -71,7 +134,7 @@ fills this file in at release time.
   `holler pane launch PANE --harness claude --port-policy none` launches a pane whose harness is one interactive Claude
   Code process, recorded by its pid and with no port, and the pane verbs drive it
   ([#831](https://github.com/Performant-Labs/holler/issues/831); adopting the fleet's existing Claude Code panes is its
-  last step and waits for [#835](https://github.com/Performant-Labs/holler/issues/835)). The launch starts Claude Code on
+  last step, below). The launch starts Claude Code on
   a fresh session id with the seven environment variables that would override its login removed, so the process uses
   the login Claude Code holds (a spec that names one of them is refused `claude-login-env-refused`, and `holler pane
   doctor` reports `claude-login-missing` when that login is not the subscription's), accepts cross-session messages and
@@ -82,13 +145,10 @@ fills this file in at release time.
   decision, no keypress) restart it. `switch` and `reset` also refuse a pane waiting on a permission prompt
   (`session-holds-permission`), an interrupt with text is `interrupt-text-unsupported` and `answer --pane` is
   `answer-unsupported`. `holler pane doctor` reports two new findings, `pane-waiting` and `claude-login-missing`.
-  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet, and `holler roster`, whose rows are the sessions
-  that bodies serve, has no row for one: both need a body for its session
-  ([#850](https://github.com/Performant-Labs/holler/issues/850), after
-  [#839](https://github.com/Performant-Labs/holler/issues/839)). The new crate `holler-adapter-claude` implements the
-  harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`); every harness call is now keyed by an
-  endpoint, a port or a process; and `HostPort::foreground_commands` with the one Claude Code command rule is built to
-  #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
+  `holler say --pane NAME TEXT` reaches a Claude Code pane through its body (#850). The new crate
+  `holler-adapter-claude` implements the harness port (the binary is `HOLLER_CLAUDE_BIN`, else `claude` on `PATH`);
+  every harness call is now keyed by an endpoint, a port or a process; and `HostPort::foreground_commands` with the one
+  Claude Code command rule is built to #835's brief. [ADR 0021](docs/adr/ADR-0021.md) section 15 records the contract and what was built, and
   [`docs/pane-control.md`](docs/pane-control.md) documents the Claude Code pane.
 - Profiles can be renamed, exported and imported, and `holler pane doctor` reports a pane that drifted from its
   profile (epic [#633](https://github.com/Performant-Labs/holler/issues/633),
@@ -700,10 +760,9 @@ fills this file in at release time.
   The opt-in pane-integration scenario no longer retries its switch. [ADR 0021](docs/adr/ADR-0021.md) records the rule.
 
 ### Known Issues
-- A Claude Code pane cannot be spoken to or shown in the roster yet: `holler say --pane NAME` does not reach it and `holler roster` has no row for it; both need a body driver ([#850](https://github.com/Performant-Labs/holler/issues/850)). Adopting the fleet's existing hand-made Claude Code panes into the registry (`pane import --adopt-claude-code`) is refused until [#831](https://github.com/Performant-Labs/holler/issues/831) closes.
-- The Claude Code harness has never been run against a real `claude` binary: the hook's `$PPID` key, the inbox frame and the status values are unverified, and all fail closed. Do not put a Claude Code pane on a live fleet before that run ([#831](https://github.com/Performant-Labs/holler/issues/831)).
+- `holler pane compact` has been measured against OpenCode 1.18.35 only, not 1.19.0, and has follow-ups for its error text and wording ([#888](https://github.com/Performant-Labs/holler/issues/888)); a Claude Code pane cannot be compacted (`compact-unsupported`), since `/compact` over its inbox does not compact.
 - `pane launch`/`relaunch` record `--model`, `--effort` and environment names for an OpenCode pane but do not apply them to the harness server ([#829](https://github.com/Performant-Labs/holler/issues/829)).
-- `pane switch` right after `pane relaunch` can time out for several seconds until the TUI accepts `select-session`; retry after about 8 s ([#845](https://github.com/Performant-Labs/holler/issues/845)).
+- The fix for `pane switch` right after `pane relaunch` ([#845](https://github.com/Performant-Labs/holler/issues/845)) has not been measured against a real OpenCode 1.19.0 (its settle window, a hung request) ([#875](https://github.com/Performant-Labs/holler/issues/875)).
 - `holler profile apply`: a step that fails with a refusal-class code still exits 1, not 3 (a refused step exits 3 since #853) ([#826](https://github.com/Performant-Labs/holler/issues/826)).
 - A multi-question hold cannot answer one named question; `answer` answers the hold as a whole ([#862](https://github.com/Performant-Labs/holler/issues/862)).
 - Spawn-mode `interrupt` cancels the model turn but not a shell command already running; the next `say` blocks until it finishes ([#418](https://github.com/Performant-Labs/holler/issues/418)).
@@ -713,8 +772,7 @@ fills this file in at release time.
 - The remote admin channel has one credential type and no read-only/read-write split or rate limiting ([#616](https://github.com/Performant-Labs/holler/issues/616), [#617](https://github.com/Performant-Labs/holler/issues/617), [#618](https://github.com/Performant-Labs/holler/issues/618), [#619](https://github.com/Performant-Labs/holler/issues/619)).
 - `http_attach_driver`'s real permission/question wire shape has never been independently confirmed ([#365](https://github.com/Performant-Labs/holler/issues/365)).
 - Windows is not supported: the control-socket transport is Unix domain sockets end to end ([#378](https://github.com/Performant-Labs/holler/issues/378)).
-- Flaky tests that can fail an unrelated CI run: [#420](https://github.com/Performant-Labs/holler/issues/420), [#629](https://github.com/Performant-Labs/holler/issues/629), [#693](https://github.com/Performant-Labs/holler/issues/693), [#491](https://github.com/Performant-Labs/holler/issues/491).
-- Not yet done in the epic and so not in this release (see [PENDING] items above): the live cutover and soak ([#654](https://github.com/Performant-Labs/holler/issues/654)), the Herdr server on the hub's machine ([#655](https://github.com/Performant-Labs/holler/issues/655)), and recreating the workspace from profiles ([#666](https://github.com/Performant-Labs/holler/issues/666)); operator-run, they do not change the binary.
+- Not yet done in the epic and so not in this release: the live cutover and soak ([#654](https://github.com/Performant-Labs/holler/issues/654)), the Herdr server on the hub's machine ([#655](https://github.com/Performant-Labs/holler/issues/655)), and recreating the workspace from profiles ([#666](https://github.com/Performant-Labs/holler/issues/666)); operator-run, they do not change the binary.
 
 ## [0.4.0] - 2026-09-29
 

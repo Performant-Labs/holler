@@ -27,6 +27,14 @@
 //! (the session's shell is listed too), and it polls for the name within a bound, because
 //! right after `run` the foreground process can still be the adapter's `env`.
 //!
+//! `foreground_pids` (#831) answers the pids of the foreground process group of each live pane
+//! of the session: numbers only. Like `foreground_commands` it keeps two rules of a real
+//! session: it never asserts that the list is exactly one pid (a real session also lists its
+//! shell's group, or none), and it polls for the pid within a bound, because right after `run`
+//! the foreground process can still be the adapter's `env`. What it does assert is what the
+//! adoption depends on: the pid `ps` gained for the program `run` started is in the answer, the
+//! answer is ascending and has no repeat, and a missing session is `pane-not-found`.
+//!
 //! `attached_clients` (#647 part 2, ADR-0021 section 12) counts the tmux clients attached
 //! to a session. A session that `ensure_session` made has none, on tmux (a detached session)
 //! as on the fake, so its case asserts zero; a missing session is `pane-not-found`, as `ps`
@@ -57,7 +65,7 @@ const SETTLE_POLL: Duration = Duration::from_millis(20);
 
 /// The suite, in order: the one table that the runner iterates and [`host_cases`]
 /// lists.
-const CASES: [(&str, Case); 11] = [
+const CASES: [(&str, Case); 12] = [
     (
         "ps-of-missing-session-is-pane-not-found",
         ps_of_missing_session_is_pane_not_found,
@@ -89,6 +97,10 @@ const CASES: [(&str, Case); 11] = [
     (
         "attached-clients-of-fresh-session-is-zero-and-of-missing-is-pane-not-found",
         attached_clients_of_fresh_session_is_zero_and_of_missing_is_pane_not_found,
+    ),
+    (
+        "foreground-pids-hold-what-run-started-and-of-missing-is-pane-not-found",
+        foreground_pids_hold_what_run_started_and_of_missing_is_pane_not_found,
     ),
 ];
 
@@ -281,6 +293,43 @@ fn attached_clients_of_fresh_session_is_zero_and_of_missing_is_pane_not_found(
     )
 }
 
+/// Case 12 (#831): `foreground_pids` of a session never ensured is `pane-not-found`, as `ps`
+/// answers; after two `run`s of `sleep 30`, the answer holds both pids `ps` gained within
+/// [`SETTLE`], and every answer is ascending with no repeat (two processes, so that the order
+/// is observable). Only those pids are asserted, never the whole list: a real session also
+/// lists its shell's group.
+fn foreground_pids_hold_what_run_started_and_of_missing_is_pane_not_found(
+    host: &dyn HostPort,
+) -> Result<(), String> {
+    let missing = succeeds("PaneName::parse", PaneName::parse(C2))?;
+    expect_code(
+        "foreground_pids of a session never ensured",
+        host.foreground_pids(&missing),
+        NOT_FOUND,
+    )?;
+    let a = ensured(host, C1)?;
+    let started_pids = [started(host, &a)?, started(host, &a)?];
+    let deadline = Instant::now() + SETTLE;
+    loop {
+        let pids = succeeds(&format!("foreground_pids({a})"), host.foreground_pids(&a))?;
+        if pids != sorted_unique(pids.clone()) {
+            return Err(format!(
+                "foreground_pids({a}) is not ascending without a repeat: {pids:?}"
+            ));
+        }
+        if started_pids.iter().all(|pid| pids.contains(pid)) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "foreground_pids({a}) never held {started_pids:?} (what two run(sleep 30) added \
+                 to ps) within {SETTLE:?}: {pids:?}"
+            ));
+        }
+        thread::sleep(SETTLE_POLL);
+    }
+}
+
 // --- helpers ---
 
 /// The working directory of every session the cases ensure, and of every `run`: the
@@ -345,5 +394,12 @@ fn lacks(what: &str, pids: &[u32], pid: u32) -> Result<(), String> {
 
 fn sorted(mut pids: Vec<u32>) -> Vec<u32> {
     pids.sort_unstable();
+    pids
+}
+
+/// `pids` ascending, each once.
+fn sorted_unique(pids: Vec<u32>) -> Vec<u32> {
+    let mut pids = sorted(pids);
+    pids.dedup();
     pids
 }

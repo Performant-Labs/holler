@@ -20,6 +20,7 @@ const STORY_GROUPS: &[(u32, &[&str])] = &[
     (646, &["pane park", "pane unpark", "pane close"]),
     (647, &["pane doctor"]),
     (650, &["pane import"]),
+    (878, &["pane compact"]),
     (
         662,
         &[

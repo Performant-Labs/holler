@@ -20,6 +20,10 @@
 //!                                       # when session/new answers auth-required (ACP v1 only, #439)
 //! ```
 //!
+//! An attach row of harness `claude` attaches to a Claude Code process, not to an endpoint: ADR
+//! 0014 point 7 says its shape (#850, the child module `claude_row`), and
+//! [`SessionConfig::attaches_to_claude_code`] is the one place a row is told to be one.
+//!
 //! Sharing one file with other tools (issue #436). Unknown keys are still
 //! refused, but two things are accepted and **ignored** by the body:
 //!
@@ -63,6 +67,8 @@
 //! the pure, testable form (every source passed in explicitly, so tests
 //! never mutate real env vars or the process cwd); [`discover_and_load`]
 //! wraps it with the real `HOLLER_CONFIG` env read for the CLI.
+
+mod claude_row;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -122,6 +128,23 @@ pub struct SessionConfig {
     /// spawned process's environment. Kept exactly as written (compared
     /// case-sensitively, untrimmed); `None` for `attach`.
     pub auth_method: Option<String>,
+}
+
+impl SessionConfig {
+    /// Whether this row attaches to a Claude Code process (ADR 0014 point 7, #850): an attach
+    /// row whose harness is `claude`. Config validation, the driver choice and the support probe
+    /// all ask this, so the body tells the row apart from the ACP bridge's spawn row of the same
+    /// id in one place.
+    pub fn attaches_to_claude_code(&self) -> bool {
+        attaches_to_claude_code(self.mode, &self.harness)
+    }
+}
+
+/// The one comparison of a harness id with `claude` in the body (#850): the row is an attach row
+/// of that id. Any other attach row is an OpenCode HTTP row, and a spawn row of that id is the
+/// ACP bridge (ADR 0012).
+fn attaches_to_claude_code(mode: SessionMode, harness: &str) -> bool {
+    mode == SessionMode::Attach && harness == "claude"
 }
 
 /// The result of parsing + validating one config file: the session list plus
@@ -314,21 +337,10 @@ pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
                 }
             }
             SessionMode::Attach => {
-                if r.endpoint.is_none() {
-                    return Err(ConfigError::Invalid {
-                        row,
-                        name: r.name.clone(),
-                        field: "endpoint",
-                        reason: "attach mode requires `endpoint`".to_string(),
-                    });
-                }
-                if r.session_id.is_none() {
-                    return Err(ConfigError::Invalid {
-                        row,
-                        name: r.name.clone(),
-                        field: "session_id",
-                        reason: "attach mode requires `session_id`".to_string(),
-                    });
+                if attaches_to_claude_code(mode, &r.harness) {
+                    claude_row::check(row, &r)?;
+                } else {
+                    check_http_attach(row, &r)?;
                 }
                 if command.take().is_some() {
                     warnings.push(format!(
@@ -364,6 +376,24 @@ pub fn parse(contents: &str) -> Result<ParsedConfig, ConfigError> {
     }
 
     Ok(ParsedConfig { sessions, warnings })
+}
+
+/// The attach row of an OpenCode session (issue #194): it names the `endpoint` that serves the
+/// session and the `session_id` it attaches to.
+fn check_http_attach(row: usize, r: &RawSession) -> Result<(), ConfigError> {
+    let missing = |field: &'static str| ConfigError::Invalid {
+        row,
+        name: r.name.clone(),
+        field,
+        reason: format!("attach mode requires `{field}`"),
+    };
+    if r.endpoint.is_none() {
+        return Err(missing("endpoint"));
+    }
+    if r.session_id.is_none() {
+        return Err(missing("session_id"));
+    }
+    Ok(())
 }
 
 /// `auth_method` (issue #439). Spawn only: an attach row never spawns, so the

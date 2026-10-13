@@ -18,7 +18,8 @@
 //! `GET /agent`.
 //!
 //! **Blocking**, as the port is: every method is synchronous (call it from `spawn_blocking`
-//! or a thread in async code) and returns within [`Timeouts::call`] (I5, 10 s by default).
+//! or a thread in async code) and returns within [`Timeouts::call`] (I5, 10 s by default),
+//! except `compact` (#878, `compact.rs`), whose model call may take [`Timeouts::compact`].
 //!
 //! How a call answers:
 //!
@@ -136,7 +137,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use holler_pane::ports::Activity;
+use holler_pane::ports::{Activity, CompactModel, CompactOutcome};
 use holler_pane::{
     AgentView, Argv, HarnessEndpoint, HarnessPort, PaneError, PaneId, PaneName, ServeSpec,
 };
@@ -146,6 +147,7 @@ use crate::http::{HttpError, Reply};
 
 mod agents;
 mod attach;
+mod compact;
 pub mod http;
 mod prompt;
 mod server;
@@ -263,6 +265,9 @@ pub struct Timeouts {
     pub health: Duration,
     /// How long a switch, an attach or an abort may take to be observed. Default 5 s.
     pub settle: Duration,
+    /// `compact`'s summarize and the token reads around it, each request included (#878).
+    /// Default 120 s.
+    pub compact: Duration,
 }
 
 impl Default for Timeouts {
@@ -272,6 +277,7 @@ impl Default for Timeouts {
             request: Duration::from_secs(5),
             health: Duration::from_secs(2),
             settle: Duration::from_secs(5),
+            compact: Duration::from_secs(120),
         }
     }
 }
@@ -428,6 +434,15 @@ impl HarnessPort for OpenCodeHarness {
 
     fn session_activity(&self, at: &HarnessEndpoint, session: &str) -> Result<Activity, PaneError> {
         prompt::session_activity(self, at.port()?, session)
+    }
+
+    fn compact(
+        &self,
+        at: &HarnessEndpoint,
+        session: &str,
+        model: Option<&CompactModel>,
+    ) -> Result<CompactOutcome, PaneError> {
+        compact::compact(self, at.port()?, session, model)
     }
 
     fn agent_view(

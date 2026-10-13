@@ -289,6 +289,7 @@ holler pane launch demo-alpha --herdr-session demo --workspace demo --grid r1c1 
 holler pane list                        # every pane: place, harness, health, session of record, hold; unmanaged Herdr panes in a second table
 holler pane doctor [PANE] [--fix]       # compare the record with reality; repair or report
 holler pane switch PANE SESSION         # move a pane to another session; also: reset, relaunch, park, unpark, close, get, watch
+holler pane compact PANE                # compact an OpenCode pane's context through the harness API (a Claude Code pane answers compact-unsupported)
 holler profile create fleet --from-current
 holler profile apply fleet --dry-run    # the plan; drop --dry-run to converge the live panes on the profile
 holler profile show fleet
@@ -376,6 +377,24 @@ command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.79.0"]
   protocol v1 yet, so the body falls back to v1 on its own (its log shows
   `acp_v2_negotiation_failed ... fallback=v1`). Not yet run against real Claude Code: `interrupt`
   cancelling a turn cleanly with a later `say` still working, and detach tearing down the adapter.
+
+### A Claude Code pane
+
+A pane that `holler pane launch NAME --harness claude --port-policy none` started runs one interactive Claude Code process, and `holler say --pane NAME` reaches it through a body whose row attaches to that process (ADR 0014, points 7 to 11). The row names the pane's session of record and no endpoint:
+
+```toml
+[[session]]
+name = "c1r1"
+harness = "claude"
+mode = "attach"
+session_id = "0b6f8f2e-5c1d-4a43-9d51-2f1f6a7f0a11"   # the pane's session of record
+```
+
+`holler pane get c1r1 --format=json` prints that session (`data.pane.session_of_record`). This `claude` is the pane's interactive process; the ACP bridge above is a spawn row with a `command`.
+
+- The body reads nothing the process prints, so `say` returns an empty reply and the pane shows the answer; a turn in flight is interrupted with `holler interrupt --pane NAME`, which relaunches the pane, never by the body.
+- `holler body run` reaches the process with the same `claude` program the pane verbs use (`HOLLER_CLAUDE_BIN`, else `claude` on `PATH`). `holler body support claude` looks on `PATH` only.
+- Remove a closed pane's row: the body looks for the row's session every 30 s, one `claude agents --json` run each time, for as long as it runs.
 
 ### Codex
 

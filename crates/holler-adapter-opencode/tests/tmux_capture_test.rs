@@ -38,6 +38,7 @@ fn harness(tmux: PathBuf, dir: &Path) -> OpenCodeHarness {
             request: Duration::from_secs(1),
             health: Duration::from_secs(1),
             settle: Duration::from_secs(1),
+            compact: Duration::from_secs(20),
         },
     })
 }

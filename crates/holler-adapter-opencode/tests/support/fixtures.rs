@@ -32,6 +32,7 @@ pub fn quick() -> Timeouts {
         request: Duration::from_millis(800),
         health: Duration::from_millis(300),
         settle: Duration::from_millis(400),
+        compact: Duration::from_secs(4),
     }
 }
 

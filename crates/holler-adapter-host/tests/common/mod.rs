@@ -84,6 +84,18 @@ impl Fake {
         }
     }
 
+    /// A fake `tmux` answering with `tmux_body` and a fake `ps` answering with `ps_body`
+    /// (#831), beside the default fake `kill`. The fake `ps` records its arguments like the
+    /// others (`ps.calls`, [`Fake::ps_calls`]) and its `${LC_ALL-unset}` (`ps.env`); its body
+    /// sees `$1` = `-t`, `$2` = the tty, and the call number `$n`, so [`queue`] works on it.
+    /// Nothing here names a `TmuxHost` method: a test builds its host with
+    /// `host(&fake).with_ps_binary(fake.ps())`.
+    pub fn with_ps(tmux_body: &str, ps_body: &str) -> Fake {
+        let fake = Fake::new(tmux_body);
+        write_script(&fake.dir.join("ps"), &ps_script(&fake.dir, ps_body));
+        fake
+    }
+
     /// The fake another process made in `dir` (the re-executed child of AC 6f).
     pub fn at(dir: PathBuf) -> Fake {
         Fake { _guard: None, dir }
@@ -95,6 +107,11 @@ impl Fake {
 
     pub fn kill(&self) -> PathBuf {
         self.dir.join("kill")
+    }
+
+    /// The fake `ps` of [`Fake::with_ps`].
+    pub fn ps(&self) -> PathBuf {
+        self.dir.join("ps")
     }
 
     /// The socket path the fake-side hosts name. No server ever listens there.
@@ -115,6 +132,16 @@ impl Fake {
     /// Every kill call, in order, its arguments joined by spaces.
     pub fn kills(&self) -> Vec<String> {
         read_lines(&self.dir.join("kill.flat"))
+    }
+
+    /// Every ps call, in order, each as its separate arguments.
+    pub fn ps_calls(&self) -> Vec<Vec<String>> {
+        read_record(&self.dir.join("ps.calls"))
+    }
+
+    /// The `LC_ALL` of every ps call (`unset` when it had none).
+    pub fn ps_env(&self) -> Vec<String> {
+        read_lines(&self.dir.join("ps.env"))
     }
 
     /// The `LC_ALL` of every kill call (`unset` when it had none).
@@ -255,6 +282,15 @@ fn tmux_script(dir: &Path, body: &str) -> String {
         "{}{}n=$(grep -c '^{END}$' \"$D/tmux.calls\")\n{body}\n",
         header(dir),
         record("tmux.calls")
+    )
+}
+
+fn ps_script(dir: &Path, body: &str) -> String {
+    format!(
+        "{}{}printf '%s\\n' \"${{LC_ALL-unset}}\" >> \"$D/ps.env\"\n\
+         n=$(grep -c '^{END}$' \"$D/ps.calls\")\n{body}\n",
+        header(dir),
+        record("ps.calls")
     )
 }
 

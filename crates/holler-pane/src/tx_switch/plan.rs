@@ -42,15 +42,19 @@ pub(super) fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Plan, Pa
     check_health(ports, &record, &at)?;
     if record.harness.kind.shape() == Shape::SingleProcess {
         check_idle(ports, &record, &at)?;
-        if let Some(target) = &existing {
-            check_unclaimed(ports, &record.name, target)?;
-        }
-        // No body drives a single process until #850, so the hub is not asked (D3 item 8).
-        check_first(ports, request, &record, None)?;
-        return Ok(Plan {
-            record,
-            driver: None,
-        });
+        let records = match &existing {
+            Some(target) => Some(check_unclaimed(ports, &record.name, target)?),
+            None => None,
+        };
+        // The drive rule (ADR-0021 section 15 item 19, #850): the body is found as a server
+        // pane's is, over an empty server list, since a single process has none to list.
+        let reads = Reads {
+            listed: Some(Vec::new()),
+            records,
+        };
+        let driver = find_driver(ports, &record, &at, existing.as_deref(), reads)?;
+        check_first(ports, request, &record, driver.as_ref())?;
+        return Ok(Plan { record, driver });
     }
     let reads = match &existing {
         Some(target) => Reads {
@@ -69,7 +73,7 @@ pub(super) fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Plan, Pa
 
 /// The live body that drives `record`'s pane (#839, D3 step 1): `hub.advertised`, then, when a
 /// body is advertised, `driver_of` over the server's list and every record (read here unless
-/// the switch's checks already read them). An ambiguous or unproven driver is refused
+/// the switch's checks already read them; a single process's list is empty, #850). An ambiguous or unproven driver is refused
 /// `pane-not-driven`; a switch whose `target` another live body advertises is refused
 /// [`SESSION_DRIVEN_ELSEWHERE`]; a driver that is not idle is refused by
 /// [`activity_refusal`], as the body would refuse the rebind.
@@ -216,8 +220,12 @@ fn refuse_orchestrator(record: &Pane, as_operator: bool) -> Result<(), PaneError
 /// The pane's harness answers its health check now (I6), at the record's endpoint. One that
 /// does not is refused with the remedy doctor gives a down server, taken from the one remedy
 /// table, which has one for every named pane; were it ever `None`, the pane doctor command
-/// line stands in. A check that fails is passed on as it is.
-fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+/// line stands in. A check that fails is passed on as it is. `tx_compact` calls it too (#878).
+pub(crate) fn check_health(
+    ports: Ports<'_>,
+    record: &Pane,
+    at: &HarnessEndpoint,
+) -> Result<(), PaneError> {
     if ports.harness.health(at)? {
         return Ok(());
     }
@@ -246,8 +254,13 @@ fn check_health(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result
 /// A reset, and a single process's switch (a relaunch), does not drop a conversation that is
 /// mid-turn or waiting on an answer: the pane's session of record must be idle. A pane with no
 /// session of record has no conversation to drop, and is not asked. A query that fails is
-/// passed on as it is.
-fn check_idle(ports: Ports<'_>, record: &Pane, at: &HarnessEndpoint) -> Result<(), PaneError> {
+/// passed on as it is. `tx_compact` calls it too (#878): a compaction is a model call, so it
+/// does not run on top of a turn in flight.
+pub(crate) fn check_idle(
+    ports: Ports<'_>,
+    record: &Pane,
+    at: &HarnessEndpoint,
+) -> Result<(), PaneError> {
     let Some(session) = &record.session_of_record else {
         return Ok(());
     };
