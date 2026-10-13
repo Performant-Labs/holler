@@ -57,7 +57,7 @@ TUI and the session holder at once; it listens on a per-process unix socket and 
 | Question | Answer | Evidence |
 |---|---|---|
 | 1. Session of record | Yes. `--session-id <uuid>` chooses it; `--resume <uuid>` relaunches exactly it (new process, same id, no new transcript). `claude agents --json` gives `sessionId` per process, which is "the session this pane shows", and follows a person's `/clear` or `/resume` in the pane. Two limits: an id with no transcript yet (never prompted) cannot be `--resume`d, and `--bg` ignores `--session-id`. | Verified |
-| 2. Delivery without typing | **The session's inbox socket**: write one JSON line `{"type":"user","message":{"role":"user","content":TEXT}}` to it. The TUI stays usable. The pane must be launched with `crossSessionInbound: accept` in `--settings`, or a pane that bypasses permission prompts holds every message behind a dialog. The model sees it framed as a peer session's message, not the user's. | Verified; frame and framing **Read** |
+| 2. Delivery without typing | **The session's inbox socket**: write one JSON line `{"type":"user","message":{"role":"user","content":TEXT}}` to it. The TUI stays usable. The pane must be launched with `crossSessionInbound: accept` in `--settings`, or a pane that bypasses permission prompts holds every message behind a dialog. The model sees it framed as a peer session's message, not the user's. | Verified; frame **Verified** 2026-10-13 (real-binary test), framing **Read** |
 | 3. Interrupt / abort | **No in-place, no-typing interrupt exists for a TUI pane.** A signal is not one (SIGINT ends the process). The socket takes no interrupt frame. What works: stop the process and relaunch `--resume` (loses the in-flight turn, keeps the session), or a hub-controlled `PreToolUse` hook that ends the turn at the next tool boundary. A hub-owned `-p` process has a real `interrupt` request, but no TUI. | Verified |
 | 4. Observation | `claude agents --json` (about 90 ms a call) gives `idle` / `busy` / `waiting` with `waitingFor` (`permission prompt`, `input needed`), and drops a dead process. Hooks add events. A wedged or four-hours-busy process has no heartbeat: the hub must timestamp its own observations. | Verified |
 | 5. Login | The process needs `HOME` (the config directory with the login) and nothing else. Env var **names** that change the login silently: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, the cloud-provider switches. | Verified (names); the rest **Documented** |
@@ -116,14 +116,14 @@ Candidates, what each does to the TUI, and what each costs. A, B and F are the o
 | F | `--bg` plus `claude --resume <id> "prompt"` | yes (`claude attach`) | the prompt needs a **tty** and no config flags | id cannot be chosen; a second process supervisor outside tmux | Reject |
 | G | ACP adapter (`@agentclientprotocol/claude-agent-acp`, a wrapper over the Claude Agent SDK) | no TUI | yes | yes | not a pane; it is the ADR-0012 route for a headless Claude *body* (a `command`) | Out of scope here |
 
-### A. The inbox socket (Verified; frame **Read**)
+### A. The inbox socket (Verified; frame **Verified** 2026-10-13)
 
 - Every interactive session on macOS and Linux binds a unix socket, restricted to the OS user (mode `600`, in a private
   per-user directory; observed `/tmp/cc-socks/<pid>.sock`, the docs name `/tmp/cc-socks-<uid>` as the fallback). The
   docs say a script or hook may post into it, with an optional `{"type":"auth","token":"…"}` first line on Linux.
 - The client prints the working frame in its own `--debug-file` startup log: `{"type":"user","message":{"role":"user",
   "content":"hello"}}`, one line, newline-terminated. A connection that sends no complete line within 30 s is closed.
-  This is **Read**, not documented: it must be pinned by a conformance probe (the scripts are that probe).
+  This is not documented. It was **Read** from the log, and is now **Verified**: Verified 2026-10-13 by `cargo test -p holler-adapter-claude --test real_claude_test -- --ignored` (claude 2.1.296, tmux 3.7c, Linux, 12 conformance cases passed). The test covers Linux with that one claude version only; macOS and other claude versions are not covered.
 - **Finding the socket path, documented way:** the path is exported to hooks as `CLAUDE_CODE_MESSAGING_SOCKET` before
   `SessionStart` runs. Verified: a `SessionStart` hook received a path equal to the registry's. So the launch carries a
   `SessionStart` hook that tells Holler the path and the session id. The fallback is the registry file's
@@ -318,8 +318,8 @@ Amend-first (ADR-0021 and the epic's contract block), in this order so the OpenC
    `ServerDown` is reused for "no `agents --json` entry for the recorded pid".
 9. **Refusal codes** (open codes owned by the adapter): `abort-unsupported`, `answer-unsupported`, `session-in-use`,
    `no-conversation`, `inbound-held` (a delivered message left the pane `waiting`).
-10. **Docs**: ADR-0021 (section on harnesses), `docs/pane-control.md`, and a version note: the delivery frame is
-    **Read**, so the conformance probe in `scripts/spikes/claude-drive.sh` becomes an opt-in `#[ignore]` real-binary test
+10. **Docs**: ADR-0021 (section on harnesses), `docs/pane-control.md`, and a version note: the delivery frame was
+    **Read** (now **Verified** 2026-10-13 on Linux, claude 2.1.296; macOS and other versions are not covered), so the conformance probe in `scripts/spikes/claude-drive.sh` becomes an opt-in `#[ignore]` real-binary test
     that runs on every Claude Code upgrade.
 
 ### Test-kit fakes #831 needs
