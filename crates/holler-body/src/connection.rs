@@ -97,8 +97,9 @@ pub enum RunExit {
 /// every `session/presence` this loop emits actually carries. Issue #185's
 /// `query/*` answers need the same registry's *config* rows (harness ids,
 /// `command[0]` resolution) — derived here once, from `registry` itself,
-/// rather than threading a second parallel list down alongside it.
-pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
+/// rather than threading a second parallel list down alongside it. `claude` is the Claude Code
+/// harness its rows that attach to a Claude Code process drive (#850; [`SessionManager::start_with`]).
+pub fn run(state_root: &Path, registry: SessionRegistry, claude: Option<Arc<dyn holler_pane::HarnessPort>>) -> RunExit {
     let identity = match crate::identity::load(state_root) {
         None => {
             eprintln!("error: not joined; run `holler body join` first");
@@ -130,7 +131,7 @@ pub fn run(state_root: &Path, registry: SessionRegistry) -> RunExit {
         // reconnect attempt below (`connect_and_serve`) shares the same
         // `SessionManager`, so an in-flight turn survives a dropped/retried
         // socket — only the WS connection is retried, never a session.
-        let session_manager = Arc::new(SessionManager::start(&registry));
+        let session_manager = Arc::new(SessionManager::start_with(&registry, claude));
         let exit = run_loop(state_root, &identity, &session_manager, &configs).await;
         // Best-effort graceful shutdown: only possible when no in-flight
         // `session/prompt`/`session/cancel` task still holds its own `Arc`

@@ -162,7 +162,8 @@ pub struct Rig {
     pub host: FakeHost,
     pub harnesses: FakeHarnesses,
     pub prober: FakeProber,
-    /// The hub's live attach bodies (#839): none, since no body drives a Claude Code pane until #850.
+    /// The hub's live attach bodies (#839): none until a test adds one with `with_body`; a body
+    /// that advertises a Claude Code pane's session of record drives it (#850).
     pub hub: FakeHub,
 }
 

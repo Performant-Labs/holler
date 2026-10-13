@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use holler_pane::HarnessPort;
 use holler_proto::docs::{LastTurn, PendingItem};
 use holler_proto::log::{Component, Direction as LogDirection, Event as LogEvent, Severity};
 use holler_proto::{log, Code, SessionName, SessionState, WireError};
@@ -19,7 +20,6 @@ use super::driver::Driver;
 use super::{PromptOutcome, SessionCommand, QUEUE_CAP};
 use crate::acp_driver::{DriverEvent, DriverEventStream, DriverState, StopReason};
 use crate::config::{SessionConfig, SessionMode};
-use crate::http_attach_driver::HttpAttachDriver;
 
 /// How often a session whose initial attach failed retries
 /// [`crate::http_attach_driver::HttpAttachDriver::attach`] (issue #195's own
@@ -121,6 +121,8 @@ pub(super) struct Inner {
     /// `Replace` command carries no `id` of its own — see the issue's own
     /// `SessionCommand::Replace{text, reply_tx}` shape).
     replace_counter: u64,
+    /// The Claude Code harness the body was handed (#850), for a row that attaches to one.
+    claude: Option<Arc<dyn HarnessPort>>,
 }
 
 impl Inner {
@@ -144,7 +146,13 @@ impl Inner {
             presence,
             presence_tx,
             replace_counter: 0,
+            claude: None,
         }
+    }
+
+    /// This task with the Claude Code harness the body was handed (#850).
+    pub(super) fn with_claude(self, claude: Option<Arc<dyn HarnessPort>>) -> Self {
+        Self { claude, ..self }
     }
 }
 
@@ -245,8 +253,8 @@ async fn dispatch_command(inner: &mut Inner, cmd: Option<SessionCommand>) -> boo
 
 /// One attempt at an attach-mode session's *initial* attach (issue #195):
 /// [`Driver::spawn_or_attach`] against an already-`SessionMode::Attach`
-/// config never spawns anything — it always resolves to
-/// [`crate::http_attach_driver::HttpAttachDriver::attach`]. On success, the
+/// config never spawns anything — it resolves to an attach driver's `attach`
+/// (the HTTP one, or a Claude Code process's, #850). On success, the
 /// driver is stored and the row's presence gate lifts immediately; on
 /// failure, a `session attach_failed name=… reason=…` warning is logged (the
 /// issue's own line shape) and the row stays gated — [`run`]'s own retry
@@ -271,7 +279,7 @@ fn log_session(method: &'static str, name: &SessionName, fields: Vec<(&'static s
 }
 
 async fn attempt_initial_attach(inner: &mut Inner) {
-    match Driver::spawn_or_attach(&inner.config).await {
+    match Driver::spawn_or_attach(&inner.config, inner.claude.as_ref()).await {
         Ok(driver) => {
             inner.driver = Some(driver);
             mirror_session_id(inner);
@@ -516,7 +524,7 @@ async fn rebind(inner: &mut Inner, harness_session_id: String, deadline: tokio::
         return Err(busy);
     }
     let config = SessionConfig { session_id: Some(harness_session_id.clone()), ..inner.config.clone() };
-    let attached = match tokio::time::timeout_at(deadline, HttpAttachDriver::attach(&config)).await {
+    let attached = match tokio::time::timeout_at(deadline, Driver::spawn_or_attach(&config, inner.claude.as_ref())).await {
         Ok(Ok(driver)) => driver,
         Ok(Err(e)) => {
             return Err(WireError::new(Code::InvalidParams, e.message(), Some("session not found on the endpoint")));
@@ -527,7 +535,7 @@ async fn rebind(inner: &mut Inner, harness_session_id: String, deadline: tokio::
         }
     };
     inner.config.session_id = Some(harness_session_id.clone());
-    let old = inner.driver.replace(Driver::HttpAttach(attached));
+    let old = inner.driver.replace(attached);
     mirror_session_id(inner);
     inner.presence.lock().unwrap_or_else(PoisonError::into_inner).omitted_pending_attach = false;
     log_session("rebind", &inner.name, vec![("harness_session_id", harness_session_id.clone())]);
@@ -564,7 +572,7 @@ async fn start_turn(
     updates: Option<mpsc::UnboundedSender<String>>,
 ) -> bool {
     if inner.driver.is_none() {
-        match Driver::spawn_or_attach(&inner.config).await {
+        match Driver::spawn_or_attach(&inner.config, inner.claude.as_ref()).await {
             Ok(d) => {
                 inner.driver = Some(d);
                 mirror_session_id(inner);

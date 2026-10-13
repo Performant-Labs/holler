@@ -184,6 +184,28 @@ fn send_prompt_is_called_only_by_the_two_pass_throughs() {
     assert_eq!(calls, want, "only the two pass-throughs call send_prompt");
 }
 
+/// #850 (plan review W-2): the body is the third place a `HarnessPort::send_prompt` can be called
+/// from, outside the scan above (which reads `holler-pane` and `holler-cli`). The Claude Code attach
+/// driver's delivery is that one call: it sits behind the hub's `send_prompt` (hold and pane gate
+/// first), so a second caller in the body would be a way around both. Exactly one, in
+/// `claude_attach_driver.rs`.
+#[test]
+fn the_body_calls_send_prompt_from_exactly_one_place() {
+    let calls: Vec<String> = sources("holler-body")
+        .into_iter()
+        .flat_map(|(path, code)| {
+            code.match_indices(".send_prompt(")
+                .map(|(at, _)| format!("{path}:{}", enclosing_fn(&code, at)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(calls.len(), 1, "exactly one HarnessPort::send_prompt call in the body: {calls:?}");
+    assert!(
+        calls[0].starts_with("claude_attach_driver"),
+        "and it is the Claude Code attach driver's delivery: {calls:?}"
+    );
+}
+
 /// D1 (Acceptance 14): the three pane codes and the pair rule exist once, in `holler_pane::gate`.
 /// No hub or CLI source spells a code (the hub's gate and `say_cmd` take them from there), and
 /// `holler roster`'s mismatch is a call of `shown_driven_pair_differs`, not a third copy.

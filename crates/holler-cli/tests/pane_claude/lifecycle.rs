@@ -11,6 +11,7 @@ use holler_pane::error::class_of;
 use holler_pane::pane::{HarnessKind, Hold};
 use holler_pane::{HarnessPort, PaneError};
 use holler_pane_testkit::herdr::HerdrOp;
+use holler_pane_testkit::hub::HubOp;
 use holler_pane_testkit::host::HostOp;
 
 use crate::rig::{cell, data_of, error_of, has_pair, Calls, Rig, CLAUDE, OPENCODE, PORT};
@@ -205,9 +206,11 @@ fn reset_relaunches_on_a_fresh_session() {
 }
 
 /// W4 until #839 (E91): `reset --first` reached the new process through the engine's own
-/// `send_prompt`. Since #839 a first message goes only through the hub's gate, and no body drives
-/// a Claude Code pane until #850, so the plan refuses it `pane-not-driven` before anything is
-/// stopped (D3 item 8, D6): the process, the record and the inbox are as they were.
+/// `send_prompt`. Since #839 a first message goes only through the hub's gate, so a pane that no
+/// body drives has no way to receive it: the plan asks the hub who is advertised, finds no body
+/// for the pane, and refuses `pane-not-driven` before anything is stopped (ADR-0021 section 15
+/// item 19): the process, the record and the inbox are as they were. With a body it is delivered
+/// (`driven.rs`).
 #[test]
 fn reset_first_on_a_claude_pane_is_not_driven_and_stops_nothing() {
     let rig = one_claude_pane();
@@ -224,7 +227,12 @@ fn reset_first_on_a_claude_pane_is_not_driven_and_stops_nothing() {
     assert_untouched(&rig, &before, pid, &calls);
     let process = rig.process_of(CLAUDE).unwrap();
     assert!(process.inbox.is_empty(), "nothing was delivered: {:?}", process.inbox);
-    assert!(calls.hub.is_empty(), "the plan asks the hub nothing: {:?}", calls.hub);
+    assert_eq!(
+        calls.hub,
+        vec![HubOp::Advertised],
+        "the plan asks only who is advertised: {:?}",
+        calls.hub
+    );
 }
 
 #[test]

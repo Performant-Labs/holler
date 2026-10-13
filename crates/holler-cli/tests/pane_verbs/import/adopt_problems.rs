@@ -369,7 +369,10 @@ fn a_pane_whose_sessions_toml_names_claude_is_still_skipped_with_the_switch() {
     let rig = grid();
     rig.typed_claude(B, CLAUDE_SESSION);
     let port = rig.world.live(B).port;
-    let toml = sessions_toml(B, port, CLAUDE_SESSION).replace("\"opencode\"", "\"claude\"");
+    // A Claude Code row has no endpoint (#850): a valid row, so the skip is the rule's.
+    let toml = sessions_toml(B, port, CLAUDE_SESSION)
+        .replace("\"opencode\"", "\"claude\"")
+        .replace(&format!("endpoint = \"http://127.0.0.1:{port}\"\n"), "");
     rig.write(&format!("{B}/sessions.toml"), &toml);
     let mark = rig.mark_all();
     let data = data_of(&rig.run_routed(&[ADOPT, "--dry-run"], Format::Json));

@@ -79,9 +79,9 @@ holler pane launch demo-beta --herdr-session demo --workspace demo --grid r1c2 -
 - **The prompt verbs.** `holler interrupt --pane NAME` on a Claude Code pane relaunches it on its session of record (the
   operator's decision: no keypress, and a signal would end the process), dropping the turn in flight; with text it is
   refused `interrupt-text-unsupported`, and `holler answer --pane NAME CHOICE` is refused `answer-unsupported`.
-  `holler say --pane NAME TEXT` does not reach a Claude Code pane yet: no body drives its session until
-  [#850](https://github.com/Performant-Labs/holler/issues/850) (section 12), so it is refused `pane-not-driven`, and so
-  is `holler pane reset PANE --first TEXT`.
+  `holler say --pane NAME TEXT` and `holler pane reset PANE --first TEXT` reach a Claude Code pane through its body (a
+  `[[session]]` row the operator writes from the pane's record, ADR 0014 points 7 to 11 and the README's "A Claude Code
+  pane"; nothing here starts it), and a switch or a reset re-points that body (ADR-0021 section 15, item 19). With no body running they are refused `pane-not-driven`.
 - A pane's harness kind is never changed: `relaunch` with another `--harness`, or `profile apply` of a spec that names
   another harness for a recorded pane, is refused `harness-change-refused`. Close the pane and launch it again instead.
 
@@ -286,8 +286,8 @@ holler pane reset demo-alpha --first "Read the brief and start."
 Refused (3) with `session-busy` or `session-holds-question` while the session of record is running a turn or waits on
 an answer, and with `orchestrator-pane` and `server-unhealthy` as `switch` is. The pane's body is re-pointed to the new
 session and DRIVEN recorded as for `switch`. A Claude Code pane is reset by a relaunch on a fresh session id, refused as
-`switch` is (`session-holds-permission` included); `--first` on a Claude Code pane is refused `pane-not-driven` until a
-body drives it (#850).
+`switch` is (`session-holds-permission` included); `--first` on a Claude Code pane goes through its body as on any pane,
+and is refused `pane-not-driven` with none.
 
 **`--first` goes through the hub's gate (#839).** Before anything moves, the hub is asked, without sending, whether it
 would admit the first message: a parked pane (`pane-parked`), a pane whose body's session is held (`session-held`, which
@@ -622,9 +622,8 @@ named `hj-c1r2` is a name, and it sits at `r2c1`), PROFILE, HEALTH, SHOWN and DR
 the same cells `pane list` prints for the same record, and an empty cell is `-`; a session with no pane (the io body, an
 alpha or beta agent) shows `-` in all six. A roster row is joined to a pane when the part of its name before the first
 `/` is the pane's name. The rows are the hub's, one per session a body serves, so a pane that no body serves has no row:
-a Claude Code pane has none until a body drives its session ([#850](https://github.com/Performant-Labs/holler/issues/850)),
-and `pane list` shows it meanwhile. The roster calls no adapter and shows no unmanaged pane (`pane list` does), and it
-reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
+a Claude Code pane has one once its body runs, and `pane list` shows it always. The roster calls no adapter and shows no
+unmanaged pane (`pane list` does), and it reads the registry of the local hub, so with `--server` the six columns are `-`. When at least one pane's SHOWN and
 DRIVEN are both known and differ, the first line of the output says so:
 `2 pane(s) show a different session than the hub drives: demo-alpha, demo-beta`.
 `holler roster --profile fleet` lists only that profile's panes, and a profile that does not exist is refused
@@ -1113,7 +1112,6 @@ scripts/pane-restart PANE --model PROVIDER/ID [--effort E] [--key-file PATH]
 Deferred, so not documented here as existing; none of them is available:
 
 - applying a pane's model, effort and environment to its harness server (#829);
-- a body that lets `holler say --pane NAME TEXT` reach a Claude Code pane (#850);
 - answering a Claude Code pane's permission prompt, and its `--agent` (later stories of ADR-0021 section 15);
 - recreating the Herdr workspace from the stored profiles (#666);
 - a Holler verb that attaches a pane's tmux session to its Herdr pane, the cure for `unattached` (no story owns it yet).

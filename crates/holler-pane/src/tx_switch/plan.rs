@@ -42,15 +42,19 @@ pub(super) fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Plan, Pa
     check_health(ports, &record, &at)?;
     if record.harness.kind.shape() == Shape::SingleProcess {
         check_idle(ports, &record, &at)?;
-        if let Some(target) = &existing {
-            check_unclaimed(ports, &record.name, target)?;
-        }
-        // No body drives a single process until #850, so the hub is not asked (D3 item 8).
-        check_first(ports, request, &record, None)?;
-        return Ok(Plan {
-            record,
-            driver: None,
-        });
+        let records = match &existing {
+            Some(target) => Some(check_unclaimed(ports, &record.name, target)?),
+            None => None,
+        };
+        // The drive rule (ADR-0021 section 15 item 19, #850): the body is found as a server
+        // pane's is, over an empty server list, since a single process has none to list.
+        let reads = Reads {
+            listed: Some(Vec::new()),
+            records,
+        };
+        let driver = find_driver(ports, &record, &at, existing.as_deref(), reads)?;
+        check_first(ports, request, &record, driver.as_ref())?;
+        return Ok(Plan { record, driver });
     }
     let reads = match &existing {
         Some(target) => Reads {
@@ -69,7 +73,7 @@ pub(super) fn plan(ports: Ports<'_>, request: &SwitchRequest) -> Result<Plan, Pa
 
 /// The live body that drives `record`'s pane (#839, D3 step 1): `hub.advertised`, then, when a
 /// body is advertised, `driver_of` over the server's list and every record (read here unless
-/// the switch's checks already read them). An ambiguous or unproven driver is refused
+/// the switch's checks already read them; a single process's list is empty, #850). An ambiguous or unproven driver is refused
 /// `pane-not-driven`; a switch whose `target` another live body advertises is refused
 /// [`SESSION_DRIVEN_ELSEWHERE`]; a driver that is not idle is refused by
 /// [`activity_refusal`], as the body would refuse the rebind.
