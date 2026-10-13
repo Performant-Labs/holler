@@ -8,18 +8,27 @@
 //! healthy server's list is trusted; an unhealthy server's list only tells a wedged server
 //! (the list times out) from a down one.
 //!
-//! A chain makes at most four port calls, all reads, in this order: `host.ps`; once it has
-//! answered, `host.foreground_commands` (#835); then `harness.health` and
-//! `harness.list_sessions`. A tmux session that runs Claude Code
-//! ([`is_claude_code_command`]) ends the chain after the second call: its pane is left
-//! alone, so its server is never asked.
+//! Every chain begins with two reads of the pane's tmux session: `host.ps`, then, once it has
+//! answered, `host.foreground_commands` (#835). What follows depends on what the session runs:
+//!
+//! - **Not Claude Code** (or unreadable): `harness.health` and `harness.list_sessions`, four
+//!   calls at most, whether the run adopts or not.
+//! - **Claude Code** ([`is_claude_code_command`]), without `--adopt-claude-code`, or with it
+//!   and no single Herdr pane labelled with the pane's name: nothing more. The pane is left
+//!   alone, or blocked by the join's label finding, and no server is asked.
+//! - **Claude Code, adopted** (#831; `adopt`): `host.foreground_pids` (one tmux call and one
+//!   `ps` per live tmux pane, in the host adapter), then `harness.shown_session` per pid, in
+//!   the order `foreground_pids` gives them, until the second pid the harness knows. So at
+//!   most three host calls and one `shown_session` per pid, each a subprocess, all in the
+//!   pane's own thread under the per-pane bound, and still no OpenCode server call.
 
 use std::thread::{self, ScopedJoinHandle};
 
 use crate::findings::embedded;
-use crate::pane::{is_claude_code_command, Health};
+use crate::pane::{is_claude_code_command, Health, PaneId};
 use crate::{HarnessEndpoint, PaneError, PaneName, Ports};
 
+use super::adopt::{self, Adoption};
 use super::findings::{Finding, ImportFinding};
 
 /// The calls of a chain, named as `<port>.<method>` in a finding's message.
@@ -37,12 +46,27 @@ const UNREADABLE: &str = "what the pane's tmux session runs could not be read, s
 pub(super) struct Target<'a> {
     pub name: &'a PaneName,
     pub port: Option<u16>,
+    /// What the chain does when the pane's tmux session runs Claude Code (#831).
+    pub adopt: Adopt,
+}
+
+/// The three states of `--adopt-claude-code` for one pane (#831). Each matters only for a pane
+/// whose tmux session runs Claude Code; any other pane takes the OpenCode chain in all three.
+pub(super) enum Adopt {
+    /// The run was not asked to adopt: the pane is left alone, as before.
+    Off,
+    /// Asked, and exactly one Herdr pane in the run's session has the pane's name as its label:
+    /// that pane's id, which `shown_session` takes.
+    On(PaneId),
+    /// Asked, and no Herdr pane, or several, have the label: no pid or session is read, and the
+    /// join's own label finding blocks the pane.
+    OnUnlabelled,
 }
 
 /// What one pane's chain observed.
 pub(super) enum Observed {
-    /// The pane's tmux session runs Claude Code: nothing more was asked about it.
-    ClaudeCode,
+    /// The pane's tmux session runs Claude Code, and what the adoption read of it.
+    ClaudeCode(Adoption),
     /// What was asked about any other pane.
     Seen(Chain),
     /// The chain did not finish (its thread could not start, or panicked).
@@ -61,8 +85,8 @@ pub(super) struct Chain {
 /// A read of the pane's tmux session that failed: the call, as `<port>.<method>`, and its
 /// error.
 pub(super) struct Unread {
-    op: &'static str,
-    error: PaneError,
+    pub(super) op: &'static str,
+    pub(super) error: PaneError,
 }
 
 /// The pane's harness server, as the chain observed it.
@@ -100,10 +124,17 @@ fn joined<T>(thread: std::io::Result<ScopedJoinHandle<'_, T>>) -> Option<T> {
 
 /// One pane's chain: its tmux session, then, unless the session runs Claude Code, its server.
 /// A session that could not be read is not known to run Claude Code, so its server is asked,
-/// as for any pane.
+/// as for any pane. A session that runs Claude Code is read further only when the pane is to
+/// be adopted (#831).
 fn observe(ports: Ports<'_>, target: &Target<'_>) -> Observed {
     let tmux = match read_tmux(ports, target.name) {
-        Ok(true) => return Observed::ClaudeCode,
+        Ok(true) => {
+            return Observed::ClaudeCode(match &target.adopt {
+                Adopt::Off => Adoption::NotAsked,
+                Adopt::OnUnlabelled => Adoption::Unlabelled,
+                Adopt::On(pane) => Adoption::Read(adopt::read(ports, target.name, pane)),
+            })
+        }
         Ok(false) => Ok(()),
         Err(unread) => Err(unread),
     };
@@ -216,12 +247,18 @@ pub(super) fn tmux_finding(pane: &PaneName, tmux: &Result<(), Unread>) -> Option
             ImportFinding::TmuxSessionMissing,
             format!("the tmux session {pane} does not exist"),
         )),
-        Err(Unread { op, error }) => Some(Finding::about(
-            pane,
-            ImportFinding::HarnessUnreadable,
-            format!("{UNREADABLE}: {}", failed_message(op, error)),
-        )),
+        Err(unread) => Some(unread_finding(pane, unread)),
     }
+}
+
+/// `harness-unreadable` for a read that failed, naming the call: the pane is never recorded on
+/// a guess (#835), and never adopted on one (#831).
+pub(super) fn unread_finding(pane: &PaneName, Unread { op, error }: &Unread) -> Finding {
+    Finding::about(
+        pane,
+        ImportFinding::HarnessUnreadable,
+        format!("{UNREADABLE}: {}", failed_message(op, error)),
+    )
 }
 
 /// What a chain that did not finish tells the report about `pane`: nothing was read, so

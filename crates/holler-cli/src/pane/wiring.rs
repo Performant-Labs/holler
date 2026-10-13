@@ -376,6 +376,10 @@ impl HostPort for Unwired {
     fn attached_clients(&self, _name: &PaneName) -> Result<u32, PaneError> {
         Err(PaneError::NotImplemented)
     }
+
+    fn foreground_pids(&self, _name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        Err(PaneError::NotImplemented)
+    }
 }
 
 impl HarnessPort for Unwired {

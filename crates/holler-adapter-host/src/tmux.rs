@@ -34,6 +34,11 @@ const PS_FORMAT: &str = "#{pane_pid} #{pane_dead}";
 /// basename: a name only, never a command line (I7).
 const FOREGROUND_FORMAT: &str = "#{pane_dead} #{pane_current_command}";
 
+/// What `foreground_pids` lists for every pane (#831): whether it is dead, then its tty, from
+/// which `ps -t` reads the pane's foreground process group (tmux has no format for it). A path
+/// only, never a command line (I7).
+const TTY_FORMAT: &str = "#{pane_dead} #{pane_tty}";
+
 /// What `attached_clients` lists for every pane (#647 part 2): the number of clients attached
 /// to the pane's session. With `-s` every line is one pane of the one session, so each carries
 /// the same count. A count only, never a client's name or tty (I7).
@@ -159,6 +164,19 @@ pub(crate) fn foreground_listing(name: &PaneName) -> Vec<String> {
     ])
 }
 
+/// `foreground_pids`' listing (#831): every pane of the session, as `ps` lists them, with its
+/// tty.
+pub(crate) fn tty_listing(name: &PaneName) -> Vec<String> {
+    strings(&[
+        "list-panes",
+        "-s",
+        "-t",
+        &window_target(name),
+        "-F",
+        TTY_FORMAT,
+    ])
+}
+
 /// `attached_clients`' listing (#647 part 2): every pane of the session, as `ps` lists them,
 /// with the number of clients attached to the session.
 pub(crate) fn attached_listing(name: &PaneName) -> Vec<String> {
@@ -234,7 +252,7 @@ impl fmt::Display for Window {
 }
 
 /// `text` as a decimal number: ASCII digits only (no sign, no space), within `u32`.
-fn decimal(text: &str) -> Option<u32> {
+pub(crate) fn decimal(text: &str) -> Option<u32> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -279,6 +297,36 @@ pub(crate) fn parse_foreground(stdout: &str) -> Option<Vec<String>> {
         }
     }
     Some(names)
+}
+
+/// `foreground_pids`' listing (#831): the tty of every live pane, in the order tmux lists them,
+/// without its `/dev/` (the name `ps -t` takes: `pts/3` on Linux, `ttys004` on macOS), or `None`
+/// when a line is not `<0|1> /dev/<tty>`. Read as strictly as `foreground_commands`' listing: one
+/// malformed line fails the whole answer, never a partial list. The tty is checked before it
+/// reaches `ps` as an argument: a non-empty relative path of `[A-Za-z0-9._/-]`, with no `..`
+/// segment and not starting with `-` (which `ps` could read as an option).
+pub(crate) fn parse_ttys(stdout: &str) -> Option<Vec<String>> {
+    let mut ttys = Vec::new();
+    for line in stdout.lines() {
+        let (dead, path) = line.split_once(' ')?;
+        let tty = path.strip_prefix("/dev/").filter(|tty| is_tty_name(tty))?;
+        match dead {
+            "0" => ttys.push(tty.to_owned()),
+            "1" => {}
+            _ => return None,
+        }
+    }
+    Some(ttys)
+}
+
+/// Whether `tty` is a tty name `ps -t` may be given (see [`parse_ttys`]).
+fn is_tty_name(tty: &str) -> bool {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-');
+    !tty.is_empty()
+        && !tty.starts_with('-')
+        && !tty.starts_with('/')
+        && tty.bytes().all(allowed)
+        && tty.split('/').all(|segment| segment != "..")
 }
 
 /// `attached_clients`' listing (#647 part 2): the session's client count, or `None` unless
@@ -327,7 +375,7 @@ pub(crate) fn parse_listing(stdout: &str) -> Listing {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {
     /// No such session, or no server: `pane-not-found` for `run`, `ps`,
-    /// `foreground_commands` and `attached_clients`, `Ok` for `stop_owned`.
+    /// `foreground_commands`, `foreground_pids` and `attached_clients`, `Ok` for `stop_owned`.
     Missing,
     /// No such window: `can't find window` from a target lookup, and `no such window`,
     /// which `set-option -w -t @<id>` prints for a window that closed (tmux 3.7c). For

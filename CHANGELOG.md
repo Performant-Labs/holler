@@ -8,6 +8,20 @@ fills this file in at release time.
 ## [Unreleased]
 
 ### Enhancements
+- Pane control, Claude Code panes (epic [#633](https://github.com/Performant-Labs/holler/issues/633)):
+  `holler pane import --adopt-claude-code` adopts the fleet's existing Claude Code panes into the registry
+  ([#831](https://github.com/Performant-Labs/holler/issues/831)), where it was refused (`usage`) before. A pane whose tmux
+  session runs `claude` gets a record with the Claude Code harness: the pid of its process and the session it holds, read
+  from Claude Code's own listing by pid, health `unknown`, and the model, ceilings and variable names of its `pane.env`
+  (no agent, no command). The pid comes from a new read-only host method, `HostPort::foreground_pids`, which the tmux
+  adapter answers with each pane's tty and one `ps -t` per pane (numbers only), so a `claude` typed into a shell is found.
+  Nothing is adopted on a guess: no such process, more than one, no session, or a login variable in `pane.env` blocks the
+  pane, with five new findings (`claude-code-adopted`, `claude-process-unmatched`, `claude-login-env`,
+  `claude-model-not-anthropic`, `spec-kind-differs`). With the switch, an existing profile `fleet` is extended by one
+  compare-and-swap instead of `profile-exists`, and a failed extension deletes only its own records. The report ends with
+  `holler pane relaunch NAME` for each adopted pane. A launcher-table entry may omit `port` for such a pane.
+  [ADR 0021](docs/adr/ADR-0021.md) sections 2 and 15 (item 17) and
+  [`docs/pane-control.md`](docs/pane-control.md) sections 3 and 10 record it.
 - The health probe and the host, OpenCode and Claude adapters run their subprocesses through one bounded runner in
   `holler-pane` (`holler_pane::bounded`) instead of four private copies
   ([#696](https://github.com/Performant-Labs/holler/issues/696), epic

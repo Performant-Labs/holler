@@ -10,8 +10,8 @@
 //! inheritance. Nothing is added to it: a tmux client's environment reaches every pane
 //! started after it. Each port call has one deadline, the configured bound (I5, default
 //! 10 s), and every subprocess it spawns gets the time left. A subprocess still running
-//! at the deadline is killed and reaped, and the call is `timeout`. Every subprocess, tmux
-//! and `kill` alike, is run by the shared bounded runner of `holler-pane` (#696).
+//! at the deadline is killed and reaped, and the call is `timeout`. Every subprocess, tmux,
+//! `kill` and `ps` alike, is run by the shared bounded runner of `holler-pane` (#696).
 //!
 //! **Exact targets.** `has-session` takes `-t =NAME`, and every other command that names
 //! the session takes `-t =NAME:`. tmux matches a bare name by prefix, and `=NAME` on a
@@ -63,21 +63,34 @@
 //! line, or the answer is `unavailable` naming the call and quoting none of tmux's output. A
 //! count only: the adapter never asks for a client's name, tty or process (I7).
 //!
+//! **What `foreground_pids` reads (#831).** tmux has each pane's tty but no format for its
+//! foreground process, so the call is the adapter's one use of a second program besides
+//! `kill`: one `list-panes` of the session asking for `#{pane_dead} #{pane_tty}` (a dead pane
+//! is left out; a tty must be `/dev/` and a relative path of `[A-Za-z0-9._/-]` with no `..`
+//! segment and no leading `-`, or the whole answer is `unavailable` and no `ps` runs), then,
+//! for each live pane in tmux's order, `ps -t <tty> -o pid= -o pgid= -o tpgid=` with
+//! `LC_ALL=C`, under the call's one deadline. Every process whose group id is the tty's
+//! foreground group id is in the answer: a program typed into the pane's shell, and every
+//! member of its group, not the shell behind it. The pids of all panes, unique and ascending.
+//! Numbers only, never a command line (I7). All or nothing: a `ps` that fails, a line that is
+//! not three decimal fields, or a deadline reached part-way fails the whole call. A `ps` that
+//! exits non-zero with no output is a tty with no process, an empty pane.
+//!
 //! **Errors.** Each column is a method; `op` of a `timeout` is `host.<method>`.
 //!
-//! | What happened | `ensure_session` | `run` | `stop_owned` | `ps` | `foreground_commands` | `attached_clients` |
-//! |---|---|---|---|---|---|---|
-//! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` | `pane-not-found` | `pane-not-found` |
-//! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids | its live panes' command names | its client count |
-//! | an empty argv, or an `argv[0]` containing `=` | | `usage` | | | | |
-//! | `cwd` is not an absolute path to an existing directory | | `usage` | | | | |
-//! | the bound ran out | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` |
-//! | a binary is missing, or tmux or `kill` failed otherwise | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
+//! | What happened | `ensure_session` | `run` | `stop_owned` | `ps` | `foreground_commands` | `foreground_pids` | `attached_clients` |
+//! |---|---|---|---|---|---|---|---|
+//! | the session or its server is missing (stderr `can't find session`, `can't find window`, `no such window`, `no server running`, or `error connecting to` with `No such file or directory` or `Connection refused`) | created, or `usage` when its directory is not an absolute path to an existing directory | `pane-not-found` | `Ok` | `pane-not-found` | `pane-not-found` | `pane-not-found` | `pane-not-found` |
+//! | the session exists | `Ok`, nothing changes | starts the argv | stops what it owns | its live panes' pids | its live panes' command names | its live panes' foreground groups | its client count |
+//! | an empty argv, or an `argv[0]` containing `=` | | `usage` | | | | | |
+//! | `cwd` is not an absolute path to an existing directory | | `usage` | | | | | |
+//! | the bound ran out | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` | `timeout` |
+//! | a binary is missing, or tmux, `kill` or `ps` failed otherwise | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
 //!
 //! `run` checks the session before the argv, as the test kit's fake does, and the argv
 //! before `cwd`, which the fake does not check. A `usage` never echoes an argv element or
-//! the directory. An `unavailable` carries tmux's or `kill`'s first stderr line, or the
-//! path of a binary that could not be run: never an argv element or a directory.
+//! the directory. An `unavailable` carries tmux's, `kill`'s or `ps`'s first stderr line, or
+//! the path of a binary that could not be run: never an argv element, a tty or a directory.
 //!
 //! **Narrowings.** ADR-0021 is unchanged. Five readings of the port are narrower than
 //! the fake's, which does none of them:
@@ -155,6 +168,7 @@ const OP_RUN: &str = "host.run";
 const OP_STOP_OWNED: &str = "host.stop_owned";
 const OP_PS: &str = "host.ps";
 const OP_FOREGROUND_COMMANDS: &str = "host.foreground_commands";
+const OP_FOREGROUND_PIDS: &str = "host.foreground_pids";
 const OP_ATTACHED_CLIENTS: &str = "host.attached_clients";
 
 /// The fixed `what` of each refusal of tmux's output; none quotes it.
@@ -164,6 +178,8 @@ const BAD_PANE_LIST: &str =
     "tmux list-panes printed a pane that is not a pid in 2..=2147483647 and a dead flag";
 const BAD_COMMAND_LIST: &str =
     "tmux list-panes printed a pane that is not a dead flag and a command name";
+const BAD_TTY_LIST: &str =
+    "tmux list-panes printed a pane that is not a dead flag and a tty under /dev/";
 const BAD_ATTACHED_LIST: &str =
     "tmux list-panes did not print the session's attached-client count on each pane's line";
 
@@ -188,19 +204,21 @@ pub struct TmuxHost {
     socket: TmuxSocket,
     tmux: PathBuf,
     kill: PathBuf,
+    ps: PathBuf,
     config: Option<PathBuf>,
     timeout: Duration,
     stop_grace: Duration,
 }
 
 impl TmuxHost {
-    /// A host on `socket`, with `tmux` and `kill` from `PATH`, no config file, a 10 s
+    /// A host on `socket`, with `tmux`, `kill` and `ps` from `PATH`, no config file, a 10 s
     /// bound and a 2 s stop grace. Does no I/O.
     pub fn new(socket: TmuxSocket) -> Self {
         Self {
             socket,
             tmux: PathBuf::from("tmux"),
             kill: PathBuf::from("kill"),
+            ps: PathBuf::from("ps"),
             config: None,
             timeout: DEFAULT_TIMEOUT,
             stop_grace: DEFAULT_STOP_GRACE,
@@ -218,6 +236,14 @@ impl TmuxHost {
     #[must_use]
     pub fn with_kill_binary(mut self, path: PathBuf) -> Self {
         self.kill = path;
+        self
+    }
+
+    /// The `ps` binary `foreground_pids` reads a tty's foreground group with (default `ps`
+    /// from `PATH`; #831).
+    #[must_use]
+    pub fn with_ps_binary(mut self, path: PathBuf) -> Self {
+        self.ps = path;
         self
     }
 
@@ -423,6 +449,28 @@ impl HostPort for TmuxHost {
         }
     }
 
+    /// The pids of the foreground process group of every live pane of the session (#831): one
+    /// `list-panes` for the ttys, failing as `ps` fails, then one `ps -t` per live pane under
+    /// the call's one deadline. All or nothing; unique and ascending.
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        let call = Call::start(OP_FOREGROUND_PIDS, self.timeout);
+        let ttys = match self.run_tmux(&tmux::tty_listing(name), call)? {
+            Reply::Done(stdout) => {
+                tmux::parse_ttys(&stdout).ok_or_else(|| unavailable(BAD_TTY_LIST))?
+            }
+            Reply::Refused(refusal, what) => return Err(refused(name, refusal, what)),
+        };
+        let mut pids = Vec::new();
+        for tty in &ttys {
+            let group = exec::ps_group(&self.ps, tty, call.deadline)
+                .map_err(|failed| call.failed(failed))?;
+            pids.extend(group);
+        }
+        pids.sort_unstable();
+        pids.dedup();
+        Ok(pids)
+    }
+
     /// The number of clients attached to the session (#647 part 2): one `list-panes`, the
     /// listing `ps` makes, asking for `#{session_attached}`, read as strictly as `ps`'s and
     /// failing as `ps` fails.
@@ -481,8 +529,8 @@ enum Reply {
     Refused(Refusal, String),
 }
 
-/// The error of a refused call of `run`, `ps`, `foreground_commands` or `attached_clients`
-/// (Decision 8): a missing session is `pane-not-found`, anything else `unavailable`.
+/// The error of a refused call of `run`, `ps`, `foreground_commands`, `foreground_pids` or
+/// `attached_clients` (Decision 8): a missing session is `pane-not-found`, anything else `unavailable`.
 fn refused(name: &PaneName, refusal: Refusal, what: String) -> PaneError {
     if refusal.is_missing() {
         PaneError::PaneNotFound {

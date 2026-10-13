@@ -20,10 +20,11 @@
 //! `observe_panes` goes to the inner port's own `observe_panes`, so a list of panes stays one read
 //! of Herdr (ADR-0021 section 14), never one `observe_pane` per pane. `HerdrPort::observe_pane`
 //! and `HostPort::foreground_commands` have no default (#835), nor do the reads #647 part 2 added
-//! (ADR-0021 section 12), `HostPort::attached_clients` and `HarnessPort::agent_view`: a wrapper
-//! that does not forward one does not compile, so none of these wrappers has a default to fall
-//! back on for them. Each forwards them as it forwards the rest, and a test per wrapper pins that
-//! it answers the inner port's answer, with the arguments it was given.
+//! (ADR-0021 section 12), `HostPort::attached_clients` and `HarnessPort::agent_view`, nor does
+//! `HostPort::foreground_pids` (#831): a wrapper that does not forward one does not compile, so
+//! none of these wrappers has a default to fall back on for them. Each forwards them as it
+//! forwards the rest, and a test per wrapper pins that it answers the inner port's answer, with
+//! the arguments it was given.
 //!
 //! **Why the bindings (D8).** The launch engine attaches the TUI by the Herdr pane id before the
 //! pane's record exists (E34): `ensure_pane` (which knows the pane id), then `ensure_session` and
@@ -196,6 +197,10 @@ impl HostPort for BindingHost {
 
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
         self.inner.attached_clients(name)
+    }
+
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.inner.foreground_pids(name)
     }
 }
 
@@ -417,6 +422,10 @@ impl HostPort for Wired<dyn HostPort> {
 
     fn attached_clients(&self, name: &PaneName) -> Result<u32, PaneError> {
         self.port()?.attached_clients(name)
+    }
+
+    fn foreground_pids(&self, name: &PaneName) -> Result<Vec<u32>, PaneError> {
+        self.port()?.foreground_pids(name)
     }
 }
 
