@@ -23,7 +23,7 @@
 //! `--format=json`. A registry that could not be read is one `note:` line on stderr in every mode,
 //! beside the rows.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use holler_hub::control::{ControlCall, ControlError};
 use holler_pane::error::{class_of, ErrorClass, RefusalCode};
@@ -162,11 +162,17 @@ pub fn render(
 ) -> i32 {
     // The Claude projects directory is this machine's: another hub's rows (`--server`) name
     // sessions of other machines, so no lookup is made for them.
-    let projects = match registry {
-        Registry::NotRead => None,
-        _ => crate::roster_agent::ambient_projects_dir(),
-    };
+    let projects = projects_for(&registry, crate::roster_agent::ambient_projects_dir());
     render_in(reply, registry, roster, choice, sink, projects.as_deref())
+}
+
+/// The projects directory a render looks sessions up in: `ambient`, except for `--server`'s rows
+/// ([`Registry::NotRead`]), whose sessions are another hub's and have no sidechain files here.
+fn projects_for(registry: &Registry<'_>, ambient: Option<PathBuf>) -> Option<PathBuf> {
+    match registry {
+        Registry::NotRead => None,
+        _ => ambient,
+    }
 }
 
 /// [`render`] with the Claude projects directory given (issue #914): `None` makes every row's
@@ -618,5 +624,18 @@ fn hold_display(row: &serde_json::Value) -> String {
     match row.get("hold_reason").and_then(|v| v.as_str()) {
         Some(reason) => format!("held{kind} {age}{under}: {reason}"),
         None => format!("held{kind} {age}{under}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_hubs_rows_get_no_projects_directory() {
+        let ambient = Some(PathBuf::from("/claude/projects"));
+        assert_eq!(projects_for(&Registry::NotRead, ambient.clone()), None);
+        let failed = Registry::Failed(PaneError::NotImplemented);
+        assert_eq!(projects_for(&failed, ambient.clone()), ambient);
     }
 }

@@ -65,6 +65,31 @@ fn only_agent_jsonl_files_count() {
 }
 
 #[test]
+fn a_symlink_reports_its_targets_write_time_and_a_directory_is_not_a_transcript() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("p").join(SESSION).join("subagents");
+    fs::create_dir_all(&dir).unwrap();
+    let target = root.path().join("elsewhere.jsonl");
+    File::create(&target)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(6_000)))
+        .unwrap();
+    std::os::unix::fs::symlink(&target, dir.join("agent-link.jsonl")).unwrap();
+    // A dangling link and a directory named like a transcript count for nothing.
+    std::os::unix::fs::symlink(root.path().join("gone"), dir.join("agent-dangling.jsonl")).unwrap();
+    fs::create_dir(dir.join("agent-dir.jsonl")).unwrap();
+    assert_eq!(last_output(root.path(), SESSION), Some(6_000));
+}
+
+#[test]
+fn a_stray_file_among_the_projects_is_skipped() {
+    let root = tempfile::tempdir().unwrap();
+    File::create(root.path().join("stray.txt")).unwrap();
+    sidechain(root.path(), "p", SESSION, "agent-a.jsonl", 7_000);
+    assert_eq!(last_output(root.path(), SESSION), Some(7_000));
+}
+
+#[test]
 fn null_cases_are_none_and_never_zero() {
     let root = tempfile::tempdir().unwrap();
     // No projects directory at all.
@@ -157,13 +182,19 @@ fn every_other_row_reads_null() {
             hub_row("o1/work", "opencode", Some(SESSION)),
             // a Claude row with no session id yet
             hub_row("r1c1/work", "claude", None),
+            // a Claude row whose session id key is absent
+            {
+                let mut row = hub_row("r1c4/work", "claude", None);
+                row.as_object_mut().unwrap().remove("harness_session_id");
+                row
+            },
             // a Claude row whose session has no sidechain files
             hub_row("r1c2/work", "claude", Some("no-such-session")),
         ],
         &["--json"],
         Some(root.path()),
     );
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     for row in &rows {
         assert_eq!(field(row), &Value::Null, "{row}");
     }

@@ -57,10 +57,12 @@ pub fn last_output(projects: &Path, session_id: &str) -> Option<u64> {
             if !(name.starts_with("agent-") && name.ends_with(".jsonl")) {
                 continue;
             }
-            let secs = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
+            // `fs::metadata` follows a symlink to the transcript it names; a directory or any
+            // other non-file named like a transcript is not one.
+            let secs = fs::metadata(entry.path())
                 .ok()
+                .filter(fs::Metadata::is_file)
+                .and_then(|meta| meta.modified().ok())
                 .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
                 .map(|age| age.as_secs())
                 .filter(|secs| *secs > 0);
