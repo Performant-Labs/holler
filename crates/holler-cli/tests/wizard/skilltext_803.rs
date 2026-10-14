@@ -535,8 +535,11 @@ fn the_docs_readme_index_guide_and_changelog_carry_the_change() {
     let unreleased = section(from, "## [Unreleased]", "\n## [");
     let newest = section(&from[unreleased.len()..], "\n## [", "\n## [");
     let unreleased = format!("{unreleased}{newest}");
-    let enh = section(&unreleased, "### Enhancements", "\n### ");
-    assert!(enh.contains("#803"), "an Enhancements item for #803");
+    // Any Enhancements section: a non-empty `[Unreleased]` brings its own ahead of the released one.
+    let enh_has_803 = unreleased
+        .match_indices("### Enhancements")
+        .any(|(at, _)| section(&unreleased[at..], "### Enhancements", "\n### ").contains("#803"));
+    assert!(enh_has_803, "an Enhancements item for #803");
     let breaking = section(&unreleased, "### Breaking Changes", "\n### ");
     assert!(
         breaking.contains("#803") && breaking.contains("[[pane]]"),
