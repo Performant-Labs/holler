@@ -7,6 +7,9 @@ fills this file in at release time.
 
 ## [Unreleased]
 
+### Enhancements
+- `holler roster --json` / `--format=json`: every row carries `backgroundAgentLastOutput`, the epoch seconds of the newest sub-agent transcript write (`<sessionId>/subagents/agent-*.jsonl` under the Claude projects directory) of a Claude row's session on this machine, or `null` when it cannot be told (not a Claude row, no session id, no sub-agent files, unreadable layout, `--server`). It is when a background agent last produced output, not whether one is running. [#914](https://github.com/Performant-Labs/holler/issues/914), for pfleet#506.
+
 ## [0.5.0] - 2026-10-13
 
 ### Enhancements

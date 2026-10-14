@@ -217,6 +217,11 @@ path = "tests/roster_cli_test.rs"
 name = "roster_panes_test"
 path = "tests/roster_panes_test.rs"
 
+# Issue #914: the roster JSON's `backgroundAgentLastOutput` (pfleet#506).
+[[test]]
+name = "roster_background_agent_test"
+path = "tests/roster_background_agent_test.rs"
+
 # Issue #255: proves `Roster::sweep()` actually runs inside the production
 # hub process (a dedicated background task, not just the unit tests'
 # injected-clock coverage). Lives here for the same `CARGO_BIN_EXE_stub-acp`
