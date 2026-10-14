@@ -16,12 +16,14 @@
 //! with `--server`, which names another hub.
 //!
 //! **Three output modes**, from the resolved [`FormatChoice`]: text, the table; a bare `--json`,
-//! the roster's own `{"rows": [...]}` with the six pane keys added to each row (ADR 0003: additive
-//! is MINOR); and an explicit `--format=json`, one envelope whose `data` is `{"rows": [...],
+//! the roster's own `{"rows": [...]}` with the six pane keys and (#914) `backgroundAgentLastOutput`
+//! added to each row (ADR 0003: additive is MINOR); and an explicit `--format=json`, one envelope whose `data` is `{"rows": [...],
 //! "mismatches": [...]}`. A usage error is one `error:` line on stderr in every mode, as clap's own
 //! are under `roster`; any other error goes through [`emit_error`], an envelope only under
 //! `--format=json`. A registry that could not be read is one `note:` line on stderr in every mode,
 //! beside the rows.
+
+use std::path::{Path, PathBuf};
 
 use holler_hub::control::{ControlCall, ControlError};
 use holler_pane::error::{class_of, ErrorClass, RefusalCode};
@@ -63,7 +65,8 @@ When a pane's SHOWN and DRIVEN are both known and differ, the first line of the 
 the six columns are `-`, and --profile is a usage error. --format=json prints one envelope
 whose data is {\"rows\": [...], \"mismatches\": [...]}; --json keeps the roster's own
 {\"rows\": [...]}, each row with the keys pane, pos, profile, health, shown and driven (null
-for a session with no pane).";
+for a session with no pane), and backgroundAgentLastOutput: the epoch seconds of the newest
+sub-agent transcript write of a Claude row's session on this machine, else null.";
 
 /// A `--server` that the transport refused before any dial (#508's AC 13: a plaintext `ws://` to
 /// a host that is not loopback, an address that does not parse). An open code the roster owns
@@ -157,6 +160,31 @@ pub fn render(
     choice: FormatChoice,
     sink: &mut Sink<'_>,
 ) -> i32 {
+    // The Claude projects directory is this machine's: another hub's rows (`--server`) name
+    // sessions of other machines, so no lookup is made for them.
+    let projects = projects_for(&registry, crate::roster_agent::ambient_projects_dir());
+    render_in(reply, registry, roster, choice, sink, projects.as_deref())
+}
+
+/// The projects directory a render looks sessions up in: `ambient`, except for `--server`'s rows
+/// ([`Registry::NotRead`]), whose sessions are another hub's and have no sidechain files here.
+fn projects_for(registry: &Registry<'_>, ambient: Option<PathBuf>) -> Option<PathBuf> {
+    match registry {
+        Registry::NotRead => None,
+        _ => ambient,
+    }
+}
+
+/// [`render`] with the Claude projects directory given (issue #914): `None` makes every row's
+/// `backgroundAgentLastOutput` null. The tests pass a temp directory.
+pub fn render_in(
+    reply: &Value,
+    registry: Registry<'_>,
+    roster: &Roster,
+    choice: FormatChoice,
+    sink: &mut Sink<'_>,
+    projects: Option<&Path>,
+) -> i32 {
     let mode = Mode::of(choice);
     let profile = match profile_name(&roster.profile) {
         Ok(profile) => profile,
@@ -180,7 +208,7 @@ pub fn render(
         .filter(|row| profile.is_none() || row.pane.is_some())
         .collect();
     let mismatches = mismatches(&rows);
-    print(sink, mode, reply, &rows, &mismatches, profile.as_ref())
+    print(sink, mode, reply, &rows, &mismatches, profile.as_ref(), projects)
 }
 
 /// The roster's three output modes (#648), from the resolved format.
@@ -366,11 +394,12 @@ fn print(
     rows: &[Joined<'_>],
     mismatches: &[&PaneName],
     profile: Option<&ProfileName>,
+    projects: Option<&Path>,
 ) -> i32 {
     if mode == Mode::Text {
         return emit(sink, Format::Text, Ok(()), |()| text(rows, mismatches, profile));
     }
-    let json = match json_rows(rows) {
+    let json = match json_rows(rows, projects) {
         Ok(json) => json,
         Err(cause) => {
             let _ = writeln!(sink.err, "error: cannot encode the result: {cause}");
@@ -512,8 +541,9 @@ impl<'a> PaneKeys<'a> {
 }
 
 /// The JSON rows (acceptance 3): each hub row as it arrived, every key and value kept, with the six
-/// [`PaneKeys`] added.
-fn json_rows(rows: &[Joined<'_>]) -> Result<Vec<Value>, serde_json::Error> {
+/// [`PaneKeys`] added, and (#914) `backgroundAgentLastOutput`: epoch seconds for a Claude row whose
+/// session has sub-agent output on this machine, else `null`. The key is never left out.
+fn json_rows(rows: &[Joined<'_>], projects: Option<&Path>) -> Result<Vec<Value>, serde_json::Error> {
     rows.iter()
         .map(|row| {
             let mut json = row.hub.clone();
@@ -521,10 +551,27 @@ fn json_rows(rows: &[Joined<'_>]) -> Result<Vec<Value>, serde_json::Error> {
                 (&mut json, serde_json::to_value(PaneKeys::of(row.pane))?)
             {
                 hub.extend(keys);
+                hub.insert(AGENT_KEY.to_owned(), background_agent_last_output(row.hub, projects));
             }
             Ok(json)
         })
         .collect()
+}
+
+/// The JSON key of when a Claude pane's background agent last produced output (#914).
+const AGENT_KEY: &str = "backgroundAgentLastOutput";
+
+/// A row's [`AGENT_KEY`] value: only a Claude row with a session id is looked up, and a lookup
+/// that cannot tell is `null`.
+fn background_agent_last_output(hub: &Value, projects: Option<&Path>) -> Value {
+    let claude = hub.get("harness").and_then(Value::as_str) == Some("claude");
+    let session = hub.get("harness_session_id").and_then(Value::as_str);
+    match (claude, session, projects) {
+        (true, Some(session), Some(projects)) => {
+            crate::roster_agent::last_output(projects, session).map_or(Value::Null, Value::from)
+        }
+        _ => Value::Null,
+    }
 }
 
 /// `roster --json`'s document (scope item 6): the hub's reply as it arrived, with `rows` the rows
@@ -577,5 +624,18 @@ fn hold_display(row: &serde_json::Value) -> String {
     match row.get("hold_reason").and_then(|v| v.as_str()) {
         Some(reason) => format!("held{kind} {age}{under}: {reason}"),
         None => format!("held{kind} {age}{under}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_hubs_rows_get_no_projects_directory() {
+        let ambient = Some(PathBuf::from("/claude/projects"));
+        assert_eq!(projects_for(&Registry::NotRead, ambient.clone()), None);
+        let failed = Registry::Failed(PaneError::NotImplemented);
+        assert_eq!(projects_for(&failed, ambient.clone()), ambient);
     }
 }

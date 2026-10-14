@@ -16,6 +16,7 @@ pub mod pane;
 pub mod profile;
 pub mod prompt_target;
 pub mod query_cmd;
+pub mod roster_agent;
 pub mod roster_cmd;
 pub mod say_cmd;
 pub mod time_fmt;
